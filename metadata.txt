@@ -2,7 +2,7 @@
 name=QFIT
 qgisMinimumVersion=3.28
 description=Explore fitness data spatially in QGIS
-version=0.5.0
+version=0.6.0
 author=Emmanuel Belo
 email=emmanuel.nicolas.belo@gmail.com
 about=QFIT imports and visualizes fitness activity data in QGIS, starting with Strava and expanding toward broader FIT/GPX workflows.

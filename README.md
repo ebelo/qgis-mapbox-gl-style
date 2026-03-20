@@ -4,7 +4,7 @@
 
 QFIT is a QGIS plugin for importing and visualizing fitness activity data in a spatial workflow.
 
-## Current MVP
+## Current MVP+
 
 The current implementation supports:
 - Strava API connection using `client_id`, `client_secret`, and `refresh_token`
@@ -14,15 +14,29 @@ The current implementation supports:
 - optional detailed Strava track streams for higher-fidelity geometries
 - local caching of detailed stream geometries to reduce repeated API calls
 - a simple Strava rate-limit guard for detailed-stream enrichment
-- normalizing them into a shared internal activity model
-- writing activity lines and activity start points to a GeoPackage
+- upserting fetched activities into a canonical local GeoPackage registry
+- rebuilding visible track and start-point layers from that registry
+- optionally writing an `activity_points` analysis layer from detailed stream geometry
 - loading those layers directly into QGIS
 - filtering by activity type, date range, and minimum distance
-- applying visualization presets including line styling, activity-type coloring, and start-point heatmaps
+- applying visualization presets including lines, track points, heatmaps, and start-point views
+
+## Current GeoPackage model
+
+QFIT now uses the GeoPackage as a local sync store plus visualization container.
+
+Internal tables:
+- `activity_registry` — canonical source of truth for synced activities
+- `sync_state` — sync cursor / status metadata
+
+Visible layers:
+- `activity_tracks` — line layer for activity geometries
+- `activity_starts` — start-point layer
+- `activity_points` — optional sampled point layer derived from detailed streams
 
 ## Planned next expansions
 
-- separate on-demand `activity_points` stream/sample table for richer analysis
+- richer sampled-stream attributes in `activity_points` such as timestamps, elevation, and metrics when available
 - provider adapters for FIT / GPX / TCX imports
 - richer symbology and density workflows
 - better packaging and release automation
@@ -38,20 +52,24 @@ The current implementation supports:
 - `strava_client.py` — Strava authentication and activity retrieval
 - `models.py` — canonical activity model
 - `polyline_utils.py` — encoded polyline decoding
-- `gpkg_writer.py` — GeoPackage writing via QGIS APIs
+- `sync_repository.py` — canonical GeoPackage registry + sync metadata upserts
+- `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
 - `layer_manager.py` — layer loading, filtering, and styling
 - `qfit_cache.py` — local cache for detailed stream geometries
-- `docs/schema.md` — first-pass schema design
+- `docs/schema.md` — current schema design
+- `docs/strava-setup.md` — Strava setup and OAuth notes
 
-## How the MVP works
+## How the current workflow works
 
 1. Enter Strava credentials in the QFIT dock
-2. Choose how many pages of activities to fetch
-3. Optionally enable detailed Strava track streams and set a limit
-4. Fetch activities from Strava
-5. Choose an output `.gpkg` file
-6. Write and load the result into QGIS
-7. Apply filters and style presets
+2. Use the built-in OAuth helper if you still need a refresh token
+3. Choose how many pages of activities to fetch
+4. Optionally enable detailed Strava track streams and set a limit
+5. Optionally enable the `activity_points` layer and choose a point sampling stride
+6. Fetch activities from Strava
+7. Choose an output `.gpkg` file
+8. Write + load the synced result into QGIS
+9. Apply filters and style presets
 
 ## Strava credentials
 
@@ -60,21 +78,15 @@ You need:
 - `client_secret`
 - `refresh_token`
 
-QFIT now helps with the refresh-token step:
+QFIT helps with the refresh-token step:
 - open the Strava authorize page from inside the plugin
 - paste the returned authorization code
 - exchange it for a refresh token inside QFIT
 
-These values are stored locally through QGIS settings for convenience.
+These values are currently stored locally through QGIS settings for convenience.
 
 See also:
 - `docs/strava-setup.md`
-
-## GeoPackage output
-
-QFIT currently writes two layers:
-- `activities` — line features for activity tracks
-- `activity_starts` — point features for activity start locations
 
 ## Packaging
 
@@ -88,17 +100,7 @@ This writes a release-style archive to `dist/`.
 
 ## Development notes
 
-This is an MVP implementation intended to validate the end-to-end workflow before broadening provider support.
-
-## License
-
-TBD
-t.
-
-## License
-
-TBD
-to-end workflow before broadening provider support.
+This project is now beyond the original scaffold/MVP stage and is moving toward a proper sync-oriented QGIS plugin architecture.
 
 ## License
 
