@@ -53,13 +53,31 @@ You need:
 - `client_secret`
 - `refresh_token`
 
-These are stored locally through QGIS settings for convenience.
+QFIT now helps with the refresh-token step:
+- open the Strava authorize page from inside the plugin
+- paste the returned authorization code
+- exchange it for a refresh token inside QFIT
+
+These values are stored locally through QGIS settings for convenience.
+
+See also:
+- `docs/strava-setup.md`
 
 ## GeoPackage output
 
 QFIT currently writes two layers:
 - `activities` — line features for activity tracks
 - `activity_starts` — point features for activity start locations
+
+## Packaging
+
+Build an installable plugin zip with:
+
+```bash
+python3 scripts/package_plugin.py
+```
+
+This writes a release-style archive to `dist/`.
 
 ## Development notes
 
