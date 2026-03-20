@@ -12,6 +12,8 @@ The current implementation supports:
 - downloading recent athlete activities from Strava
 - date-bounded fetches based on the selected filter window
 - optional detailed Strava track streams for higher-fidelity geometries
+- local caching of detailed stream geometries to reduce repeated API calls
+- a simple Strava rate-limit guard for detailed-stream enrichment
 - normalizing them into a shared internal activity model
 - writing activity lines and activity start points to a GeoPackage
 - loading those layers directly into QGIS
@@ -38,6 +40,7 @@ The current implementation supports:
 - `polyline_utils.py` — encoded polyline decoding
 - `gpkg_writer.py` — GeoPackage writing via QGIS APIs
 - `layer_manager.py` — layer loading, filtering, and styling
+- `qfit_cache.py` — local cache for detailed stream geometries
 - `docs/schema.md` — first-pass schema design
 
 ## How the MVP works
