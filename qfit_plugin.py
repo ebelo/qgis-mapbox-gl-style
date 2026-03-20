@@ -1,4 +1,5 @@
 from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QAction
 
 from .qfit_dockwidget import QfitDockWidget
@@ -29,7 +30,7 @@ class QfitPlugin:
 
     def show_dock(self):
         if self.dockwidget is None:
-            self.dockwidget = QfitDockWidget()
-            self.iface.addDockWidget(2, self.dockwidget)
+            self.dockwidget = QfitDockWidget(self.iface)
+            self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dockwidget)
         self.dockwidget.show()
         self.dockwidget.raise_()

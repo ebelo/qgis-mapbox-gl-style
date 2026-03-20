@@ -4,70 +4,66 @@
 
 QFIT is a QGIS plugin for importing and visualizing fitness activity data in a spatial workflow.
 
-## Vision
+## Current MVP
 
-Start with Strava activity import via API, load activities into a GeoPackage, and provide interactive filtering and visualization inside QGIS.
+The current implementation supports:
+- Strava API connection using `client_id`, `client_secret`, and `refresh_token`
+- downloading recent athlete activities from Strava
+- normalizing them into a shared internal activity model
+- writing activity lines and activity start points to a GeoPackage
+- loading those layers directly into QGIS
+- filtering by activity type, date range, and minimum distance
+- applying visualization presets including line styling, activity-type coloring, and start-point heatmaps
 
-Longer term, QFIT can expand to support additional sources and formats such as:
-- FIT files
-- GPX
-- TCX
-- Garmin exports
-- COROS exports
-- Suunto exports
+## Planned next expansions
 
-## MVP goals
+- detailed stream geometry instead of summary polylines
+- provider adapters for FIT / GPX / TCX imports
+- richer symbology and density workflows
+- better auth flow and token management
+- packaging and release automation
 
-- Connect to Strava via API credentials
-- Download user activities
-- Store activities and track geometry in a GeoPackage
-- Load resulting layers into QGIS
-- Filter activities by:
-  - type
-  - date
-  - distance
-  - elapsed time
-- Apply basic visualization presets
-
-## Planned visualizations
-
-- activity lines
-- heatmap-style density layers
-- start point layers
-- clustered start points
-- style presets by activity type
-
-## Initial structure
+## Plugin structure
 
 - `metadata.txt` — QGIS plugin metadata
 - `__init__.py` — QGIS plugin entrypoint
 - `qfit_plugin.py` — main plugin class
-- `qfit_dockwidget.py` — UI dock widget scaffold
+- `qfit_dockwidget.py` — dock widget UI logic
 - `qfit_dockwidget_base.ui` — Qt Designer UI layout
-- `resources.qrc` / `resources.py` — Qt resources
-- `strava_client.py` — API client scaffold
-- `gpkg_writer.py` — GeoPackage writing scaffold
+- `strava_client.py` — Strava authentication and activity retrieval
+- `models.py` — canonical activity model
+- `polyline_utils.py` — encoded polyline decoding
+- `gpkg_writer.py` — GeoPackage writing via QGIS APIs
+- `layer_manager.py` — layer loading, filtering, and styling
+- `docs/schema.md` — first-pass schema design
 
-## MVP architecture
+## How the MVP works
 
-### Data flow
-1. User configures Strava credentials
-2. Plugin fetches activities from Strava
-3. Activities are normalized into internal models
-4. Data is written to a GeoPackage
-5. GeoPackage layers are loaded into QGIS
-6. User filters and styles the loaded layers
+1. Enter Strava credentials in the QFIT dock
+2. Choose how many pages of activities to fetch
+3. Fetch activities from Strava
+4. Choose an output `.gpkg` file
+5. Write and load the result into QGIS
+6. Apply filters and style presets
 
-### Main components
-- **Plugin UI**: toolbar action + dock widget
-- **Strava client**: authentication and activity retrieval
-- **Data writer**: GeoPackage persistence
-- **Layer manager**: add/update QGIS layers
-- **Styling engine**: apply rendering presets
+## Strava credentials
+
+You need:
+- `client_id`
+- `client_secret`
+- `refresh_token`
+
+These are stored locally through QGIS settings for convenience.
+
+## GeoPackage output
+
+QFIT currently writes two layers:
+- `activities` — line features for activity tracks
+- `activity_starts` — point features for activity start locations
 
 ## Development notes
 
-This repository currently contains a clean scaffold intended to become a proper QGIS Python plugin.
+This is an MVP implementation intended to validate the end-to-end workflow before broadening provider support.
 
 ## License
 
