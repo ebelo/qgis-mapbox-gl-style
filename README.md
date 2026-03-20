@@ -18,6 +18,7 @@ The current implementation supports:
 - rebuilding visible track and start-point layers from that registry
 - optionally writing an `activity_points` analysis layer from detailed stream geometry
 - attaching sampled stream metrics to `activity_points` when available, including time, distance, elevation, heart rate, cadence, power, speed, temperature, grade, and moving-state flags
+- deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - loading those layers directly into QGIS
 - filtering by activity type, date range, and minimum distance
 - applying visualization presets including lines, track points, heatmaps, and start-point views
@@ -33,11 +34,11 @@ Internal tables:
 Visible layers:
 - `activity_tracks` — line layer for activity geometries
 - `activity_starts` — start-point layer
-- `activity_points` — optional sampled point layer derived from detailed streams, with per-point stream metrics when available
+- `activity_points` — optional sampled point layer derived from detailed streams, with per-point stream metrics and derived timestamps when available
 
 ## Planned next expansions
 
-- richer stream enrichment beyond the current sampled metrics, including more robust timestamp handling and additional provider-specific measures
+- more explicit QGIS temporal integration and styling on top of the new point timestamps
 - provider adapters for FIT / GPX / TCX imports
 - richer symbology and density workflows
 - better packaging and release automation
@@ -53,6 +54,7 @@ Visible layers:
 - `strava_client.py` — Strava authentication and activity retrieval
 - `models.py` — canonical activity model
 - `polyline_utils.py` — encoded polyline decoding
+- `time_utils.py` — ISO timestamp parsing / offset helpers
 - `sync_repository.py` — canonical GeoPackage registry + sync metadata upserts
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
 - `layer_manager.py` — layer loading, filtering, and styling
