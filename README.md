@@ -22,11 +22,11 @@ The current implementation supports:
 
 ## Planned next expansions
 
-- detailed stream geometry instead of summary polylines
+- separate on-demand `activity_points` stream/sample table for richer analysis
 - provider adapters for FIT / GPX / TCX imports
 - richer symbology and density workflows
-- better auth flow and token management
-- packaging and release automation
+- better packaging and release automation
+- repeatable integration tests inside a real QGIS environment
 
 ## Plugin structure
 
@@ -89,6 +89,16 @@ This writes a release-style archive to `dist/`.
 ## Development notes
 
 This is an MVP implementation intended to validate the end-to-end workflow before broadening provider support.
+
+## License
+
+TBD
+t.
+
+## License
+
+TBD
+to-end workflow before broadening provider support.
 
 ## License
 
