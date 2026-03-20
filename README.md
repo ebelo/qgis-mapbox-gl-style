@@ -59,8 +59,11 @@ Visible layers:
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
 - `layer_manager.py` — layer loading, filtering, and styling
 - `qfit_cache.py` — local cache for detailed stream bundles
+- `scripts/install_plugin.py` — install QFIT into a local QGIS profile for testing
+- `scripts/uninstall_plugin.py` — remove QFIT from a local QGIS profile
 - `docs/schema.md` — current schema design
 - `docs/strava-setup.md` — Strava setup and OAuth notes
+- `docs/qgis-testing.md` — local QGIS testing workflow
 
 ## How the current workflow works
 
@@ -104,6 +107,11 @@ This writes a release-style archive to `dist/`.
 ## Development notes
 
 This project is now beyond the original scaffold/MVP stage and is moving toward a proper sync-oriented QGIS plugin architecture.
+
+## License
+
+TBD
+old/MVP stage and is moving toward a proper sync-oriented QGIS plugin architecture.
 
 ## License
 
