@@ -12,11 +12,12 @@ The current implementation supports:
 - downloading recent athlete activities from Strava
 - date-bounded fetches based on the selected filter window
 - optional detailed Strava track streams for higher-fidelity geometries
-- local caching of detailed stream geometries to reduce repeated API calls
+- local caching of detailed stream bundles to reduce repeated API calls
 - a simple Strava rate-limit guard for detailed-stream enrichment
 - upserting fetched activities into a canonical local GeoPackage registry
 - rebuilding visible track and start-point layers from that registry
 - optionally writing an `activity_points` analysis layer from detailed stream geometry
+- attaching sampled stream metrics to `activity_points` when available, including time, distance, elevation, heart rate, cadence, power, speed, temperature, grade, and moving-state flags
 - loading those layers directly into QGIS
 - filtering by activity type, date range, and minimum distance
 - applying visualization presets including lines, track points, heatmaps, and start-point views
@@ -32,11 +33,11 @@ Internal tables:
 Visible layers:
 - `activity_tracks` — line layer for activity geometries
 - `activity_starts` — start-point layer
-- `activity_points` — optional sampled point layer derived from detailed streams
+- `activity_points` — optional sampled point layer derived from detailed streams, with per-point stream metrics when available
 
 ## Planned next expansions
 
-- richer sampled-stream attributes in `activity_points` such as timestamps, elevation, and metrics when available
+- richer stream enrichment beyond the current sampled metrics, including more robust timestamp handling and additional provider-specific measures
 - provider adapters for FIT / GPX / TCX imports
 - richer symbology and density workflows
 - better packaging and release automation
@@ -55,7 +56,7 @@ Visible layers:
 - `sync_repository.py` — canonical GeoPackage registry + sync metadata upserts
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
 - `layer_manager.py` — layer loading, filtering, and styling
-- `qfit_cache.py` — local cache for detailed stream geometries
+- `qfit_cache.py` — local cache for detailed stream bundles
 - `docs/schema.md` — current schema design
 - `docs/strava-setup.md` — Strava setup and OAuth notes
 
