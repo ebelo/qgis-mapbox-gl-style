@@ -20,6 +20,7 @@ The current implementation supports:
 - attaching sampled stream metrics to `activity_points` when available, including time, distance, elevation, heart rate, cadence, power, speed, temperature, grade, and moving-state flags
 - deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - loading those layers directly into QGIS
+- adding an optional Mapbox background layer through saved plugin settings
 - filtering by activity type, date range, and minimum distance
 - applying visualization presets including lines, track points, heatmaps, and start-point views
 
@@ -57,7 +58,8 @@ Visible layers:
 - `time_utils.py` — ISO timestamp parsing / offset helpers
 - `sync_repository.py` — canonical GeoPackage registry + sync metadata upserts
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
-- `layer_manager.py` — layer loading, filtering, and styling
+- `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
+- `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
 - `scripts/install_plugin.py` — install qfit into a local QGIS profile for testing
 - `scripts/uninstall_plugin.py` — remove qfit from a local QGIS profile
@@ -72,10 +74,23 @@ Visible layers:
 3. Choose how many pages of activities to fetch
 4. Optionally enable detailed Strava track streams and set a limit
 5. Optionally enable the `activity_points` layer and choose a point sampling stride
-6. Fetch activities from Strava
-7. Choose an output `.gpkg` file
-8. Write + load the synced result into QGIS
-9. Apply filters and style presets
+6. Optionally enable a Mapbox background map and choose a preset such as Outdoor, Light, Satellite, or a custom Winter style
+7. Fetch activities from Strava
+8. Choose an output `.gpkg` file
+9. Write + load the synced result into QGIS
+10. Apply filters, style presets, and background-map updates
+
+## Background map settings
+
+qfit can also add a Mapbox background layer underneath the synced activity data.
+
+Configure these values in the dock when you want a background basemap:
+- enable the background-map toggle
+- paste a Mapbox access token
+- choose a preset such as `Outdoor`, `Light`, or `Satellite`
+- for `Winter (custom style)` or `Custom`, provide the Mapbox style owner and style ID from your own Studio style
+
+The built-in presets intentionally keep the configuration small and predictable. The Winter slot is just a convenience label for a custom winter-themed style if you have one.
 
 ## Strava credentials
 
@@ -119,6 +134,7 @@ The covered areas currently include:
 - polyline decoding
 - ISO time parsing/formatting helpers
 - local stream-cache behavior
+- Mapbox background preset/config resolution
 - Strava normalization and helper logic
 - sync repository hashing, upserts, and reload behavior
 
