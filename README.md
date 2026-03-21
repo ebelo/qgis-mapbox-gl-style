@@ -23,8 +23,9 @@ The current implementation supports:
 - generating an `activity_atlas_pages` layer with print-ready page extents and labels for QGIS atlas layouts
 - tuning atlas-page padding and minimum extent directly from the plugin before rebuilding publish layers
 - generating atlas pages in a stable chronological order with page numbers and TOC-friendly labels for QGIS layouts
-- loading those layers directly into QGIS
-- adding an optional Mapbox background layer through saved plugin settings
+- adding Web Mercator-ready atlas metadata (`center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`) for layout work in EPSG:3857
+- loading those layers directly into QGIS with EPSG:3857 as the working project/map CRS
+- adding an optional Mapbox background layer through saved plugin settings, with an explicit background-map Load button and basemap ordering kept below the activity layers
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
 - previewing fetched activities with a dock-side summary and sortable recent-activity list before loading layers
 - applying visualization presets including lines, track points, heatmaps, and start-point views
@@ -90,8 +91,10 @@ Visible layers:
 9. Review the fetched-activity summary / preview and refine the query if needed
 10. Write + load the synced result into QGIS
 11. Optionally tune atlas-page margin and minimum extent in the Publish / atlas section
-12. Apply filters, style presets, temporal-playback mode, and background-map updates
-13. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_distance_label`, and `page_duration_label` fields for layout text or a table of contents
+12. Use `Write + Load` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
+13. Use `Apply filters` only when you want the current dock query to become an actual QGIS layer subset
+14. Optionally use `Load background map` to add or refresh the basemap underneath the qfit activity layers
+15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_distance_label`, `page_duration_label`, `center_x_3857`, `center_y_3857`, `extent_width_m`, and `extent_height_m` fields for layout text, overview tables, or Web Mercator layout logic
 
 ## Publish / atlas settings
 
@@ -101,6 +104,7 @@ The resulting atlas-page layer is intentionally more layout-ready than a raw ext
 - pages are ordered chronologically with a stable `page_number`
 - `page_sort_key` gives QGIS a deterministic sort field for atlas or TOC tables
 - `page_date`, `page_distance_label`, and `page_duration_label` reduce the need for layout expressions
+- `center_x_3857`, `center_y_3857`, `extent_width_m`, and `extent_height_m` make it easier to drive Web Mercator-oriented layout logic now that qfit uses EPSG:3857 as the working QGIS projection choice
 
 Use it when you want to tune the eventual print-layout framing:
 - `Page margin (%)` adds extra space around each activity extent
@@ -117,6 +121,9 @@ Configure these values in the dock when you want a background basemap:
 - paste a Mapbox access token
 - choose a preset such as `Outdoor`, `Light`, or `Satellite`
 - for `Winter (custom style)` or `Custom`, provide the Mapbox style owner and style ID from your own Studio style
+- click `Load background map` when you want to add or refresh the basemap explicitly
+
+When qfit loads the background layer, it keeps it below the qfit activity layers in the QGIS layer tree so tracks, starts, and points render on top of the basemap.
 
 The built-in presets intentionally keep the configuration small and predictable. The Winter slot is just a convenience label for a custom winter-themed style if you have one.
 
