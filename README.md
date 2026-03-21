@@ -20,6 +20,7 @@ The current implementation supports:
 - attaching sampled stream metrics to `activity_points` when available, including time, distance, elevation, heart rate, cadence, power, speed, temperature, grade, and moving-state flags
 - deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - wiring loaded qfit layers into QGIS temporal playback using local or UTC timestamps when available
+- generating an `activity_atlas_pages` layer with print-ready page extents and labels for QGIS atlas layouts
 - loading those layers directly into QGIS
 - adding an optional Mapbox background layer through saved plugin settings
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
@@ -38,11 +39,13 @@ Visible layers:
 - `activity_tracks` — line layer for activity geometries
 - `activity_starts` — start-point layer
 - `activity_points` — optional sampled point layer derived from detailed streams, with per-point stream metrics and derived timestamps when available
+- `activity_atlas_pages` — polygon layer of atlas/page extents with titles/subtitles for QGIS print layouts
 
 ## Planned next expansions
 
 - provider adapters for FIT / GPX / TCX imports
 - richer temporal styling / playback presets on top of the new QGIS temporal wiring
+- PDF/layout automation on top of the new atlas-page layer
 - richer symbology and density workflows
 - better packaging and release automation
 - repeatable integration tests inside a real QGIS environment
@@ -65,6 +68,7 @@ Visible layers:
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
 - `temporal_config.py` — reusable temporal-playback field selection and expression helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
+- `publish_atlas.py` — atlas/page extent planning helpers for QGIS print layouts
 - `scripts/install_plugin.py` — install qfit into a local QGIS profile for testing
 - `scripts/uninstall_plugin.py` — remove qfit from a local QGIS profile
 - `docs/schema.md` — current schema design
@@ -84,6 +88,7 @@ Visible layers:
 9. Review the fetched-activity summary / preview and refine the query if needed
 10. Write + load the synced result into QGIS
 11. Apply filters, style presets, temporal-playback mode, and background-map updates
+12. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export
 
 ## Background map settings
 
@@ -137,6 +142,7 @@ python3 -m unittest discover -s tests -v
 
 The covered areas currently include:
 - activity querying, sorting, summary formatting, and layer subset expression helpers
+- atlas-page extent/label planning helpers for publish workflows
 - temporal-playback field selection / expression helpers
 - polyline decoding
 - ISO time parsing/formatting helpers
