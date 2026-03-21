@@ -11,3 +11,5 @@ __pycache__/
 resources.py
 .coverage
 coverage.xml
+
+symbology-style.db

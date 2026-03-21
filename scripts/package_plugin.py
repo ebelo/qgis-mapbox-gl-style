@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
 EXCLUDED_DIRS = {".git", "dist", "scripts", "docs", "__pycache__"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip"}
-EXCLUDED_FILES = {".gitignore"}
+EXCLUDED_FILES = {".gitignore", "symbology-style.db"}
 
 
 def read_metadata() -> tuple[str, str]:
