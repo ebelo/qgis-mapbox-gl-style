@@ -9,3 +9,5 @@ __pycache__/
 .idea/
 *.zip
 resources.py
+.coverage
+coverage.xml

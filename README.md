@@ -104,14 +104,27 @@ python3 scripts/package_plugin.py
 
 This writes a release-style archive to `dist/`.
 
+## Testing
+
+QFIT now includes a lightweight standard-library unit test suite for the core,
+QGIS-independent modules.
+
+Run it with:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The covered areas currently include:
+- polyline decoding
+- ISO time parsing/formatting helpers
+- local stream-cache behavior
+- Strava normalization and helper logic
+- sync repository hashing, upserts, and reload behavior
+
 ## Development notes
 
 This project is now beyond the original scaffold/MVP stage and is moving toward a proper sync-oriented QGIS plugin architecture.
-
-## License
-
-TBD
-old/MVP stage and is moving toward a proper sync-oriented QGIS plugin architecture.
 
 ## License
 
