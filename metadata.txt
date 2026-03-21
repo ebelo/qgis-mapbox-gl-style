@@ -1,11 +1,11 @@
 [general]
-name=QFIT
+name=qfit
 qgisMinimumVersion=3.28
 description=Explore fitness data spatially in QGIS
 version=0.9.0
 author=Emmanuel Belo
 email=emmanuel.nicolas.belo@gmail.com
-about=QFIT imports and visualizes fitness activity data in QGIS, starting with Strava and expanding toward broader FIT/GPX workflows.
+about=qfit imports and visualizes fitness activity data in QGIS, starting with Strava and expanding toward broader FIT/GPX workflows.
 tracker=https://github.com/ebelo/qfit/issues
 repository=https://github.com/ebelo/qfit
 homepage=https://github.com/ebelo/qfit

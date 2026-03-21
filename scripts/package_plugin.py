@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a distributable QGIS plugin zip for QFIT."""
+"""Build a distributable QGIS plugin zip for qfit."""
 
 from __future__ import annotations
 

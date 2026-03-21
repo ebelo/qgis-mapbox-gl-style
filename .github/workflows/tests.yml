@@ -9,14 +9,9 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: QFIT
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          path: QFIT
 
       - name: Set up Python
         uses: actions/setup-python@v5

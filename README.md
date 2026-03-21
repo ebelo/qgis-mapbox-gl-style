@@ -1,8 +1,8 @@
-# QFIT
+# qfit
 
-**QFIT — Explore fitness data spatially in QGIS**
+**qfit — Explore fitness data spatially in QGIS**
 
-QFIT is a QGIS plugin for importing and visualizing fitness activity data in a spatial workflow.
+qfit is a QGIS plugin for importing and visualizing fitness activity data in a spatial workflow.
 
 ## Current MVP+
 
@@ -25,7 +25,7 @@ The current implementation supports:
 
 ## Current GeoPackage model
 
-QFIT now uses the GeoPackage as a local sync store plus visualization container.
+qfit now uses the GeoPackage as a local sync store plus visualization container.
 
 Internal tables:
 - `activity_registry` — canonical source of truth for synced activities
@@ -59,15 +59,15 @@ Visible layers:
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
 - `layer_manager.py` — layer loading, filtering, and styling
 - `qfit_cache.py` — local cache for detailed stream bundles
-- `scripts/install_plugin.py` — install QFIT into a local QGIS profile for testing
-- `scripts/uninstall_plugin.py` — remove QFIT from a local QGIS profile
+- `scripts/install_plugin.py` — install qfit into a local QGIS profile for testing
+- `scripts/uninstall_plugin.py` — remove qfit from a local QGIS profile
 - `docs/schema.md` — current schema design
 - `docs/strava-setup.md` — Strava setup and OAuth notes
 - `docs/qgis-testing.md` — local QGIS testing workflow
 
 ## How the current workflow works
 
-1. Enter Strava credentials in the QFIT dock
+1. Enter Strava credentials in the qfit dock
 2. Use the built-in OAuth helper if you still need a refresh token
 3. Choose how many pages of activities to fetch
 4. Optionally enable detailed Strava track streams and set a limit
@@ -84,10 +84,10 @@ You need:
 - `client_secret`
 - `refresh_token`
 
-QFIT helps with the refresh-token step:
+qfit helps with the refresh-token step:
 - open the Strava authorize page from inside the plugin
 - paste the returned authorization code
-- exchange it for a refresh token inside QFIT
+- exchange it for a refresh token inside qfit
 
 These values are currently stored locally through QGIS settings for convenience.
 
@@ -106,7 +106,7 @@ This writes a release-style archive to `dist/`.
 
 ## Testing
 
-QFIT now includes a lightweight standard-library unit test suite for the core,
+qfit now includes a lightweight standard-library unit test suite for the core,
 QGIS-independent modules.
 
 Run it with:

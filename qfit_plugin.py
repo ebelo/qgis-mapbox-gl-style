@@ -12,14 +12,14 @@ class QfitPlugin:
         self.dockwidget = None
 
     def initGui(self):
-        self.action = QAction(QIcon(), "QFIT", self.iface.mainWindow())
+        self.action = QAction(QIcon(), "qfit", self.iface.mainWindow())
         self.action.triggered.connect(self.show_dock)
         self.iface.addToolBarIcon(self.action)
-        self.iface.addPluginToMenu("&QFIT", self.action)
+        self.iface.addPluginToMenu("&qfit", self.action)
 
     def unload(self):
         if self.action is not None:
-            self.iface.removePluginMenu("&QFIT", self.action)
+            self.iface.removePluginMenu("&qfit", self.action)
             self.iface.removeToolBarIcon(self.action)
             self.action = None
 
