@@ -24,7 +24,7 @@ The current implementation supports:
 - tuning atlas-page padding, minimum extent, and optional target aspect ratio directly from the plugin before rebuilding publish layers
 - generating atlas pages in a stable chronological order with page numbers and TOC-friendly labels for QGIS layouts
 - adding Web Mercator-ready atlas metadata (`center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`) for layout work in EPSG:3857
-- precomputing route-profile-ready atlas metadata (`profile_available`, sampled profile distance, min/max elevation, gain/loss) when detailed stream metrics are available
+- precomputing route-profile-ready atlas metadata (`profile_available`, sampled profile distance, min/max elevation, relief, gain/loss, and layout-friendly labels) when detailed stream metrics are available
 - loading those layers directly into QGIS with EPSG:3857 as the working project/map CRS
 - adding an optional Mapbox background layer through saved plugin settings, with an explicit background-map Load button and basemap ordering kept below the activity layers
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
@@ -95,7 +95,7 @@ Visible layers:
 12. Use `Write + Load` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
 13. Use `Apply filters` only when you want the current dock query to become an actual QGIS layer subset
 14. Optionally use `Load background map` to add or refresh the basemap underneath the qfit activity layers
-15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_distance_label`, `page_duration_label`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_min_altitude_m`, `profile_max_altitude_m`, `profile_elevation_gain_m`, and `profile_elevation_loss_m` fields for layout text, conditional profile frames, or Web Mercator layout logic
+15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_distance_label`, `page_duration_label`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, or Web Mercator layout logic
 
 ## Publish / atlas settings
 
@@ -106,7 +106,7 @@ The resulting atlas-page layer is intentionally more layout-ready than a raw ext
 - `page_sort_key` gives QGIS a deterministic sort field for atlas or TOC tables
 - `page_date`, `page_distance_label`, and `page_duration_label` reduce the need for layout expressions
 - `center_x_3857`, `center_y_3857`, `extent_width_m`, and `extent_height_m` make it easier to drive Web Mercator-oriented layout logic now that qfit uses EPSG:3857 as the working QGIS projection choice
-- `profile_available`, `profile_distance_m`, `profile_min_altitude_m`, `profile_max_altitude_m`, `profile_elevation_gain_m`, and `profile_elevation_loss_m` make it easier to conditionally show route-profile panels in layouts when sampled altitude/distance stream data exists
+- `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` make it easier to conditionally show route-profile panels in layouts when sampled altitude/distance stream data exists, without repeating basic label formatting in QGIS expressions
 
 Use it when you want to tune the eventual print-layout framing:
 - `Page margin (%)` adds extra space around each activity extent
