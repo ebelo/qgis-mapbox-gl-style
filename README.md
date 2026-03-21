@@ -21,7 +21,8 @@ The current implementation supports:
 - deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - loading those layers directly into QGIS
 - adding an optional Mapbox background layer through saved plugin settings
-- filtering by activity type, date range, and minimum distance
+- filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
+- previewing fetched activities with a dock-side summary and sortable recent-activity list before loading layers
 - applying visualization presets including lines, track points, heatmaps, and start-point views
 
 ## Current GeoPackage model
@@ -58,6 +59,7 @@ Visible layers:
 - `time_utils.py` — ISO timestamp parsing / offset helpers
 - `sync_repository.py` — canonical GeoPackage registry + sync metadata upserts
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
+- `activity_query.py` — reusable activity filtering, sorting, summary, preview, and subset-expression helpers
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
@@ -77,8 +79,9 @@ Visible layers:
 6. Optionally enable a Mapbox background map and choose a preset such as Outdoor, Light, Satellite, or a custom Winter style
 7. Fetch activities from Strava
 8. Choose an output `.gpkg` file
-9. Write + load the synced result into QGIS
-10. Apply filters, style presets, and background-map updates
+9. Review the fetched-activity summary / preview and refine the query if needed
+10. Write + load the synced result into QGIS
+11. Apply filters, style presets, and background-map updates
 
 ## Background map settings
 
@@ -131,6 +134,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 The covered areas currently include:
+- activity querying, sorting, summary formatting, and layer subset expression helpers
 - polyline decoding
 - ISO time parsing/formatting helpers
 - local stream-cache behavior
