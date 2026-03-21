@@ -21,7 +21,7 @@ The current implementation supports:
 - deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - wiring loaded qfit layers into QGIS temporal playback using local or UTC timestamps when available
 - generating an `activity_atlas_pages` layer with print-ready page extents and labels for QGIS atlas layouts
-- tuning atlas-page padding and minimum extent directly from the plugin before rebuilding publish layers
+- tuning atlas-page padding, minimum extent, and optional target aspect ratio directly from the plugin before rebuilding publish layers
 - generating atlas pages in a stable chronological order with page numbers and TOC-friendly labels for QGIS layouts
 - adding Web Mercator-ready atlas metadata (`center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`) for layout work in EPSG:3857
 - loading those layers directly into QGIS with EPSG:3857 as the working project/map CRS
@@ -90,7 +90,7 @@ Visible layers:
 8. Choose an output `.gpkg` file
 9. Review the fetched-activity summary / preview and refine the query if needed
 10. Write + load the synced result into QGIS
-11. Optionally tune atlas-page margin and minimum extent in the Publish / atlas section
+11. Optionally tune atlas-page margin, minimum extent, and target aspect ratio in the Publish / atlas section
 12. Use `Write + Load` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
 13. Use `Apply filters` only when you want the current dock query to become an actual QGIS layer subset
 14. Optionally use `Load background map` to add or refresh the basemap underneath the qfit activity layers
@@ -109,6 +109,7 @@ The resulting atlas-page layer is intentionally more layout-ready than a raw ext
 Use it when you want to tune the eventual print-layout framing:
 - `Page margin (%)` adds extra space around each activity extent
 - `Minimum page extent (°)` keeps very short or compact activities readable in an atlas
+- `Target aspect ratio` optionally expands each atlas extent in Web Mercator so it better matches a fixed layout frame (for example, square pages or wider landscape compositions)
 
 These values are saved in QGIS settings and applied the next time you write/load the GeoPackage.
 
