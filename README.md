@@ -21,6 +21,7 @@ The current implementation supports:
 - deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - wiring loaded qfit layers into QGIS temporal playback using local or UTC timestamps when available
 - generating an `activity_atlas_pages` layer with print-ready page extents and labels for QGIS atlas layouts
+- tuning atlas-page padding and minimum extent directly from the plugin before rebuilding publish layers
 - loading those layers directly into QGIS
 - adding an optional Mapbox background layer through saved plugin settings
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
@@ -87,8 +88,19 @@ Visible layers:
 8. Choose an output `.gpkg` file
 9. Review the fetched-activity summary / preview and refine the query if needed
 10. Write + load the synced result into QGIS
-11. Apply filters, style presets, temporal-playback mode, and background-map updates
-12. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export
+11. Optionally tune atlas-page margin and minimum extent in the Publish / atlas section
+12. Apply filters, style presets, temporal-playback mode, and background-map updates
+13. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export
+
+## Publish / atlas settings
+
+qfit now exposes a small publish configuration block for the generated `activity_atlas_pages` layer.
+
+Use it when you want to tune the eventual print-layout framing:
+- `Page margin (%)` adds extra space around each activity extent
+- `Minimum page extent (°)` keeps very short or compact activities readable in an atlas
+
+These values are saved in QGIS settings and applied the next time you write/load the GeoPackage.
 
 ## Background map settings
 
