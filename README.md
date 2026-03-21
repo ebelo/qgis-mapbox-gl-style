@@ -22,6 +22,7 @@ The current implementation supports:
 - wiring loaded qfit layers into QGIS temporal playback using local or UTC timestamps when available
 - generating an `activity_atlas_pages` layer with print-ready page extents and labels for QGIS atlas layouts
 - tuning atlas-page padding and minimum extent directly from the plugin before rebuilding publish layers
+- generating atlas pages in a stable chronological order with page numbers and TOC-friendly labels for QGIS layouts
 - loading those layers directly into QGIS
 - adding an optional Mapbox background layer through saved plugin settings
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
@@ -40,7 +41,7 @@ Visible layers:
 - `activity_tracks` — line layer for activity geometries
 - `activity_starts` — start-point layer
 - `activity_points` — optional sampled point layer derived from detailed streams, with per-point stream metrics and derived timestamps when available
-- `activity_atlas_pages` — polygon layer of atlas/page extents with titles/subtitles for QGIS print layouts
+- `activity_atlas_pages` — polygon layer of atlas/page extents with titles/subtitles plus page numbers and TOC-friendly labels for QGIS print layouts
 
 ## Planned next expansions
 
@@ -90,11 +91,16 @@ Visible layers:
 10. Write + load the synced result into QGIS
 11. Optionally tune atlas-page margin and minimum extent in the Publish / atlas section
 12. Apply filters, style presets, temporal-playback mode, and background-map updates
-13. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export
+13. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_distance_label`, and `page_duration_label` fields for layout text or a table of contents
 
 ## Publish / atlas settings
 
 qfit now exposes a small publish configuration block for the generated `activity_atlas_pages` layer.
+
+The resulting atlas-page layer is intentionally more layout-ready than a raw extent index:
+- pages are ordered chronologically with a stable `page_number`
+- `page_sort_key` gives QGIS a deterministic sort field for atlas or TOC tables
+- `page_date`, `page_distance_label`, and `page_duration_label` reduce the need for layout expressions
 
 Use it when you want to tune the eventual print-layout framing:
 - `Page margin (%)` adds extra space around each activity extent
