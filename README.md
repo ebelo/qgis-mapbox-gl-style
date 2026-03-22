@@ -52,7 +52,7 @@ Visible layers:
 - PDF/layout automation on top of the new atlas-page layer
 - richer symbology and density workflows
 - better packaging and release automation
-- repeatable integration tests inside a real QGIS environment
+- broader scripted integration coverage inside a real QGIS environment
 
 ## Plugin structure
 
@@ -159,18 +159,27 @@ This writes a release-style archive to `dist/`.
 
 ## Testing
 
-qfit now includes a lightweight standard-library unit test suite for the core,
-QGIS-independent modules.
+qfit now includes a lightweight standard-library test suite for both the core,
+QGIS-independent modules and an optional headless PyQGIS smoke test.
 
-Run it with:
+Run everything with:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
+Or run just the PyQGIS smoke test with:
+
+```bash
+python3 -m unittest tests.test_qgis_smoke -v
+```
+
+On machines without PyQGIS installed, the smoke test is skipped automatically.
+
 The covered areas currently include:
 - activity querying, sorting, summary formatting, and layer subset expression helpers
 - atlas-page extent/label planning helpers for publish workflows
+- headless PyQGIS smoke coverage for GeoPackage writing/loading, EPSG:3857 project wiring, temporal expressions, atlas-layer presence, and basemap ordering
 - temporal-playback field selection / expression helpers
 - polyline decoding
 - ISO time parsing/formatting helpers
