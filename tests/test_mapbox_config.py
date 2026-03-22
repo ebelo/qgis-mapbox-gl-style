@@ -214,12 +214,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = simplify_mapbox_style_expressions(style)
         self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(60, 0%, 75%)")
 
-    def test_non_color_expressions_not_touched(self):
+    def test_line_width_expressions_clamped_to_sane_range(self):
         style = {
             "layers": [
                 {
                     "paint": {
-                        "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 9, 1, 22, 10],
+                        # zoom interpolation: at z12 → ~3px, at z22 → 300px
+                        "line-width": ["interpolate", ["exponential", 1.5], ["zoom"], 12, 3, 22, 300],
                         "line-color": "hsl(100, 50%, 60%)",
                     },
                     "layout": {},
@@ -227,8 +228,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ]
         }
         result = simplify_mapbox_style_expressions(style)
-        # line-width expression is not touched
-        self.assertIsInstance(result["layers"][0]["paint"]["line-width"], list)
+        # line-width should be simplified to a scalar and clamped ≤ max
+        width = result["layers"][0]["paint"]["line-width"]
+        self.assertIsInstance(width, float)
+        self.assertLessEqual(width, 3.0)
+        self.assertGreater(width, 0)
+        # literal colors are untouched
         self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(100, 50%, 60%)")
 
     def test_original_style_not_mutated(self):

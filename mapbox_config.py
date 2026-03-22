@@ -174,6 +174,47 @@ def _extract_fallback_color(expr: object) -> str | None:
     return fallback
 
 
+def _extract_midrange_size(expr: object) -> float | None:
+    """Extract a reasonable representative size from a Mapbox size expression.
+
+    For zoom-interpolated sizes we try to pick the value at a mid-zoom (z12),
+    falling back to a modest literal. This avoids collapsing all text to the
+    extreme (first or last) zoom stop value.
+    """
+    if isinstance(expr, (int, float)):
+        return float(expr)
+    if not isinstance(expr, list) or not expr:
+        return None
+    op = expr[0]
+    if op == "interpolate" and len(expr) >= 5:
+        # ['interpolate', interp_type, ['zoom'], z1, v1, z2, v2, ...]
+        # Try to find value at z12, else take median of numeric stops
+        stops_start = 3
+        stops = []
+        for i in range(stops_start, len(expr) - 1, 2):
+            z = expr[i]
+            v = expr[i + 1]
+            if isinstance(z, (int, float)):
+                v_scalar = _extract_midrange_size(v)
+                if v_scalar is not None:
+                    stops.append((z, v_scalar))
+        if stops:
+            # Return value nearest to z12
+            stops.sort(key=lambda s: abs(s[0] - 12))
+            return stops[0][1]
+    if op == "step" and len(expr) >= 3:
+        # ['step', input, default, threshold, value, ...]
+        default_val = _extract_midrange_size(expr[2])
+        if default_val is not None:
+            return default_val
+    # Recurse for nested expressions, take first reasonable scalar
+    for item in expr[1:]:
+        val = _extract_midrange_size(item)
+        if val is not None:
+            return val
+    return None
+
+
 def _simplify_text_field(expr: object) -> object:
     """Simplify a Mapbox text-field expression to the first simple field reference.
 
@@ -214,7 +255,61 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
         "icon-color", "icon-halo-color", "background-color",
         "fill-extrusion-color",
     }
+    # Line width properties: expression values can reach 200–300 at max zoom;
+    # QGIS may pick a large stop and produce QPen::setWidthF warnings.
+    # We extract a z12-representative value and cap to a sane maximum.
+    _WIDTH_PROPS = {"line-width", "line-gap-width", "line-offset"}
+    _MAX_LINE_WIDTH_MM = 3.0  # ~11px at 96 DPI — sane max for cartographic lines
+    # Per-layer-id text-size overrides to restore cartographic hierarchy.
+    _TEXT_SIZE_OVERRIDES: dict[str, object] = {
+        "natural-point-label": 9.0,
+        "natural-line-label": 10.0,
+        "poi-label": 9.0,
+        "road-label": 10.0,
+        "path-pedestrian-label": 9.0,
+        "waterway-label": 10.0,
+        "water-line-label": 11.0,
+        "water-point-label": 12.0,
+        "airport-label": 11.0,
+        "settlement-subdivision-label": 8.0,
+        "settlement-minor-label": 10.0,
+        "settlement-major-label": 14.0,
+        "state-label": 13.0,
+        "country-label": 16.0,
+        "continent-label": 16.0,
+    }
+
+    # Settlement layer label policy:
+    # - settlement-major-label: only cities (type=city) — Geneva, Bern, Lyon, Lausanne
+    # - settlement-minor-label: only towns (type=town) with filterrank<=2 — regional centres
+    # - settlement-subdivision-label: suppress entirely
+    # filterrank is available in tiles (verified z10: Cologny=3, Corsier=5, Geneva=1)
+    # Filter by `type` only — filterrank is zoom-dependent and unreliable for
+    # consistent cross-zoom filtering. `type` is stable across all zoom levels.
+    # Mapbox Streets v8 settlement types: city, town, village, hamlet, suburb,
+    # neighbourhood, quarter, borough
+    _SETTLEMENT_FILTERS: dict[str, object] = {
+        "settlement-major-label": ["match", ["get", "type"], ["city"], True, False],
+        "settlement-minor-label": ["match", ["get", "type"], ["town"], True, False],
+        "settlement-subdivision-label": None,
+    }
+
     for layer in style.get("layers", []):
+        layer_id = layer.get("id", "")
+
+        # Suppress or filter settlement label layers
+        settlement_filter = _SETTLEMENT_FILTERS.get(layer_id, "NOTSET")
+        if settlement_filter != "NOTSET":
+            if settlement_filter is None:
+                layer["layout"] = layer.get("layout", {})
+                layer["layout"]["visibility"] = "none"
+            else:
+                existing_filter = layer.get("filter")
+                if existing_filter:
+                    layer["filter"] = ["all", existing_filter, settlement_filter]
+                else:
+                    layer["filter"] = settlement_filter
+
         for section in ("paint", "layout"):
             props = layer.get(section)
             if not isinstance(props, dict):
@@ -227,8 +322,22 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     fallback = _extract_fallback_color(val)
                     if fallback is not None:
                         props[prop] = fallback
+                elif prop in _WIDTH_PROPS:
+                    width = _extract_midrange_size(val)
+                    if width is not None:
+                        # Convert px → mm (96 DPI) and clamp to sane range
+                        width_mm = width * 25.4 / 96.0
+                        props[prop] = max(0.1, min(width_mm, _MAX_LINE_WIDTH_MM))
                 elif prop == "text-field":
                     props[prop] = _simplify_text_field(val)
+                elif prop == "text-size":
+                    override = _TEXT_SIZE_OVERRIDES.get(layer_id)
+                    if override is not None:
+                        props[prop] = override
+                    else:
+                        size = _extract_midrange_size(val)
+                        if size is not None:
+                            props[prop] = size
     return style
 
 
