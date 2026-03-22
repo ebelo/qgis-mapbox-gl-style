@@ -3,6 +3,8 @@ import unittest
 import tests._path  # noqa: F401,E402
 
 from mapbox_config import (  # noqa: E402
+    DEFAULT_MAPBOX_RETINA,
+    DEFAULT_MAPBOX_TILE_SIZE,
     MapboxConfigError,
     build_background_layer_name,
     build_mapbox_tiles_url,
@@ -44,14 +46,16 @@ class MapboxConfigTests(unittest.TestCase):
             style_id="style/id",
             retina=False,
         )
-        self.assertIn("styles/v1/my%20user/style%2Fid/tiles/256/{z}/{x}/{y}", url)
+        self.assertEqual(DEFAULT_MAPBOX_TILE_SIZE, 512)
+        self.assertTrue(DEFAULT_MAPBOX_RETINA)
+        self.assertIn("styles/v1/my%20user/style%2Fid/tiles/512/{z}/{x}/{y}", url)
         self.assertIn("access_token=pk.test%20token", url)
         self.assertNotIn("@2x", url)
 
     def test_xyz_uri_wraps_tiles_url(self):
         uri = build_xyz_layer_uri("pk.123", "mapbox", "outdoors-v12")
         self.assertTrue(uri.startswith("type=xyz&url=https://api.mapbox.com/"))
-        self.assertIn("{z}/{x}/{y}@2x", uri)
+        self.assertIn("tiles/512/{z}/{x}/{y}@2x", uri)
         self.assertIn("zmin=0&zmax=22", uri)
 
     def test_layer_name_prefers_preset_label(self):

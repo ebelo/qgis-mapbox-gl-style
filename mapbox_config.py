@@ -9,6 +9,8 @@ class MapboxConfigError(ValueError):
 
 BACKGROUND_LAYER_PREFIX = "qfit background"
 DEFAULT_BACKGROUND_PRESET = "Outdoor"
+DEFAULT_MAPBOX_TILE_SIZE = 512
+DEFAULT_MAPBOX_RETINA = True
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -85,8 +87,8 @@ def build_mapbox_tiles_url(
     style_owner: str,
     style_id: str,
     *,
-    tile_size: int = 256,
-    retina: bool = True,
+    tile_size: int = DEFAULT_MAPBOX_TILE_SIZE,
+    retina: bool = DEFAULT_MAPBOX_RETINA,
 ) -> str:
     token = access_token.strip()
     owner = style_owner.strip()
