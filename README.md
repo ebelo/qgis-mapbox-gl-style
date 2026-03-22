@@ -34,6 +34,7 @@ The current implementation supports:
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
 - previewing fetched activities with a dock-side summary and sortable recent-activity list before loading layers
 - applying visualization presets including lines, track points, heatmaps, and start-point views
+- surfacing reusable contextual help in the dock with clearer labels, consistent tooltips, inline helper text, and lightweight `?` affordances on the most confusing controls
 
 ## Current GeoPackage model
 
@@ -98,9 +99,9 @@ Visible layers:
 9. Review the fetched-activity summary / preview and refine the query if needed
 10. Write + load the synced result into QGIS
 11. Optionally tune atlas-page margin, minimum extent, and target aspect ratio in the Publish / atlas section
-12. Use `Write + Load` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
-13. Use `Apply filters` only when you want the current dock query to become an actual QGIS layer subset
-14. Optionally use `Load background map` to add or refresh the basemap underneath the qfit activity layers
+12. Use `Write + load layers` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
+13. Use `Apply current filters` only when you want the current dock query to become an actual QGIS layer subset
+14. Optionally use `Load / refresh background map` to add or refresh the basemap underneath the qfit activity layers
 15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_toc_label`, `page_distance_label`, `page_duration_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, `page_profile_summary`, `document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, cover/TOC summaries, or Web Mercator layout logic
 16. If you want a single atlas-wide record for a cover page or table-of-contents layout, read the `atlas_document_summary` table from the GeoPackage and reuse its `activity_count`, `date_range_label`, `total_distance_label`, `total_duration_label`, `total_elevation_gain_label`, `activity_types_label`, and `cover_summary` fields directly
 17. If you want a clean per-page table source for a QGIS contents page, use the `atlas_toc_entries` table and bind a layout table or labels to its `page_number`, `page_number_label`, `page_toc_label`, `toc_entry_label`, `page_stats_summary`, and `page_profile_summary` fields instead of reading those values from the atlas polygons
@@ -120,9 +121,11 @@ The resulting atlas-page layer is intentionally more layout-ready than a raw ext
 - `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` make it easier to conditionally show route-profile panels in layouts when sampled altitude/distance stream data exists, without repeating basic label formatting in QGIS expressions
 
 Use it when you want to tune the eventual print-layout framing:
-- `Page margin (%)` adds extra space around each activity extent
-- `Minimum page extent (°)` keeps very short or compact activities readable in an atlas
-- `Target aspect ratio` optionally expands each atlas extent in Web Mercator so it better matches a fixed layout frame (for example, square pages or wider landscape compositions)
+- `Atlas margin around route (%)` adds extra space around each activity extent
+- `Minimum atlas extent (°)` keeps very short or compact activities readable in an atlas
+- `Target page aspect ratio` optionally expands each atlas extent in Web Mercator so it better matches a fixed layout frame (for example, square pages or wider landscape compositions)
+
+The dock now adds inline help and `?` affordances to the most confusing settings, especially detailed-track limits, point sampling, temporal timestamps, basemap setup, and the difference between writing/loading layers versus applying subset filters.
 
 These values are saved in QGIS settings and applied the next time you write/load the GeoPackage.
 
