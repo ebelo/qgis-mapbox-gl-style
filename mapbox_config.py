@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from urllib.parse import quote
+import json
+from urllib.parse import quote, unquote
+from urllib.request import urlopen
 
 
 class MapboxConfigError(ValueError):
@@ -113,12 +115,218 @@ def build_mapbox_tiles_url(
     )
 
 
+TILE_MODE_RASTER = "Raster"
+TILE_MODE_VECTOR = "Vector"
+TILE_MODES = [TILE_MODE_RASTER, TILE_MODE_VECTOR]
+
+
 def build_xyz_layer_uri(access_token: str, style_owner: str, style_id: str) -> str:
     url = build_mapbox_tiles_url(access_token, style_owner, style_id)
     return "type=xyz&url={url}&zmin=0&zmax=22&tilePixelRatio={tile_pixel_ratio}".format(
         url=quote(url, safe=":/?{}=%@"),
         tile_pixel_ratio=DEFAULT_MAPBOX_TILE_PIXEL_RATIO,
     )
+
+
+def _validated_mapbox_style_parts(access_token: str, style_owner: str, style_id: str) -> tuple[str, str, str]:
+    token = access_token.strip()
+    owner = style_owner.strip()
+    resolved_style_id = style_id.strip()
+
+    if not token:
+        raise MapboxConfigError("Enter a Mapbox access token to load the selected background map.")
+    if not owner or not resolved_style_id:
+        raise MapboxConfigError("Enter a Mapbox style owner and style ID first.")
+    return token, owner, resolved_style_id
+
+
+def fetch_mapbox_style_definition(
+    access_token: str,
+    style_owner: str,
+    style_id: str,
+) -> dict[str, object]:
+    """Fetch and parse the Mapbox style JSON for a style."""
+    style_url = build_mapbox_style_json_url(access_token, style_owner, style_id)
+    with urlopen(style_url, timeout=20) as response:  # noqa: S310
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _extract_fallback_color(expr: object) -> str | None:
+    """Recursively extract a sensible literal color from a Mapbox expression.
+
+    Mapbox uses `['match', field, val1, color1, ..., default_color]` and
+    `['interpolate', ..., zoom, color, ...]` expressions for dynamic colors.
+    QGIS' QgsMapBoxGlStyleConverter does not resolve data-driven expressions
+    and falls back to black.  We extract the *last literal color string* from
+    such expressions as a reasonable representative color.
+    """
+    if isinstance(expr, str):
+        return expr if (expr.startswith("hsl") or expr.startswith("#") or expr.startswith("rgb")) else None
+    if not isinstance(expr, list) or not expr:
+        return None
+    # Walk backwards through list elements looking for the deepest literal
+    fallback: str | None = None
+    for item in reversed(expr):
+        color = _extract_fallback_color(item)
+        if color is not None:
+            fallback = color
+            break
+    return fallback
+
+
+def _simplify_text_field(expr: object) -> object:
+    """Simplify a Mapbox text-field expression to the first simple field reference.
+
+    QGIS handles ``['get', 'name']`` but not ``['coalesce', ['get', 'name_en'], ['get', 'name'], ...]``.
+    We extract the first ``['get', <field>]`` from a coalesce and return it directly.
+    """
+    if not isinstance(expr, list) or not expr:
+        return expr
+    op = expr[0]
+    if op == "coalesce":
+        # Return the first simple ['get', field] child
+        for child in expr[1:]:
+            if isinstance(child, list) and len(child) == 2 and child[0] == "get" and isinstance(child[1], str):
+                return child
+    if op == "step":
+        # step expressions for text-field — find the first literal string fallback
+        for item in expr[1:]:
+            if isinstance(item, str) and item:
+                return item
+    return expr
+
+
+def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> dict[str, object]:
+    """Return a copy of a Mapbox style with expression-based colors replaced by
+    literal fallback colors so QGIS' converter does not render them as black.
+
+    Also simplifies ``text-field`` coalesce expressions to their first simple
+    ``['get', field]`` reference so QGIS can resolve the label field name.
+
+    Only color properties whose values are Mapbox expressions (lists) are
+    simplified.  Literal strings (``hsl(...)``, ``#rrggbb``) are kept as-is.
+    """
+    import copy
+    style = copy.deepcopy(style_definition)
+    color_props = {
+        "line-color", "fill-color", "fill-outline-color", "circle-color",
+        "circle-stroke-color", "text-color", "text-halo-color",
+        "icon-color", "icon-halo-color", "background-color",
+        "fill-extrusion-color",
+    }
+    for layer in style.get("layers", []):
+        for section in ("paint", "layout"):
+            props = layer.get(section)
+            if not isinstance(props, dict):
+                continue
+            for prop in list(props.keys()):
+                val = props[prop]
+                if not isinstance(val, list):
+                    continue
+                if prop in color_props:
+                    fallback = _extract_fallback_color(val)
+                    if fallback is not None:
+                        props[prop] = fallback
+                elif prop == "text-field":
+                    props[prop] = _simplify_text_field(val)
+    return style
+
+
+def extract_mapbox_vector_source_ids(style_definition: dict[str, object]) -> list[str]:
+    """Extract vector tileset IDs from a Mapbox style definition.
+
+    Supports sources declared like: {"url": "mapbox://tilesetA,tilesetB"}
+    """
+    sources = style_definition.get("sources") if isinstance(style_definition, dict) else None
+    if not isinstance(sources, dict):
+        raise MapboxConfigError("Mapbox style JSON does not declare any sources.")
+
+    tileset_ids: list[str] = []
+    for source in sources.values():
+        if not isinstance(source, dict) or source.get("type") != "vector":
+            continue
+        url = str(source.get("url") or "").strip()
+        if not url.startswith("mapbox://"):
+            continue
+        raw_ids = url.removeprefix("mapbox://")
+        for tileset_id in raw_ids.split(","):
+            normalized = tileset_id.strip()
+            if normalized and normalized not in tileset_ids:
+                tileset_ids.append(normalized)
+
+    if not tileset_ids:
+        raise MapboxConfigError("Mapbox style JSON does not expose a vector tileset source for QGIS.")
+    return tileset_ids
+
+
+def build_mapbox_vector_tiles_url(
+    access_token: str,
+    style_owner: str,
+    style_id: str,
+    *,
+    tileset_ids: list[str] | tuple[str, ...] | None = None,
+) -> str:
+    """Return the Mapbox vector tile endpoint URL for a given style/source."""
+    token, owner, resolved_style_id = _validated_mapbox_style_parts(access_token, style_owner, style_id)
+
+    if tileset_ids:
+        joined_tilesets = ",".join(quote(tileset_id.strip(), safe=".,-_") for tileset_id in tileset_ids if tileset_id.strip())
+    else:
+        joined_tilesets = "{owner}.{style_id}".format(
+            owner=quote(owner, safe=""),
+            style_id=quote(resolved_style_id, safe=""),
+        )
+
+    return (
+        "https://api.mapbox.com/v4/{tilesets}/{{z}}/{{x}}/{{y}}.mvt"
+        "?access_token={token}"
+    ).format(
+        tilesets=joined_tilesets,
+        token=quote(token, safe=""),
+    )
+
+
+def build_mapbox_style_json_url(
+    access_token: str,
+    style_owner: str,
+    style_id: str,
+) -> str:
+    """Return the Mapbox style JSON URL for use with QGIS vector tile styling."""
+    token, owner, resolved_style_id = _validated_mapbox_style_parts(access_token, style_owner, style_id)
+
+    return (
+        "https://api.mapbox.com/styles/v1/{owner}/{style_id}?access_token={token}"
+    ).format(
+        owner=quote(owner, safe=""),
+        style_id=quote(resolved_style_id, safe=""),
+        token=quote(token, safe=""),
+    )
+
+
+def build_vector_tile_layer_uri(
+    access_token: str,
+    style_owner: str,
+    style_id: str,
+    *,
+    tileset_ids: list[str] | tuple[str, ...] | None = None,
+    include_style_url: bool = True,
+) -> str:
+    """Return a QGIS-compatible vector tile layer URI for a Mapbox style."""
+    tiles_url = build_mapbox_vector_tiles_url(
+        access_token,
+        style_owner,
+        style_id,
+        tileset_ids=tileset_ids,
+    )
+    uri = "type=xyz&url={url}&zmin=0&zmax=22".format(
+        url=quote(tiles_url, safe=":/?{}=%@,"),
+    )
+    if include_style_url:
+        style_url = build_mapbox_style_json_url(access_token, style_owner, style_id)
+        uri += "&styleUrl={style_url}".format(
+            style_url=quote(style_url, safe=":/?{}=%@"),
+        )
+    return uri
 
 
 def build_background_layer_name(preset_name: str | None, style_owner: str, style_id: str) -> str:
