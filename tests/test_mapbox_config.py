@@ -4,6 +4,7 @@ import tests._path  # noqa: F401,E402
 
 from mapbox_config import (  # noqa: E402
     DEFAULT_MAPBOX_RETINA,
+    DEFAULT_MAPBOX_TILE_PIXEL_RATIO,
     DEFAULT_MAPBOX_TILE_SIZE,
     MapboxConfigError,
     build_background_layer_name,
@@ -47,6 +48,7 @@ class MapboxConfigTests(unittest.TestCase):
             retina=False,
         )
         self.assertEqual(DEFAULT_MAPBOX_TILE_SIZE, 512)
+        self.assertEqual(DEFAULT_MAPBOX_TILE_PIXEL_RATIO, 2)
         self.assertTrue(DEFAULT_MAPBOX_RETINA)
         self.assertIn("styles/v1/my%20user/style%2Fid/tiles/512/{z}/{x}/{y}", url)
         self.assertIn("access_token=pk.test%20token", url)
@@ -57,6 +59,7 @@ class MapboxConfigTests(unittest.TestCase):
         self.assertTrue(uri.startswith("type=xyz&url=https://api.mapbox.com/"))
         self.assertIn("tiles/512/{z}/{x}/{y}@2x", uri)
         self.assertIn("zmin=0&zmax=22", uri)
+        self.assertIn(f"tilePixelRatio={DEFAULT_MAPBOX_TILE_PIXEL_RATIO}", uri)
 
     def test_layer_name_prefers_preset_label(self):
         self.assertEqual(

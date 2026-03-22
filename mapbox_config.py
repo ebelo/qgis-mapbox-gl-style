@@ -11,6 +11,7 @@ BACKGROUND_LAYER_PREFIX = "qfit background"
 DEFAULT_BACKGROUND_PRESET = "Outdoor"
 DEFAULT_MAPBOX_TILE_SIZE = 512
 DEFAULT_MAPBOX_RETINA = True
+DEFAULT_MAPBOX_TILE_PIXEL_RATIO = 2
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -114,8 +115,9 @@ def build_mapbox_tiles_url(
 
 def build_xyz_layer_uri(access_token: str, style_owner: str, style_id: str) -> str:
     url = build_mapbox_tiles_url(access_token, style_owner, style_id)
-    return "type=xyz&url={url}&zmin=0&zmax=22".format(
+    return "type=xyz&url={url}&zmin=0&zmax=22&tilePixelRatio={tile_pixel_ratio}".format(
         url=quote(url, safe=":/?{}=%@"),
+        tile_pixel_ratio=DEFAULT_MAPBOX_TILE_PIXEL_RATIO,
     )
 
 
