@@ -82,6 +82,7 @@ Visible layers:
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
 - `activity_query.py` — reusable activity filtering, sorting, summary, preview, and subset-expression helpers
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
+- `map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
 - `temporal_config.py` — reusable temporal-playback field selection and expression helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
@@ -155,6 +156,19 @@ Configure these values in the dock when you want a background basemap:
 When qfit loads the background layer, it keeps it below the qfit activity layers in the QGIS layer tree so tracks, starts, and points render on top of the basemap. qfit requests Mapbox's higher-resolution style tiles by default (`512px` with retina `@2x`) and marks the XYZ source with `tilePixelRatio=2` so QGIS treats those tiles as true high-DPI tiles instead of scaling them like standard `256px` tiles.
 
 The built-in presets intentionally keep the configuration small and predictable. The Winter slot is just a convenience label for a custom winter-themed style if you have one.
+
+## Activity styling and basemap-aware rendering
+
+qfit's `By activity type` preset now follows the semantic palette documented in `docs/map-style-guide.md`.
+
+Highlights:
+- `sport_type` is used as the preferred categorization field when it exists, with `activity_type` as a fallback
+- common Strava sports map to stable semantic color families (for example runs stay red, rides orange, winter sports blue, water sports blue/cyan, indoor fitness purple, machine/virtual grey)
+- the line palette stays semantically consistent while the rendering adapts to the active Mapbox context
+- `Outdoor` keeps the base line weights, `Light` adds a dark casing and slightly heavier lines, and `Satellite` adds a stronger white casing plus higher opacity for readability over imagery
+- unknown or future activity names fall back to a semantic family heuristic and ultimately to a neutral grey instead of failing silently
+
+The simpler `Simple lines` preset also uses the same basemap-aware width/opacity/outline rules, so switching basemaps does not require manually restyling tracks every time.
 
 ## Strava credentials
 
