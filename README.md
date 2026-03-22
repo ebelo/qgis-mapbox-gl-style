@@ -25,6 +25,8 @@ The current implementation supports:
 - generating atlas pages in a stable chronological order with page numbers and TOC-friendly labels for QGIS layouts
 - adding Web Mercator-ready atlas metadata (`center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`) for layout work in EPSG:3857
 - precomputing route-profile-ready atlas metadata (`profile_available`, sampled profile distance, min/max elevation, relief, gain/loss, and layout-friendly labels) when detailed stream metrics are available
+- exposing publish-friendly detail labels on atlas pages (`page_toc_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, `page_profile_summary`) so layouts can show activity stats with less expression boilerplate
+- stamping atlas-document / cover-ready summary fields (`document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`) onto every atlas page so QGIS layouts can reuse them directly
 - loading those layers directly into QGIS with EPSG:3857 as the working project/map CRS
 - adding an optional Mapbox background layer through saved plugin settings, with an explicit background-map Load button and basemap ordering kept below the activity layers
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
@@ -95,7 +97,7 @@ Visible layers:
 12. Use `Write + Load` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
 13. Use `Apply filters` only when you want the current dock query to become an actual QGIS layer subset
 14. Optionally use `Load background map` to add or refresh the basemap underneath the qfit activity layers
-15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_distance_label`, `page_duration_label`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, or Web Mercator layout logic
+15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_toc_label`, `page_distance_label`, `page_duration_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, `page_profile_summary`, `document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, cover/TOC summaries, or Web Mercator layout logic
 
 ## Publish / atlas settings
 
@@ -104,7 +106,8 @@ qfit now exposes a small publish configuration block for the generated `activity
 The resulting atlas-page layer is intentionally more layout-ready than a raw extent index:
 - pages are ordered chronologically with a stable `page_number`
 - `page_sort_key` gives QGIS a deterministic sort field for atlas or TOC tables
-- `page_date`, `page_distance_label`, and `page_duration_label` reduce the need for layout expressions
+- `page_date`, `page_toc_label`, `page_distance_label`, `page_duration_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, and `page_profile_summary` reduce the need for layout expressions
+- document-level summary fields (`document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`) are repeated on every atlas page so cover/TOC layouts can reuse atlas-wide totals without a separate helper table
 - `center_x_3857`, `center_y_3857`, `extent_width_m`, and `extent_height_m` make it easier to drive Web Mercator-oriented layout logic now that qfit uses EPSG:3857 as the working QGIS projection choice
 - `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` make it easier to conditionally show route-profile panels in layouts when sampled altitude/distance stream data exists, without repeating basic label formatting in QGIS expressions
 
