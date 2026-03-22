@@ -38,6 +38,7 @@ The current implementation supports:
 - previewing fetched activities with a dock-side summary and sortable recent-activity list before loading layers
 - applying visualization presets including lines, track points, heatmaps, and start-point views
 - surfacing reusable contextual help in the dock with clearer labels, consistent tooltips, inline helper text, and lightweight `?` affordances on the most confusing controls
+- exporting a per-activity PDF atlas from the dock with a single "Generate Atlas PDF" button, using a programmatic QgsPrintLayout with atlas coverage from `activity_atlas_pages`, showing activity title, date, stats summary, and a map frame centred on each activity extent; export runs off the main thread via QgsTask so the QGIS UI stays responsive
 
 ## Current GeoPackage model
 
@@ -62,7 +63,7 @@ Visible layers:
 
 - provider adapters for FIT / GPX / TCX imports
 - richer temporal styling / playback presets on top of the new QGIS temporal wiring
-- PDF/layout automation on top of the new atlas-page layer
+- richer PDF atlas options: cover page, table of contents page, inline elevation profile charts
 - richer symbology and density workflows
 - better packaging and release automation
 - broader scripted integration coverage inside a real QGIS environment
@@ -87,6 +88,7 @@ Visible layers:
 - `temporal_config.py` — reusable temporal-playback field selection and expression helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
 - `publish_atlas.py` — atlas/page extent planning helpers for QGIS print layouts
+- `atlas_export_task.py` — QgsTask-based PDF atlas export (programmatic QgsPrintLayout + QgsLayoutExporter)
 - `scripts/install_plugin.py` — install qfit into a local QGIS profile for testing
 - `scripts/uninstall_plugin.py` — remove qfit from a local QGIS profile
 - `docs/schema.md` — current schema design
