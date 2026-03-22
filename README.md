@@ -29,6 +29,7 @@ The current implementation supports:
 - stamping atlas-document / cover-ready summary fields (`document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`) onto every atlas page so QGIS layouts can reuse them directly
 - writing an `atlas_document_summary` helper table with the atlas-wide totals and labels as a single row for cover/TOC layouts that prefer a dedicated document summary source
 - writing an `atlas_toc_entries` helper table with one row per atlas page so QGIS table-of-contents layouts can bind to a clean non-spatial TOC source instead of the atlas polygons
+- writing an `atlas_profile_samples` helper table with one row per sampled distance/elevation point so QGIS layouts can build route-profile charts from atlas-ready per-page data
 - loading those layers directly into QGIS with EPSG:3857 as the working project/map CRS
 - adding an optional Mapbox background layer through saved plugin settings, with an explicit background-map Load button and basemap ordering kept below the activity layers
 - filtering by activity type, activity-name search, date range, minimum/maximum distance, and detailed-stream availability
@@ -51,6 +52,7 @@ Visible layers:
 - `activity_atlas_pages` — polygon layer of atlas/page extents with titles/subtitles plus page numbers and TOC-friendly labels for QGIS print layouts
 - `atlas_document_summary` — single-row helper table with atlas-wide totals/labels for cover and table-of-contents layouts
 - `atlas_toc_entries` — one-row-per-page helper table with TOC-ready labels for print-layout tables and cover/contents compositions
+- `atlas_profile_samples` — one-row-per-profile-point helper table with sampled distance/elevation values for route-profile diagrams in print layouts
 
 ## Planned next expansions
 
@@ -105,6 +107,7 @@ Visible layers:
 15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_toc_label`, `page_distance_label`, `page_duration_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, `page_profile_summary`, `document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, cover/TOC summaries, or Web Mercator layout logic
 16. If you want a single atlas-wide record for a cover page or table-of-contents layout, read the `atlas_document_summary` table from the GeoPackage and reuse its `activity_count`, `date_range_label`, `total_distance_label`, `total_duration_label`, `total_elevation_gain_label`, `activity_types_label`, and `cover_summary` fields directly
 17. If you want a clean per-page table source for a QGIS contents page, use the `atlas_toc_entries` table and bind a layout table or labels to its `page_number`, `page_number_label`, `page_toc_label`, `toc_entry_label`, `page_stats_summary`, and `page_profile_summary` fields instead of reading those values from the atlas polygons
+18. If you want an atlas-ready route-profile data source, use the `atlas_profile_samples` table and chart or filter it by `page_number` / `page_sort_key`; it exposes ordered `distance_m`, `distance_label`, `altitude_m`, `profile_point_index`, `profile_point_ratio`, and `profile_distance_m` values for each page
 
 ## Publish / atlas settings
 
@@ -117,6 +120,7 @@ The resulting atlas-page layer is intentionally more layout-ready than a raw ext
 - document-level summary fields (`document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`) are still repeated on every atlas page for simple per-page layout expressions
 - the GeoPackage now also includes an `atlas_document_summary` table with a single atlas-wide summary row when you prefer a dedicated cover/TOC data source
 - the new `atlas_toc_entries` table gives TOC layouts a clean non-spatial row source with page-number labels and preformatted entry text, so simple contents pages do not need to read from atlas polygons or rebuild numbering logic in expressions
+- the new `atlas_profile_samples` table gives route-profile layouts a clean per-page chart source with ordered sampled distance/elevation rows, so profile diagrams do not need to scrape nested JSON or activity points directly
 - `center_x_3857`, `center_y_3857`, `extent_width_m`, and `extent_height_m` make it easier to drive Web Mercator-oriented layout logic now that qfit uses EPSG:3857 as the working QGIS projection choice
 - `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, `profile_elevation_loss_m`, and `profile_elevation_loss_label` make it easier to conditionally show route-profile panels in layouts when sampled altitude/distance stream data exists, without repeating basic label formatting in QGIS expressions
 
