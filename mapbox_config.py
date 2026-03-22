@@ -14,6 +14,9 @@ DEFAULT_BACKGROUND_PRESET = "Outdoor"
 DEFAULT_MAPBOX_TILE_SIZE = 512
 DEFAULT_MAPBOX_RETINA = False
 DEFAULT_MAPBOX_TILE_PIXEL_RATIO = 2
+WEB_MERCATOR_WORLD_WIDTH_M = 40075016.685578488
+DEFAULT_MAPBOX_MIN_ZOOM = 0
+DEFAULT_MAPBOX_MAX_ZOOM = 22
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -126,6 +129,75 @@ def build_xyz_layer_uri(access_token: str, style_owner: str, style_id: str) -> s
         url=quote(url, safe=":/?{}=%@"),
         tile_pixel_ratio=DEFAULT_MAPBOX_TILE_PIXEL_RATIO,
     )
+
+
+def native_web_mercator_resolution_for_zoom(
+    zoom_level: int,
+    *,
+    tile_size: int = DEFAULT_MAPBOX_TILE_SIZE,
+) -> float:
+    normalized_zoom_level = max(DEFAULT_MAPBOX_MIN_ZOOM, int(zoom_level))
+    return WEB_MERCATOR_WORLD_WIDTH_M / float(tile_size * (2 ** normalized_zoom_level))
+
+
+def nearest_native_web_mercator_zoom_level(
+    resolution_m_per_pixel: float,
+    *,
+    tile_size: int = DEFAULT_MAPBOX_TILE_SIZE,
+    min_zoom: int = DEFAULT_MAPBOX_MIN_ZOOM,
+    max_zoom: int = DEFAULT_MAPBOX_MAX_ZOOM,
+) -> int:
+    if resolution_m_per_pixel <= 0:
+        return int(min_zoom)
+
+    zoom_levels = range(int(min_zoom), int(max_zoom) + 1)
+    return min(
+        zoom_levels,
+        key=lambda zoom_level: abs(
+            native_web_mercator_resolution_for_zoom(zoom_level, tile_size=tile_size)
+            - float(resolution_m_per_pixel)
+        ),
+    )
+
+
+def snap_web_mercator_bounds_to_native_zoom(
+    bounds: tuple[float, float, float, float],
+    viewport_width_px: int,
+    viewport_height_px: int,
+    *,
+    tile_size: int = DEFAULT_MAPBOX_TILE_SIZE,
+    min_zoom: int = DEFAULT_MAPBOX_MIN_ZOOM,
+    max_zoom: int = DEFAULT_MAPBOX_MAX_ZOOM,
+) -> tuple[tuple[float, float, float, float], int]:
+    min_x, min_y, max_x, max_y = bounds
+    width_m = max(float(max_x) - float(min_x), 0.0)
+    height_m = max(float(max_y) - float(min_y), 0.0)
+    width_px = max(int(viewport_width_px or 0), 1)
+    height_px = max(int(viewport_height_px or 0), 1)
+
+    current_resolution = max(width_m / float(width_px), height_m / float(height_px), 0.0)
+    snapped_zoom_level = nearest_native_web_mercator_zoom_level(
+        current_resolution,
+        tile_size=tile_size,
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+    )
+    snapped_resolution = native_web_mercator_resolution_for_zoom(
+        snapped_zoom_level,
+        tile_size=tile_size,
+    )
+
+    center_x = (float(min_x) + float(max_x)) / 2.0
+    center_y = (float(min_y) + float(max_y)) / 2.0
+    snapped_width_m = snapped_resolution * float(width_px)
+    snapped_height_m = snapped_resolution * float(height_px)
+    snapped_bounds = (
+        center_x - (snapped_width_m / 2.0),
+        center_y - (snapped_height_m / 2.0),
+        center_x + (snapped_width_m / 2.0),
+        center_y + (snapped_height_m / 2.0),
+    )
+    return snapped_bounds, snapped_zoom_level
 
 
 def _validated_mapbox_style_parts(access_token: str, style_owner: str, style_id: str) -> tuple[str, str, str]:

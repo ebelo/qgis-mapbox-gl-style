@@ -21,7 +21,7 @@ The current implementation supports:
 - deriving absolute sampled timestamps for `activity_points` in UTC and local activity time when stream offsets are available
 - wiring loaded qfit layers into QGIS temporal playback using local or UTC timestamps when available
 - generating an `activity_atlas_pages` layer with print-ready page extents and labels for QGIS atlas layouts
-- tuning atlas-page padding, minimum extent, and optional target aspect ratio directly from the plugin before rebuilding publish layers
+- tuning atlas-page padding, minimum extent, and target aspect ratio directly from the plugin before rebuilding publish layers, with the built-in PDF exporter defaulting that ratio to its real map frame so tracks stay inside the visible extent
 - generating atlas pages in a stable chronological order with page numbers and TOC-friendly labels for QGIS layouts
 - adding Web Mercator-ready atlas metadata (`center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`) for layout work in EPSG:3857
 - precomputing route-profile-ready atlas metadata (`profile_available`, sampled profile distance, min/max elevation, relief, gain/loss, and layout-friendly labels) when detailed stream metrics are available

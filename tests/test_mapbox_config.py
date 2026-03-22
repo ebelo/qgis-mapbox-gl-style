@@ -16,11 +16,14 @@ from mapbox_config import (  # noqa: E402
     build_mapbox_vector_tiles_url,
     build_vector_tile_layer_uri,
     extract_mapbox_vector_source_ids,
+    nearest_native_web_mercator_zoom_level,
+    native_web_mercator_resolution_for_zoom,
     simplify_mapbox_style_expressions,
     build_xyz_layer_uri,
     preset_defaults,
     preset_requires_custom_style,
     resolve_background_style,
+    snap_web_mercator_bounds_to_native_zoom,
 )
 
 
@@ -82,6 +85,46 @@ class MapboxConfigTests(unittest.TestCase):
             "qfit background — ebelo/winter-wonderland",
         )
 
+    def test_native_web_mercator_resolution_for_zoom_zero_matches_world_tile_width(self):
+        self.assertAlmostEqual(
+            native_web_mercator_resolution_for_zoom(0),
+            40075016.685578488 / 512.0,
+            places=6,
+        )
+
+    def test_nearest_native_zoom_level_picks_exact_match(self):
+        zoom_level = nearest_native_web_mercator_zoom_level(
+            native_web_mercator_resolution_for_zoom(12)
+        )
+        self.assertEqual(zoom_level, 12)
+
+    def test_snap_web_mercator_bounds_to_native_zoom_preserves_center(self):
+        original_bounds = (1000.0, 2000.0, 11280.0, 9680.0)
+        snapped_bounds, snapped_zoom_level = snap_web_mercator_bounds_to_native_zoom(
+            original_bounds,
+            viewport_width_px=1024,
+            viewport_height_px=768,
+        )
+
+        original_center = (
+            (original_bounds[0] + original_bounds[2]) / 2.0,
+            (original_bounds[1] + original_bounds[3]) / 2.0,
+        )
+        snapped_center = (
+            (snapped_bounds[0] + snapped_bounds[2]) / 2.0,
+            (snapped_bounds[1] + snapped_bounds[3]) / 2.0,
+        )
+
+        self.assertEqual(original_center, snapped_center)
+        snapped_resolution = max(
+            (snapped_bounds[2] - snapped_bounds[0]) / 1024.0,
+            (snapped_bounds[3] - snapped_bounds[1]) / 768.0,
+        )
+        self.assertAlmostEqual(
+            snapped_resolution,
+            native_web_mercator_resolution_for_zoom(snapped_zoom_level),
+            places=6,
+        )
 
     def test_vector_tile_url_uses_v4_endpoint(self):
         url = build_mapbox_vector_tiles_url("pk.token", "mapbox", "outdoors-v12")
