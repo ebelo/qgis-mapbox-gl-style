@@ -95,26 +95,24 @@ Visible layers:
 
 ## How the current workflow works
 
-1. Enter Strava credentials in the qfit dock
-2. Use the built-in OAuth helper if you still need a refresh token
-3. Choose how many pages of activities to fetch
-4. Optionally enable detailed Strava track streams and set a limit
-5. Optionally enable the `activity_points` layer and choose a point sampling stride
-6. Optionally enable a Mapbox background map and choose a preset such as Outdoor, Light, Satellite, or a custom Winter style
-7. Fetch activities from Strava
-8. Choose an output `.gpkg` file
-9. Review the fetched-activity summary / preview and refine the query if needed
-10. Write + load the synced result into QGIS
-11. Optionally tune atlas-page margin, minimum extent, and target aspect ratio in the Publish / atlas section
-12. Use `Write + load layers` to load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
-13. Use `Apply current filters` only when you want the current dock query to become an actual QGIS layer subset
-14. Optionally use `Load / refresh background map` to add or refresh the basemap underneath the qfit activity layers
-15. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_toc_label`, `page_distance_label`, `page_duration_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, `page_profile_summary`, `document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, cover/TOC summaries, or Web Mercator layout logic
-16. If you want a single atlas-wide record for a cover page or table-of-contents layout, read the `atlas_document_summary` table from the GeoPackage and reuse its `activity_count`, `date_range_label`, `total_distance_label`, `total_duration_label`, `total_elevation_gain_label`, `activity_types_label`, and `cover_summary` fields directly
-17. If you want a simple cover-page metric grid or highlight list, bind a layout table or labels to the ordered `atlas_cover_highlights` rows (`highlight_label`, `highlight_value`) instead of rebuilding those strings in expressions
-18. If you want a reusable per-page activity detail block, bind a layout table or repeated labels to `atlas_page_detail_items` filtered by `page_number` or `page_sort_key`; it exposes ordered `detail_label` / `detail_value` rows for stat cards and side panels
-19. If you want a clean per-page table source for a QGIS contents page, use the `atlas_toc_entries` table and bind a layout table or labels to its `page_number`, `page_number_label`, `page_toc_label`, `toc_entry_label`, `page_stats_summary`, and `page_profile_summary` fields instead of reading those values from the atlas polygons
-20. If you want an atlas-ready route-profile data source, use the `atlas_profile_samples` table and chart or filter it by `page_number` / `page_sort_key`; it exposes ordered `distance_m`, `distance_label`, `altitude_m`, `profile_point_index`, `profile_point_ratio`, and `profile_distance_m` values for each page
+The dock is now organized around the main qfit workflow:
+
+1. **Connect** — enter your Strava app credentials and use the built-in OAuth helper if you still need a refresh token
+2. **Fetch activities** — choose a date window, paging limits, and any activity filters you want to use for previewing
+3. Optionally enable detailed Strava track streams; qfit keeps the detailed-track limit hidden until that mode is turned on
+4. Click **Fetch activities** to preview what qfit will work with before anything is written to disk
+5. **Store data** — choose an output `.gpkg` file and optionally enable sampled `activity_points` generation for analysis
+6. Click **Store and load layers** to sync the fetched result into the GeoPackage and load the full qfit layers into QGIS without auto-applying dock subset filters to the layer tables
+7. **Visualize** — optionally enable a Mapbox basemap, choose a preset such as Outdoor, Light, Satellite, or a custom Winter style, then click **Load basemap** when you want to add or refresh it
+8. Use **Apply current filters to loaded layers** only when you want the current dock query to become a real QGIS layer subset on already-loaded layers
+9. **Analyze** — switch **Temporal timestamps** to `Local activity time` or `UTC time` when you want the loaded layers wired into the QGIS temporal controller
+10. **Publish / atlas** — expand the collapsed publish section only when you want to tune atlas-page margin, minimum extent, or target aspect ratio for print layouts
+11. Optionally use the loaded `qfit atlas pages` layer as a starting index layer for a QGIS print layout / atlas export, using its built-in `page_number`, `page_name`, `page_date`, `page_toc_label`, `page_distance_label`, `page_duration_label`, `page_average_speed_label`, `page_average_pace_label`, `page_elevation_gain_label`, `page_stats_summary`, `page_profile_summary`, `document_activity_count`, `document_date_range_label`, `document_total_distance_label`, `document_total_duration_label`, `document_total_elevation_gain_label`, `document_activity_types_label`, `document_cover_summary`, `center_x_3857`, `center_y_3857`, `extent_width_m`, `extent_height_m`, `profile_available`, `profile_distance_m`, `profile_distance_label`, `profile_altitude_range_label`, `profile_relief_m`, `profile_elevation_gain_m`, `profile_elevation_gain_label`, and `profile_elevation_loss_label` fields for layout text, conditional profile frames, cover/TOC summaries, or Web Mercator layout logic
+12. If you want a single atlas-wide record for a cover page or table-of-contents layout, read the `atlas_document_summary` table from the GeoPackage and reuse its `activity_count`, `date_range_label`, `total_distance_label`, `total_duration_label`, `total_elevation_gain_label`, `activity_types_label`, and `cover_summary` fields directly
+13. If you want a simple cover-page metric grid or highlight list, bind a layout table or labels to the ordered `atlas_cover_highlights` rows (`highlight_label`, `highlight_value`) instead of rebuilding those strings in expressions
+14. If you want a reusable per-page activity detail block, bind a layout table or repeated labels to `atlas_page_detail_items` filtered by `page_number` or `page_sort_key`; it exposes ordered `detail_label` / `detail_value` rows for stat cards and side panels
+15. If you want a clean per-page table source for a QGIS contents page, use the `atlas_toc_entries` table and bind a layout table or labels to its `page_number`, `page_number_label`, `page_toc_label`, `toc_entry_label`, `page_stats_summary`, and `page_profile_summary` fields instead of reading those values from the atlas polygons
+16. If you want an atlas-ready route-profile data source, use the `atlas_profile_samples` table and chart or filter it by `page_number` / `page_sort_key`; it exposes ordered `distance_m`, `distance_label`, `altitude_m`, `profile_point_index`, `profile_point_ratio`, and `profile_distance_m` values for each page
 
 ## Publish / atlas settings
 
@@ -150,8 +148,8 @@ Configure these values in the dock when you want a background basemap:
 - enable the background-map toggle
 - paste a Mapbox access token
 - choose a preset such as `Outdoor`, `Light`, or `Satellite`
-- for `Winter (custom style)` or `Custom`, provide the Mapbox style owner and style ID from your own Studio style
-- click `Load background map` when you want to add or refresh the basemap explicitly
+- for `Winter (custom style)` or `Custom`, qfit reveals the advanced style owner / style ID fields for your own Mapbox Studio style
+- click `Load basemap` when you want to add or refresh the basemap explicitly
 
 When qfit loads the background layer, it keeps it below the qfit activity layers in the QGIS layer tree so tracks, starts, and points render on top of the basemap. qfit requests Mapbox's higher-resolution style tiles by default (`512px` with retina `@2x`) and marks the XYZ source with `tilePixelRatio=2` so QGIS treats those tiles as true high-DPI tiles instead of scaling them like standard `256px` tiles.
 
