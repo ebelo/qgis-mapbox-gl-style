@@ -49,7 +49,7 @@ class MapboxConfigTests(unittest.TestCase):
         )
         self.assertEqual(DEFAULT_MAPBOX_TILE_SIZE, 512)
         self.assertEqual(DEFAULT_MAPBOX_TILE_PIXEL_RATIO, 2)
-        self.assertTrue(DEFAULT_MAPBOX_RETINA)
+        self.assertFalse(DEFAULT_MAPBOX_RETINA)
         self.assertIn("styles/v1/my%20user/style%2Fid/tiles/512/{z}/{x}/{y}", url)
         self.assertIn("access_token=pk.test%20token", url)
         self.assertNotIn("@2x", url)
@@ -57,7 +57,10 @@ class MapboxConfigTests(unittest.TestCase):
     def test_xyz_uri_wraps_tiles_url(self):
         uri = build_xyz_layer_uri("pk.123", "mapbox", "outdoors-v12")
         self.assertTrue(uri.startswith("type=xyz&url=https://api.mapbox.com/"))
-        self.assertIn("tiles/512/{z}/{x}/{y}@2x", uri)
+        # 512px tiles without @2x suffix — the 512px size already provides retina
+        # density; @2x on top would over-request and cause blur via mis-scaled resampling.
+        self.assertIn("tiles/512/{z}/{x}/{y}", uri)
+        self.assertNotIn("@2x", uri)
         self.assertIn("zmin=0&zmax=22", uri)
         self.assertIn(f"tilePixelRatio={DEFAULT_MAPBOX_TILE_PIXEL_RATIO}", uri)
 

@@ -151,7 +151,7 @@ Configure these values in the dock when you want a background basemap:
 - for `Winter (custom style)` or `Custom`, qfit reveals the advanced style owner / style ID fields for your own Mapbox Studio style
 - click `Load basemap` when you want to add or refresh the basemap explicitly
 
-When qfit loads the background layer, it keeps it below the qfit activity layers in the QGIS layer tree so tracks, starts, and points render on top of the basemap. qfit requests Mapbox's higher-resolution style tiles by default (`512px` with retina `@2x`) and marks the XYZ source with `tilePixelRatio=2` so QGIS treats those tiles as true high-DPI tiles instead of scaling them like standard `256px` tiles.
+When qfit loads the background layer, it keeps it below the qfit activity layers in the QGIS layer tree so tracks, starts, and points render on top of the basemap. qfit requests Mapbox's `512px` style tiles (without the `@2x` suffix) and marks the XYZ source with `tilePixelRatio=2`. The `512px` tile size is already Mapbox's high-density format — adding `@2x` on top would request an even larger tile that QGIS cannot compensate for correctly, resulting in blurry resampled rendering. With `512px` + `tilePixelRatio=2`, QGIS treats the tiles as true high-DPI content and adjusts zoom selection accordingly, producing crisp rendering on both standard and high-DPI displays.
 
 The built-in presets intentionally keep the configuration small and predictable. The Winter slot is just a convenience label for a custom winter-themed style if you have one.
 
