@@ -62,7 +62,7 @@ Visible layers:
 
 - provider adapters for FIT / GPX / TCX imports
 - richer temporal styling / playback presets on top of the new QGIS temporal wiring
-- richer PDF atlas options: cover page, table of contents page, inline elevation profile charts
+- richer PDF atlas options: table of contents page, inline elevation profile charts
 - richer symbology and density workflows
 - better packaging and release automation
 - broader scripted integration coverage inside a real QGIS environment
@@ -88,18 +88,26 @@ Visible layers:
 - `qfit_cache.py` — local cache for detailed stream bundles
 - `publish_atlas.py` — atlas/page extent planning helpers for QGIS print layouts
 - `atlas_export_task.py` — QgsTask-based PDF atlas export (programmatic QgsPrintLayout + QgsLayoutExporter)
+- `atlas_export_controller.py` — atlas export orchestration extracted from the dock widget
+- `background_map_controller.py` — background map wiring and basemap orchestration
+- `contextual_help.py` — reusable contextual help entries for dock widget controls
+- `fetch_task.py` — QgsTask wrapper for background Strava fetching
+- `settings_service.py` — QGIS settings storage and retrieval
+- `sync_controller.py` — fetch/sync orchestration bridging the dock widget and Strava client
 - `scripts/install_plugin.py` — install qfit into a local QGIS profile for testing
 - `scripts/uninstall_plugin.py` — remove qfit from a local QGIS profile
+- `scripts/package_plugin.py` — build a release-style plugin archive
 - `docs/schema.md` — current schema design
 - `docs/strava-setup.md` — Strava setup and OAuth notes
 - `docs/qgis-testing.md` — local QGIS testing workflow
+- `docs/map-style-guide.md` — semantic color palette and basemap-aware style rules
 
 ## How the current workflow works
 
-The dock is now organized around the main qfit workflow:
+The dock is organized around the main qfit workflow. Orchestration is split across dedicated controllers: `SyncController` handles fetch/sync logic, `BackgroundMapController` manages basemap wiring, and `AtlasExportController` drives PDF atlas export — keeping the dock widget focused on UI wiring.
 
 1. **Connect** — enter your Strava app credentials and use the built-in OAuth helper if you still need a refresh token
-2. **Fetch activities** — choose paging limits and any activity filters you want to use for previewing; the fetch always performs a full sync, and date filters apply only to the preview and loaded layers
+2. **Fetch activities** — choose paging limits and any activity filters you want to use for previewing; the fetch runs in a background `QgsTask` via `StravaFetchTask` so the QGIS UI stays responsive; the fetch always performs a full sync, and date filters apply only to the preview and loaded layers
 3. Optionally enable detailed Strava track streams; qfit keeps the detailed-track limit hidden until that mode is turned on
 4. Click **Fetch activities** to preview what qfit will work with before anything is written to disk
 5. **Store data** — choose an output `.gpkg` file and optionally enable sampled `activity_points` generation for analysis
@@ -198,16 +206,21 @@ This writes a release-style archive to `dist/`.
 
 ## Testing
 
-qfit now includes a lightweight standard-library test suite for both the core,
-QGIS-independent modules and an optional headless PyQGIS smoke test.
+qfit includes a comprehensive test suite for all core, QGIS-independent modules and an optional headless PyQGIS smoke test.
 
-Run everything with:
+Run everything with pytest:
+
+```bash
+python3 -m pytest tests/ -x -q
+```
+
+Or with unittest discovery:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-Or run just the PyQGIS smoke test with:
+Run just the PyQGIS smoke test with:
 
 ```bash
 python3 -m unittest tests.test_qgis_smoke -v
@@ -217,7 +230,11 @@ On machines without PyQGIS installed, the smoke test is skipped automatically.
 
 The covered areas currently include:
 - activity querying, sorting, summary formatting, and layer subset expression helpers
+- filter parity between in-memory Python filtering and SQL subset string generation
 - atlas-page extent/label planning helpers for publish workflows
+- atlas export task orchestration and per-page filtering
+- atlas export controller orchestration
+- background map controller logic
 - headless PyQGIS smoke coverage for GeoPackage writing/loading, EPSG:3857 project wiring, temporal expressions, atlas-layer presence, and basemap ordering
 - temporal-playback field selection / expression helpers
 - polyline decoding
@@ -225,11 +242,15 @@ The covered areas currently include:
 - local stream-cache behavior
 - Mapbox background preset/config resolution
 - Strava normalization and helper logic
-- sync repository hashing, upserts, and reload behavior
+- sync repository hashing, upserts, reload behavior, and unchanged-row detection
+- fetch task success/error/cancellation handling
+- contextual help binding
+- settings service credential storage
+- narrowed exception handling verification
 
 ## Development notes
 
-This project is now beyond the original scaffold/MVP stage and is moving toward a proper sync-oriented QGIS plugin architecture.
+This project is beyond the original scaffold/MVP stage and uses a controller-based architecture: `SyncController`, `BackgroundMapController`, and `AtlasExportController` encapsulate orchestration logic that was previously embedded in the dock widget, keeping the UI layer thin and testable.
 
 ## License
 
