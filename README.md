@@ -233,4 +233,4 @@ This project is now beyond the original scaffold/MVP stage and is moving toward 
 
 ## License
 
-TBD
+GPL-2.0-or-later — see [LICENSE](LICENSE) for details.
