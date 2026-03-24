@@ -9,8 +9,7 @@ qfit is a QGIS plugin for importing and visualizing fitness activity data in a s
 The current implementation supports:
 - Strava API connection using `client_id`, `client_secret`, and `refresh_token`
 - a built-in OAuth helper to open the Strava authorize page and exchange an authorization code for a refresh token
-- downloading recent athlete activities from Strava
-- date-bounded fetches based on the selected filter window
+- downloading all athlete activities from Strava (full sync)
 - optional detailed Strava track streams for higher-fidelity geometries
 - local caching of detailed stream bundles to reduce repeated API calls
 - a simple Strava rate-limit guard for detailed-stream enrichment
@@ -100,7 +99,7 @@ Visible layers:
 The dock is now organized around the main qfit workflow:
 
 1. **Connect** — enter your Strava app credentials and use the built-in OAuth helper if you still need a refresh token
-2. **Fetch activities** — choose a date window, paging limits, and any activity filters you want to use for previewing
+2. **Fetch activities** — choose paging limits and any activity filters you want to use for previewing; the fetch always performs a full sync, and date filters apply only to the preview and loaded layers
 3. Optionally enable detailed Strava track streams; qfit keeps the detailed-track limit hidden until that mode is turned on
 4. Click **Fetch activities** to preview what qfit will work with before anything is written to disk
 5. **Store data** — choose an output `.gpkg` file and optionally enable sampled `activity_points` generation for analysis
