@@ -1,3 +1,5 @@
+import os
+
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import QAction
@@ -12,7 +14,8 @@ class QfitPlugin:
         self.dockwidget = None
 
     def initGui(self):
-        self.action = QAction(QIcon(), "qfit", self.iface.mainWindow())
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
+        self.action = QAction(QIcon(icon_path), "qfit", self.iface.mainWindow())
         self.action.triggered.connect(self.show_dock)
         self.iface.addToolBarIcon(self.action)
         self.iface.addPluginToMenu("&qfit", self.action)
