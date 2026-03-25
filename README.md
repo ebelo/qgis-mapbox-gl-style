@@ -196,13 +196,30 @@ See also:
 
 ## Packaging
 
-Build an installable plugin zip with:
+Build an installable plugin zip locally with:
 
 ```bash
 python3 scripts/package_plugin.py
 ```
 
 This writes a release-style archive to `dist/`.
+
+### Automated build artifacts
+
+qfit now also packages the plugin automatically on GitHub:
+
+- every push/merge to `main` runs the `build` workflow and uploads the plugin ZIP as a GitHub Actions artifact
+- every version tag matching `v*` runs the `release` workflow and publishes the plugin ZIP as a GitHub Release asset
+
+That gives two distribution paths:
+
+1. **Latest CI build**
+   - open the latest successful `build` workflow run on GitHub Actions
+   - download the `qfit-plugin` artifact
+
+2. **Versioned release build**
+   - create and push a tag like `v0.43.0`
+   - GitHub will create a release and attach the generated plugin ZIP automatically
 
 ## Testing
 
