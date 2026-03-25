@@ -1,0 +1,34 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build plugin ZIP
+        id: package
+        run: |
+          python scripts/package_plugin.py
+          echo "zip=$(ls dist/*.zip)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload plugin ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: qfit-plugin
+          path: ${{ steps.package.outputs.zip }}
+          if-no-files-found: error
