@@ -53,7 +53,7 @@ class QfitPlugin:
 
     def show_dock(self):
         if self.dockwidget is None:
-            self.dockwidget = QfitDockWidget(self.iface)
+            self.dockwidget = QfitDockWidget(self.iface, parent=self.iface.mainWindow())
             self.iface.addDockWidget(Qt.RightDockWidgetArea, self.dockwidget)
         self.dockwidget.show()
         self.dockwidget.raise_()
