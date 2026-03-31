@@ -20,6 +20,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install packaging dependencies
+        run: python -m pip install --upgrade pypdf
+
       - name: Build plugin ZIP
         id: package
         run: |

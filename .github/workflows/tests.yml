@@ -22,7 +22,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install test dependencies
-        run: python -m pip install --upgrade pyyaml
+        run: python -m pip install --upgrade pyyaml pypdf
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
