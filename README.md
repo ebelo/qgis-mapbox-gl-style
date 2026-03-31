@@ -107,6 +107,7 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `background_map_controller.py` — background map wiring and basemap orchestration
 - `contextual_help.py` — reusable contextual help entries for dock widget controls
 - `fetch_task.py` — QgsTask wrapper for background Strava fetching
+- `load_workflow.py` / `visual_apply.py` / `atlas/export_service.py` — workflow services with explicit request/result dataclasses to keep dock-widget calls structured during the architecture migration
 - `settings_port.py` — small application-facing settings access contract
 - `settings_service.py` — QGIS-backed settings adapter implementing that contract
 - `sync_controller.py` — fetch/sync orchestration bridging the dock widget and Strava client
