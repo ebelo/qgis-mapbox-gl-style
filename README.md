@@ -89,13 +89,13 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `qfit_dockwidget.py` — dock widget UI logic
 - `qfit_dockwidget_base.ui` — Qt Designer UI layout
 - `strava_client.py` — Strava authentication and activity retrieval
-- `models.py` — canonical activity model
+- `activities/domain/` — provider-neutral activity core (`models.py`, `activity_classification.py`, `activity_query.py`)
+- `models.py` / `activity_query.py` / `activity_classification.py` — compatibility import shims for the activity domain core
 - `polyline_utils.py` — encoded polyline decoding
 - `time_utils.py` — ISO timestamp parsing / offset helpers
 - `activity_storage.py` — small activity storage port plus the GeoPackage-backed adapter
 - `sync_repository.py` — GeoPackage registry persistence and sync metadata upserts
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs, depending on the storage port/adapter seam
-- `activity_query.py` — reusable activity filtering, sorting, summary, preview, and subset-expression helpers
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
 - `map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
