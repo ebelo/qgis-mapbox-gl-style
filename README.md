@@ -200,10 +200,14 @@ See also:
 Build an installable plugin zip locally with:
 
 ```bash
+python -m pip install pypdf
 python3 scripts/package_plugin.py
 ```
 
 This writes a release-style archive to `dist/`.
+
+The packager vendors the pure-Python `pypdf` runtime into the plugin ZIP so atlas
+PDF export stays self-contained on Linux, macOS, and Windows QGIS installs.
 
 ### Automated build artifacts
 
