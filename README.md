@@ -67,6 +67,20 @@ Visible layers:
 - better packaging and release automation
 - broader scripted integration coverage inside a real QGIS environment
 
+## Architecture
+
+qfit is being evolved as a **modular monolith** with pragmatic **ports-and-adapters** boundaries.
+
+In practice, that means:
+- keep qfit as one plugin/package
+- prefer feature/workflow ownership over a flat pile of technical modules
+- keep `QfitDockWidget` focused on UI glue
+- move orchestration into controllers/services/use cases
+- keep provider-neutral logic easier to test than QGIS-heavy adapters
+- introduce ports/gateways only when they clarify workflows or reduce coupling
+
+See `docs/architecture.md` for the contributor-facing boundary rules and placement guide.
+
 ## Plugin structure
 
 - `metadata.txt` — QGIS plugin metadata
@@ -225,6 +239,13 @@ That gives two distribution paths:
 2. **Versioned release build**
    - create and push a tag like `v0.43.0`
    - GitHub will create a release and attach the generated plugin ZIP automatically
+
+## Contributing and architecture
+
+If you are changing internals, read these first:
+
+- `CONTRIBUTING.md` — workflow, tests, SonarCloud, and PR quality gates
+- `docs/architecture.md` — intended module boundaries, dependency direction, and placement rules
 
 ## Testing
 
