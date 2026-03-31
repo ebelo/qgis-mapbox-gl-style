@@ -106,7 +106,8 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `background_map_controller.py` — background map wiring and basemap orchestration
 - `contextual_help.py` — reusable contextual help entries for dock widget controls
 - `fetch_task.py` — QgsTask wrapper for background Strava fetching
-- `settings_service.py` — QGIS settings storage and retrieval
+- `settings_port.py` — small application-facing settings access contract
+- `settings_service.py` — QGIS-backed settings adapter implementing that contract
 - `sync_controller.py` — fetch/sync orchestration bridging the dock widget and Strava client
 - `scripts/install_plugin.py` — install qfit into a local QGIS profile for testing
 - `scripts/uninstall_plugin.py` — remove qfit from a local QGIS profile
