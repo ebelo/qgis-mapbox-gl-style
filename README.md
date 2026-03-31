@@ -92,8 +92,9 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `models.py` — canonical activity model
 - `polyline_utils.py` — encoded polyline decoding
 - `time_utils.py` — ISO timestamp parsing / offset helpers
-- `sync_repository.py` — canonical GeoPackage registry + sync metadata upserts
-- `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs
+- `activity_storage.py` — small activity storage port plus the GeoPackage-backed adapter
+- `sync_repository.py` — GeoPackage registry persistence and sync metadata upserts
+- `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs, depending on the storage port/adapter seam
 - `activity_query.py` — reusable activity filtering, sorting, summary, preview, and subset-expression helpers
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
 - `map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
