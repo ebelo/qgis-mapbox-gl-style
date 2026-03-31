@@ -88,7 +88,9 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `qfit_plugin.py` — main plugin class
 - `qfit_dockwidget.py` — dock widget UI logic
 - `qfit_dockwidget_base.ui` — Qt Designer UI layout
-- `strava_client.py` — Strava authentication and activity retrieval
+- `providers/domain/` — provider-neutral provider contracts (`provider.py`)
+- `providers/infrastructure/` — provider adapters such as the Strava client/provider implementation
+- `provider.py` / `strava_client.py` / `strava_provider.py` — compatibility import shims for the provider feature package
 - `activities/domain/` — provider-neutral activity core (`models.py`, `activity_classification.py`, `activity_query.py`)
 - `models.py` / `activity_query.py` / `activity_classification.py` — compatibility import shims for the activity domain core
 - `polyline_utils.py` — encoded polyline decoding
