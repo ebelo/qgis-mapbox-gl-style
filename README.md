@@ -251,6 +251,7 @@ If you are changing internals, read these first:
 
 - `CONTRIBUTING.md` — workflow, tests, SonarCloud, and PR quality gates
 - `docs/architecture.md` — intended module boundaries, dependency direction, and placement rules
+- `docs/atlas-validation-harness.md` — supported atlas/export validation scenarios and artifact workflow
 
 ## Testing
 
