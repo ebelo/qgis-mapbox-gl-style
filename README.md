@@ -106,10 +106,12 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `publish_atlas.py` — atlas/page extent planning helpers for QGIS print layouts
 - `atlas_export_task.py` — QgsTask-based PDF atlas export (programmatic QgsPrintLayout + QgsLayoutExporter)
 - `atlas_export_controller.py` — atlas export orchestration extracted from the dock widget
-- `background_map_controller.py` — background map wiring and basemap orchestration
+- `visualization/application/background_map_controller.py` — background map wiring and basemap orchestration
+- `background_map_controller.py` — compatibility import shim for the visualization workflow package
 - `contextual_help.py` — reusable contextual help entries for dock widget controls
 - `fetch_task.py` — QgsTask wrapper for background Strava fetching
-- `load_workflow.py` / `visual_apply.py` / `atlas/export_service.py` — workflow services with explicit request/result dataclasses to keep dock-widget calls structured during the architecture migration
+- `activities/application/load_workflow.py` / `visualization/application/visual_apply.py` / `atlas/export_service.py` — workflow services with explicit request/result dataclasses to keep dock-widget calls structured during the architecture migration
+- `load_workflow.py` / `visual_apply.py` — compatibility import shims for migrated workflow modules
 - `settings_port.py` — small application-facing settings access contract
 - `settings_service.py` — QGIS-backed settings adapter implementing that contract
 - `sync_controller.py` — fetch/sync orchestration bridging the dock widget and Strava client
@@ -123,7 +125,7 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 
 ## How the current workflow works
 
-The dock is organized around the main qfit workflow. Orchestration is split across dedicated controllers: `SyncController` handles fetch/sync logic, `BackgroundMapController` manages basemap wiring, and `AtlasExportController` drives PDF atlas export — keeping the dock widget focused on UI wiring.
+The dock is organized around the main qfit workflow. Orchestration is split across dedicated controllers/services owned by feature packages: `SyncController` handles fetch/sync logic, `visualization.application.BackgroundMapController` manages basemap wiring, `visualization.application.VisualApplyService` applies styling/filter workflows, and `AtlasExportController` drives PDF atlas export — keeping the dock widget focused on UI wiring.
 
 1. **Connect** — enter your Strava app credentials and use the built-in OAuth helper if you still need a refresh token
 2. **Fetch activities** — choose paging limits and any activity filters you want to use for previewing; the fetch runs in a background `QgsTask` via `StravaFetchTask` so the QGIS UI stays responsive; the fetch always performs a full sync, and date filters apply only to the preview and loaded layers
