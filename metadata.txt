@@ -11,7 +11,6 @@ copyright=(C) Emmanuel Belo
 tracker=https://github.com/ebelo/qfit/issues
 repository=https://github.com/ebelo/qfit
 homepage=https://github.com/ebelo/qfit
-category=Plugins
 icon=icon.png
 experimental=True
 deprecated=False
