@@ -101,14 +101,13 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
 - `map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
-- `temporal_config.py` — reusable temporal-playback field selection and expression helpers
+- `visualization/application/temporal_config.py` — reusable temporal-playback field selection and expression helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
 - `publish_atlas.py` — atlas/page extent planning helpers for QGIS print layouts
 - `atlas_export_task.py` — QgsTask-based PDF atlas export (programmatic QgsPrintLayout + QgsLayoutExporter)
 - `atlas_export_controller.py` — atlas export orchestration extracted from the dock widget
 - `visualization/application/background_map_controller.py` — background map wiring and basemap orchestration
-- `background_map_controller.py` — compatibility import shim for the visualization workflow package
-- `contextual_help.py` — reusable contextual help entries for dock widget controls
+- `ui/contextual_help.py` — reusable contextual help entries for dock widget controls
 - `fetch_task.py` — QgsTask wrapper for background Strava fetching
 - `activities/application/load_workflow.py` / `visualization/application/visual_apply.py` / `atlas/export_service.py` — workflow services with explicit request/result dataclasses to keep dock-widget calls structured during the architecture migration
 - `load_workflow.py` / `visual_apply.py` — compatibility import shims for migrated workflow modules
