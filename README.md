@@ -99,7 +99,7 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `sync_repository.py` — GeoPackage registry persistence and sync metadata upserts
 - `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs, depending on the storage port/adapter seam
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
-- `map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
+- `visualization/map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
 - `visualization/application/temporal_config.py` — reusable temporal-playback field selection and expression helpers
 - `qfit_cache.py` — local cache for detailed stream bundles
