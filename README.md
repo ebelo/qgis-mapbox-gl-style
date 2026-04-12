@@ -108,7 +108,7 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `atlas_export_controller.py` — atlas export orchestration extracted from the dock widget
 - `visualization/application/background_map_controller.py` — background map wiring and basemap orchestration
 - `ui/contextual_help.py` — reusable contextual help entries for dock widget controls
-- `fetch_task.py` — QgsTask wrapper for background Strava fetching
+- `activities/application/fetch_task.py` — QgsTask wrapper for background Strava fetching
 - `activities/application/load_workflow.py` / `visualization/application/visual_apply.py` / `atlas/export_service.py` — workflow services with explicit request/result dataclasses to keep dock-widget calls structured during the architecture migration
 - `load_workflow.py` / `visual_apply.py` — compatibility import shims for migrated workflow modules
 - `settings_port.py` — small application-facing settings access contract
