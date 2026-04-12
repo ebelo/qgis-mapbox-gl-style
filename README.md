@@ -110,7 +110,6 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `ui/contextual_help.py` — reusable contextual help entries for dock widget controls
 - `activities/application/fetch_task.py` — QgsTask wrapper for background Strava fetching
 - `activities/application/load_workflow.py` / `visualization/application/visual_apply.py` / `atlas/export_service.py` — workflow services with explicit request/result dataclasses to keep dock-widget calls structured during the architecture migration
-- `visual_apply.py` — compatibility import shim for the migrated visualization workflow module
 - `configuration/application/settings_port.py` — small application-facing settings access contract
 - `configuration/application/settings_service.py` — QGIS-backed settings adapter implementing that contract
 - `activities/application/sync_controller.py` — fetch/sync orchestration bridging the dock widget and Strava client
