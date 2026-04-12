@@ -97,7 +97,7 @@ See `docs/architecture.md` for the contributor-facing boundary rules and placeme
 - `time_utils.py` — ISO timestamp parsing / offset helpers
 - `activity_storage.py` — small activity storage port plus the GeoPackage-backed adapter
 - `sync_repository.py` — GeoPackage registry persistence and sync metadata upserts
-- `gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs, depending on the storage port/adapter seam
+- `activities/infrastructure/geopackage/gpkg_writer.py` — derived GeoPackage layer rebuilds via QGIS APIs, depending on the storage port/adapter seam
 - `layer_manager.py` — layer loading, filtering, styling, and background-map wiring
 - `visualization/map_style.py` — semantic activity-color mapping and basemap-aware line-style rules
 - `mapbox_config.py` — background-map preset resolution and Mapbox XYZ URL helpers
