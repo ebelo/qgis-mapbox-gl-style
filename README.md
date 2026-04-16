@@ -4,6 +4,10 @@ Explore fitness activity data spatially in QGIS.
 
 qfit is a QGIS plugin that turns synced fitness activities into GeoPackage-backed layers, analysis views, and atlas-ready publish data for mapping and print workflows.
 
+![qfit screenshot in QGIS](docs/images/qfit-screenshot.png)
+
+*qfit in QGIS, showing synced activity tracks and points with the plugin dock open.*
+
 This README is split into two parts:
 
 1. **Part 1, for human readers** using qfit in QGIS
