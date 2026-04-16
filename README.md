@@ -167,7 +167,7 @@ The top-level Python module layer is now mostly limited to:
 
 - plugin/bootstrap entrypoints
 - a few small shared helpers such as `polyline_utils.py`, `time_utils.py`, `mapbox_config.py`, and `qfit_cache.py`
-- transitional compatibility shims such as `activity_query.py`, `activity_classification.py`, `models.py`, and other grandfathered modules that still exist only to cushion package migration
+- transitional compatibility shims such as `activity_query.py`, `activity_classification.py`, `models.py`, `activity_storage.py`, and `layer_manager.py` that still exist only to cushion package migration
 
 Rule of thumb:
 
