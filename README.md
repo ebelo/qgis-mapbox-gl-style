@@ -66,7 +66,7 @@ You need:
 - `client_secret`
 - `refresh_token`
 
-qfit includes a built-in OAuth helper for the refresh-token step.
+qfit includes a built-in OAuth helper in `qfit` → `Configuration` for the refresh-token step.
 
 See:
 - `docs/strava-setup.md`
