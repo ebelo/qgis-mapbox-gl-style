@@ -14,7 +14,18 @@ from importlib import metadata
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
-EXCLUDED_DIRS = {".git", ".github", "dist", "scripts", "docs", "__pycache__"}
+EXCLUDED_DIRS = {
+    ".git",
+    ".github",
+    ".pytest_cache",
+    "__pycache__",
+    "dist",
+    "docs",
+    "scripts",
+    "tests",
+    "validation",
+    "validation_artifacts",
+}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".zip"}
 EXCLUDED_FILES = {".coverage", ".gitignore", "sonar-project.properties", "symbology-style.db"}
 
