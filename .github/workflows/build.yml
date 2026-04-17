@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -29,9 +31,25 @@ jobs:
           python scripts/package_plugin.py
           echo "zip=$(ls dist/*.zip)" >> "$GITHUB_OUTPUT"
 
+      - name: Build artifact metadata
+        id: artifact
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "name=qfit-plugin-pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          elif [ "$REF_NAME" = "main" ]; then
+            echo "name=qfit-plugin-main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=qfit-plugin-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload plugin ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: qfit-plugin
+          name: ${{ steps.artifact.outputs.name }}
           path: ${{ steps.package.outputs.zip }}
           if-no-files-found: error
+          retention-days: 14

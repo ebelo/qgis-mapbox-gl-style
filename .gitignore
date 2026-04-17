@@ -14,5 +14,5 @@ coverage.xml
 
 symbology-style.db
 
-# Debug / test material — drop files here freely, never committed
+# Debug / test / local scan material, never committed
 debug/
