@@ -65,6 +65,11 @@ class QfitPlugin:
     def show_config(self):
         if self._config_dialog is None:
             self._config_dialog = QfitConfigDialog(parent=self.iface.mainWindow())
+            self._config_dialog.settingsSaved.connect(self._refresh_dock_configuration)
         self._config_dialog.show()
         self._config_dialog.raise_()
         self._config_dialog.activateWindow()
+
+    def _refresh_dock_configuration(self) -> None:
+        if self.dockwidget is not None:
+            self.dockwidget.refresh_configuration_from_settings()
