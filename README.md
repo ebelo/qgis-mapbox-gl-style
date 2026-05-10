@@ -88,6 +88,7 @@ The current visualization flow supports:
 
 See:
 - `docs/map-style-guide.md`
+- `docs/mapbox-outdoors-comparison-harness.md` for manual Mapbox Outdoors browser-vs-QGIS parity checks
 
 ### Publish and atlas support
 
@@ -109,6 +110,7 @@ For validation notes and rendering-sensitive workflow details, see:
 - `docs/strava-setup.md`
 - `docs/schema.md`
 - `docs/map-style-guide.md`
+- `docs/mapbox-outdoors-comparison-harness.md`
 - `docs/qgis-testing.md`
 
 ---
@@ -124,7 +126,8 @@ If you are changing internals, start here:
 - `docs/qgis-plugin-architecture-principles.md`
 - `docs/refactoring-roadmap.md`
 - `docs/qgis-testing.md`
-- `docs/atlas-validation-harness.md` for rendering/export-sensitive work
+- `docs/atlas-validation-harness.md` for atlas rendering/export-sensitive work
+- `docs/mapbox-outdoors-comparison-harness.md` for manual Mapbox Outdoors browser-vs-QGIS visual comparison work
 
 ### Current architecture snapshot
 
