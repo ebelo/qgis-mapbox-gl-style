@@ -223,20 +223,95 @@ def fetch_mapbox_style_definition(
         return json.loads(response.read().decode("utf-8"))
 
 
+_REPRESENTATIVE_STYLE_ZOOM = 12.0
+
+
+def _is_literal_color(value: object) -> bool:
+    return isinstance(value, str) and (
+        value.startswith("hsl") or value.startswith("#") or value.startswith("rgb")
+    )
+
+
+def _zoom_stops(expr: list[object]) -> list[tuple[float, object]]:
+    """Return ``(zoom, value)`` pairs for zoom-based Mapbox expressions."""
+    if len(expr) < 5 or expr[2] != ["zoom"]:
+        return []
+    stops: list[tuple[float, object]] = []
+    for index in range(3, len(expr) - 1, 2):
+        zoom = expr[index]
+        if isinstance(zoom, (int, float)):
+            stops.append((float(zoom), expr[index + 1]))
+    return stops
+
+
+def _nearest_zoom_stop_value(expr: list[object], target_zoom: float = _REPRESENTATIVE_STYLE_ZOOM) -> object | None:
+    stops = _zoom_stops(expr)
+    if not stops:
+        return None
+    return min(stops, key=lambda stop: abs(stop[0] - target_zoom))[1]
+
+
+def _nearest_interpolate_output_value(
+    expr: list[object],
+    target_stop: float = _REPRESENTATIVE_STYLE_ZOOM,
+) -> object | None:
+    """Return a representative output value from any Mapbox interpolate expression."""
+    if len(expr) < 5:
+        return None
+    stops: list[tuple[float, object]] = []
+    for index in range(3, len(expr) - 1, 2):
+        stop = expr[index]
+        if isinstance(stop, (int, float)):
+            stops.append((float(stop), expr[index + 1]))
+    if not stops:
+        return None
+    return min(stops, key=lambda stop: abs(stop[0] - target_stop))[1]
+
+
+def _step_zoom_value(expr: list[object], target_zoom: float = _REPRESENTATIVE_STYLE_ZOOM) -> object | None:
+    """Evaluate a simple ``['step', ['zoom'], ...]`` expression at target zoom."""
+    if len(expr) < 3 or expr[1] != ["zoom"]:
+        return None
+    value = expr[2]
+    for index in range(3, len(expr) - 1, 2):
+        threshold = expr[index]
+        if not isinstance(threshold, (int, float)):
+            continue
+        if target_zoom < float(threshold):
+            break
+        value = expr[index + 1]
+    return value
+
+
 def _extract_fallback_color(expr: object) -> str | None:
     """Recursively extract a sensible literal color from a Mapbox expression.
 
-    Mapbox uses `['match', field, val1, color1, ..., default_color]` and
-    `['interpolate', ..., zoom, color, ...]` expressions for dynamic colors.
-    QGIS' QgsMapBoxGlStyleConverter does not resolve data-driven expressions
-    and falls back to black.  We extract the *last literal color string* from
-    such expressions as a reasonable representative color.
+    Mapbox uses expressions for dynamic colors. QGIS'
+    ``QgsMapBoxGlStyleConverter`` can fall back to black when it cannot resolve
+    them, so we collapse unsupported expressions to representative colors.
+
+    For zoom expressions, choose the color closest to a mid-zoom instead of the
+    last/max-zoom stop. That produces a closer default for the city/regional
+    scales qfit usually displays while still avoiding converter black fallbacks.
     """
-    if isinstance(expr, str):
-        return expr if (expr.startswith("hsl") or expr.startswith("#") or expr.startswith("rgb")) else None
+    if _is_literal_color(expr):
+        return str(expr)
     if not isinstance(expr, list) or not expr:
         return None
-    # Walk backwards through list elements looking for the deepest literal
+
+    op = expr[0]
+    if op == "interpolate":
+        representative = _nearest_zoom_stop_value(expr)
+        color = _extract_fallback_color(representative)
+        if color is not None:
+            return color
+    if op == "step":
+        representative = _step_zoom_value(expr)
+        color = _extract_fallback_color(representative)
+        if color is not None:
+            return color
+
+    # Walk backwards through list elements looking for a data/default fallback.
     fallback: str | None = None
     for item in reversed(expr):
         color = _extract_fallback_color(item)
@@ -249,34 +324,30 @@ def _extract_fallback_color(expr: object) -> str | None:
 def _extract_midrange_size(expr: object) -> float | None:
     """Extract a reasonable representative size from a Mapbox size expression.
 
-    For zoom-interpolated sizes we try to pick the value at a mid-zoom (z12),
-    falling back to a modest literal. This avoids collapsing all text to the
-    extreme (first or last) zoom stop value.
+    For zoom-interpolated sizes we pick the value nearest a mid-zoom (z12),
+    falling back to a modest literal. This avoids collapsing all text and lines
+    to either the low-zoom or high-zoom extreme.
     """
     if isinstance(expr, (int, float)):
         return float(expr)
     if not isinstance(expr, list) or not expr:
         return None
     op = expr[0]
-    if op == "interpolate" and len(expr) >= 5:
-        # ['interpolate', interp_type, ['zoom'], z1, v1, z2, v2, ...]
-        # Try to find value at z12, else take median of numeric stops
-        stops_start = 3
-        stops = []
-        for i in range(stops_start, len(expr) - 1, 2):
-            z = expr[i]
-            v = expr[i + 1]
-            if isinstance(z, (int, float)):
-                v_scalar = _extract_midrange_size(v)
-                if v_scalar is not None:
-                    stops.append((z, v_scalar))
-        if stops:
-            # Return value nearest to z12
-            stops.sort(key=lambda s: abs(s[0] - 12))
-            return stops[0][1]
-    if op == "step" and len(expr) >= 3:
-        # ['step', input, default, threshold, value, ...]
-        default_val = _extract_midrange_size(expr[2])
+    if op == "interpolate":
+        representative = _nearest_zoom_stop_value(expr)
+        value = _extract_midrange_size(representative)
+        if value is not None:
+            return value
+        representative = _nearest_interpolate_output_value(expr)
+        value = _extract_midrange_size(representative)
+        if value is not None:
+            return value
+    if op == "step":
+        representative = _step_zoom_value(expr)
+        value = _extract_midrange_size(representative)
+        if value is not None:
+            return value
+        default_val = _extract_midrange_size(expr[2]) if len(expr) >= 3 else None
         if default_val is not None:
             return default_val
     # Recurse for nested expressions, take first reasonable scalar

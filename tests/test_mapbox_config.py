@@ -243,19 +243,41 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         # The last literal color in the match expression is the default
         self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(35, 89%, 75%)")
 
-    def test_interpolate_expression_resolved_to_last_color(self):
+    def test_interpolate_expression_resolved_to_representative_zoom_color(self):
         style = {
             "layers": [
                 {
                     "paint": {
-                        "line-color": ["interpolate", ["linear"], ["zoom"], 13, "hsl(75, 25%, 68%)", 16, "hsl(60, 0%, 75%)"]
+                        "line-color": ["interpolate", ["linear"], ["zoom"], 10, "hsl(75, 25%, 68%)", 16, "hsl(60, 0%, 75%)"]
                     },
                     "layout": {},
                 }
             ]
         }
         result = simplify_mapbox_style_expressions(style)
-        self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(60, 0%, 75%)")
+        self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(75, 25%, 68%)")
+
+    def test_step_zoom_expression_resolved_to_representative_zoom_color(self):
+        style = {
+            "layers": [
+                {
+                    "paint": {
+                        "line-color": [
+                            "step",
+                            ["zoom"],
+                            "hsl(40, 20%, 90%)",
+                            11,
+                            "hsl(45, 30%, 80%)",
+                            14,
+                            "hsl(50, 40%, 70%)",
+                        ]
+                    },
+                    "layout": {},
+                }
+            ]
+        }
+        result = simplify_mapbox_style_expressions(style)
+        self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(45, 30%, 80%)")
 
     def test_line_width_expressions_clamped_to_sane_range(self):
         style = {
@@ -278,6 +300,36 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertGreater(width, 0)
         # literal colors are untouched
         self.assertEqual(result["layers"][0]["paint"]["line-color"], "hsl(100, 50%, 60%)")
+
+    def test_line_width_expression_uses_representative_zoom_stop(self):
+        style = {
+            "layers": [
+                {
+                    "paint": {
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1, 12, 4, 18, 12]
+                    },
+                    "layout": {},
+                }
+            ]
+        }
+        result = simplify_mapbox_style_expressions(style)
+        width = result["layers"][0]["paint"]["line-width"]
+        self.assertAlmostEqual(width, 4 * 25.4 / 96.0)
+
+    def test_line_width_expression_uses_output_stop_for_property_interpolation(self):
+        style = {
+            "layers": [
+                {
+                    "paint": {
+                        "line-width": ["interpolate", ["linear"], ["get", "rank"], 0, 8, 10, 16]
+                    },
+                    "layout": {},
+                }
+            ]
+        }
+        result = simplify_mapbox_style_expressions(style)
+        width = result["layers"][0]["paint"]["line-width"]
+        self.assertEqual(width, 3.0)
 
     def test_original_style_not_mutated(self):
         expr = ["match", ["get", "class"], "motorway", "hsl(15, 100%, 75%)", "hsl(35, 89%, 75%)"]
