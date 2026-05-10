@@ -47,15 +47,63 @@ class MapboxComparisonCamera:
 
 
 CAMERAS: dict[str, MapboxComparisonCamera] = {
+    "switzerland-alps-z5-outdoors": MapboxComparisonCamera(
+        name="switzerland-alps-z5-outdoors",
+        description=(
+            "z5 broad Switzerland-Alps context for landcover, terrain/water balance, "
+            "major roads, and country-scale label density."
+        ),
+        longitude=8.20,
+        latitude=46.80,
+        zoom=5.35,
+        width=1280,
+        height=900,
+    ),
     "valais-geneva-outdoors": MapboxComparisonCamera(
         name="valais-geneva-outdoors",
         description=(
-            "Representative Mapbox Outdoors view spanning the Geneva/Valais corridor "
-            "used for qfit basemap parity checks."
+            "z7-z8 regional qfit map context spanning the Geneva/Valais corridor "
+            "for terrain/outdoor features, main roads, and settlement visibility."
         ),
         longitude=7.14,
         latitude=46.20,
         zoom=8.15,
+        width=1280,
+        height=900,
+    ),
+    "lausanne-lavaux-z10-outdoors": MapboxComparisonCamera(
+        name="lausanne-lavaux-z10-outdoors",
+        description=(
+            "z9-z11 primary qfit activity-area target around Lausanne/Lavaux for "
+            "road/trail hierarchy, labels, feature density, and color/width balance."
+        ),
+        longitude=6.72,
+        latitude=46.49,
+        zoom=10.25,
+        width=1280,
+        height=900,
+    ),
+    "chamonix-trails-z14-outdoors": MapboxComparisonCamera(
+        name="chamonix-trails-z14-outdoors",
+        description=(
+            "z13-z14 local outdoor detail around Chamonix for paths/trails, minor "
+            "roads, POIs, and label emphasis."
+        ),
+        longitude=6.868,
+        latitude=45.923,
+        zoom=13.75,
+        width=1280,
+        height=900,
+    ),
+    "zermatt-trails-z18-outdoors": MapboxComparisonCamera(
+        name="zermatt-trails-z18-outdoors",
+        description=(
+            "z18 street/trail-level stress test around Zermatt for casing, widths, "
+            "local labels, POIs, and high-detail symbol behavior."
+        ),
+        longitude=7.748,
+        latitude=46.020,
+        zoom=18.0,
         width=1280,
         height=900,
     ),

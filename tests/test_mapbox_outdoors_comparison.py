@@ -52,6 +52,17 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertIn("valais-geneva-outdoors", text)
         self.assertIn("mapbox/outdoors-v12", text)
 
+    def test_camera_matrix_covers_required_mapbox_outdoors_zoom_bands(self):
+        self.assertTrue(5.0 <= CAMERAS["switzerland-alps-z5-outdoors"].zoom <= 5.5)
+        self.assertTrue(7.0 <= CAMERAS["valais-geneva-outdoors"].zoom <= 8.5)
+        self.assertTrue(9.0 <= CAMERAS["lausanne-lavaux-z10-outdoors"].zoom <= 11.0)
+        self.assertTrue(13.0 <= CAMERAS["chamonix-trails-z14-outdoors"].zoom <= 14.5)
+        self.assertGreaterEqual(CAMERAS["zermatt-trails-z18-outdoors"].zoom, 18.0)
+
+        listed = list_cameras()
+        for camera_name in CAMERAS:
+            self.assertIn(camera_name, listed)
+
     def test_build_run_directory_uses_timestamped_debug_layout(self):
         run_dir = build_run_directory(
             output_root=Path("/tmp/qfit-mapbox"),

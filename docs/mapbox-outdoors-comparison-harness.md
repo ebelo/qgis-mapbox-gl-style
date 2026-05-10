@@ -28,9 +28,15 @@ List supported cameras:
 python3 validation/mapbox_outdoors_comparison.py --list-cameras
 ```
 
-Current camera:
+Recommended z5-z18 inspection matrix:
 
-- `valais-geneva-outdoors` — representative Geneva/Valais corridor view using `mapbox/outdoors-v12`
+| Camera | Band | Purpose |
+| --- | --- | --- |
+| `switzerland-alps-z5-outdoors` | z5 | Country-wide Switzerland/Alps context: landcover, terrain/water balance, major roads, label density. |
+| `valais-geneva-outdoors` | z7-z8 | Regional qfit map context: terrain/outdoor features, main road hierarchy, settlement visibility. |
+| `lausanne-lavaux-z10-outdoors` | z9-z11 | Primary qfit activity-area target: road/trail hierarchy, labels, feature density, color/width balance. |
+| `chamonix-trails-z14-outdoors` | z13-z14 | Local outdoor detail: paths/trails, minor roads, POIs, label emphasis. |
+| `zermatt-trails-z18-outdoors` | z18 | Street/trail-level stress test: casing, widths, local labels, POIs, high-detail symbols. |
 
 ## Required local tools
 
@@ -58,6 +64,20 @@ python3 validation/mapbox_outdoors_comparison.py valais-geneva-outdoors
 ```
 
 The command prints only artifact paths. It does not print the token, and `manifest.json` intentionally excludes token values. The QGIS capture builds a temporary vector-tile layer for rendering and does not clear the active QGIS project.
+
+To refresh the full inspection matrix manually, run each listed camera and compare the generated run directories:
+
+```bash
+for camera in \
+  switzerland-alps-z5-outdoors \
+  valais-geneva-outdoors \
+  lausanne-lavaux-z10-outdoors \
+  chamonix-trails-z14-outdoors \
+  zermatt-trails-z18-outdoors
+do
+  python3 validation/mapbox_outdoors_comparison.py "$camera"
+done
+```
 
 ## Partial captures
 
