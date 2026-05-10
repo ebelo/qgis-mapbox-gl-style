@@ -79,6 +79,8 @@ See:
 
 qfit can load an optional Mapbox basemap and keep it below the qfit layers in the QGIS layer tree.
 
+For Mapbox basemaps, raster mode is the recommended choice when you need the closest visual match to Mapbox's own rendering. Vector mode is rendered natively by QGIS and should be treated as a practical local approximation: it can be more interactive and inspectable inside QGIS, but fonts, labels, sprites, antialiasing, and zoom interpolation will not be pixel-identical to Mapbox GL JS.
+
 The current visualization flow supports:
 
 - semantic activity styling by activity type
