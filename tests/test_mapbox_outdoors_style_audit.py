@@ -44,9 +44,20 @@ SAMPLE_STYLE = {
             "minzoom": 5,
             "paint": {
                 "line-color": ["match", ["get", "class"], "primary", "#ffffff", "#cccccc"],
+                "line-dasharray": [3, 3],
                 "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1, 12, 6],
             },
             "layout": {"line-cap": "round"},
+        },
+        {
+            "id": "road-path",
+            "type": "line",
+            "source": "composite",
+            "source-layer": "road",
+            "paint": {
+                "line-dasharray": ["step", ["zoom"], ["literal", [3, 3]], 12, ["literal", [4, 4]]],
+            },
+            "layout": {},
         },
         {
             "id": "poi-label",
@@ -107,7 +118,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
 
         self.assertEqual(audit["style"]["label"], "mapbox/outdoors-v12")
-        self.assertEqual(audit["layer_count"], 4)
+        self.assertEqual(audit["layer_count"], 5)
 
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(layers["background"]["group"], "background")
@@ -118,7 +129,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         road_simplified = {change["property"] for change in layers["road-primary"]["qfit_simplifies"]}
         self.assertIn("paint.line-color", road_simplified)
         self.assertIn("paint.line-width", road_simplified)
+        self.assertIn("paint.line-dasharray", layers["road-primary"]["qfit_preserves"])
         self.assertIn("layout.line-cap", layers["road-primary"]["qfit_preserves"])
+        road_unresolved = {item["property"] for item in layers["road-primary"]["qfit_unresolved"]}
+        self.assertNotIn("paint.line-dasharray", road_unresolved)
+
+        path_unresolved = {item["property"] for item in layers["road-path"]["qfit_unresolved"]}
+        self.assertIn("paint.line-dasharray", path_unresolved)
 
         poi_simplified = {change["property"] for change in layers["poi-label"]["qfit_simplifies"]}
         self.assertIn("layout.text-field", poi_simplified)
@@ -153,7 +170,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         rendered = render_audit(audit, output_format="json")
 
         decoded = json.loads(rendered)
-        self.assertEqual(decoded["layer_count"], 4)
+        self.assertEqual(decoded["layer_count"], 5)
         self.assertEqual(decoded["layers"][0]["id"], "background")
 
     def test_load_style_definition_requires_json_object(self):
