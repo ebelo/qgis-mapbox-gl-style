@@ -1,8 +1,11 @@
 import datetime as dt
 import json
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 from tests import _path  # noqa: F401
@@ -91,6 +94,53 @@ SAMPLE_STYLE = {
 }
 
 
+def _fake_qgis_modules(warning_sets, *, existing_app=None):
+    qgis_module = ModuleType("qgis")
+    qgis_core = ModuleType("qgis.core")
+
+    class FakeQgsApplication:
+        current_instance = existing_app
+        created = []
+
+        def __init__(self, args, gui_enabled):
+            self.args = args
+            self.gui_enabled = gui_enabled
+            self.init_qgis_calls = 0
+            self.exit_qgis_calls = 0
+            FakeQgsApplication.current_instance = self
+            FakeQgsApplication.created.append(self)
+
+        @classmethod
+        def instance(cls):
+            return cls.current_instance
+
+        def initQgis(self):
+            self.init_qgis_calls += 1
+
+        def exitQgis(self):
+            self.exit_qgis_calls += 1
+            FakeQgsApplication.current_instance = None
+
+    class FakeQgsMapBoxGlStyleConverter:
+        converted_styles = []
+        created_count = 0
+
+        def __init__(self):
+            self.index = FakeQgsMapBoxGlStyleConverter.created_count
+            FakeQgsMapBoxGlStyleConverter.created_count += 1
+
+        def convert(self, style_definition):
+            FakeQgsMapBoxGlStyleConverter.converted_styles.append(style_definition)
+
+        def warnings(self):
+            return warning_sets[self.index]
+
+    qgis_core.QgsApplication = FakeQgsApplication
+    qgis_core.QgsMapBoxGlStyleConverter = FakeQgsMapBoxGlStyleConverter
+    qgis_module.core = qgis_core
+    return qgis_module, qgis_core, FakeQgsApplication, FakeQgsMapBoxGlStyleConverter
+
+
 class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
     def test_resolve_token_prefers_argument_then_environment(self):
         self.assertEqual(
@@ -169,6 +219,104 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(hidden_changes["layout.visibility"]["to"], '"none"')
         self.assertEqual(hidden_layer["qfit_unresolved"], [])
 
+    def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
+        warning_report = {
+            "raw": {"count": 3},
+            "qfit_preprocessed": {
+                "count": 2,
+                "by_message": [{"message": "Skipping unsupported expression", "count": 2}],
+                "by_layer": [{"layer": "poi-label", "count": 2}],
+            },
+            "warning_count_delta": 1,
+        }
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_qgis_converter_warning_report",
+            return_value=warning_report,
+        ) as report_mock:
+            audit = build_style_audit(
+                SAMPLE_STYLE,
+                config=StyleAuditConfig(include_qgis_converter_warnings=True),
+            )
+
+        self.assertEqual(audit["qgis_converter_warnings"], warning_report)
+        report_mock.assert_called_once()
+        self.assertIs(report_mock.call_args.kwargs["raw_style"], SAMPLE_STYLE)
+        self.assertIsInstance(report_mock.call_args.kwargs["qfit_preprocessed_style"], dict)
+
+    def test_qgis_warning_summary_counts_by_message_and_layer(self):
+        summary = mapbox_outdoors_style_audit._qgis_warning_summary(
+            [
+                "road-primary: Skipping unsupported expression",
+                "poi-label: Skipping unsupported expression",
+                "poi-label: Referenced font DIN Pro Medium is not available on system",
+                "Could not find sprite image",
+            ]
+        )
+
+        self.assertEqual(summary["count"], 4)
+        self.assertEqual(
+            summary["by_message"],
+            [
+                {"message": "Skipping unsupported expression", "count": 2},
+                {"message": "Could not find sprite image", "count": 1},
+                {"message": "Referenced font DIN Pro Medium is not available on system", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            summary["by_layer"],
+            [
+                {"layer": "poi-label", "count": 2},
+                {"layer": "road-primary", "count": 1},
+            ],
+        )
+
+    def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
+        raw_style = {"layers": []}
+        qfit_style = {"layers": [{"id": "poi-label"}]}
+        fake_qgis, fake_core, fake_app, fake_converter = _fake_qgis_modules(
+            [
+                ["road-primary: Skipping unsupported expression"],
+                ["poi-label: Referenced font DIN Pro Medium is not available on system"],
+            ]
+        )
+
+        with patch.dict(sys.modules, {"qgis": fake_qgis, "qgis.core": fake_core}), patch.dict(
+            os.environ, {}, clear=False
+        ):
+            os.environ.pop("QT_QPA_PLATFORM", None)
+            report = mapbox_outdoors_style_audit._qgis_converter_warning_report(
+                raw_style=raw_style,
+                qfit_preprocessed_style=qfit_style,
+            )
+
+        self.assertEqual(report["raw"]["count"], 1)
+        self.assertEqual(report["qfit_preprocessed"]["count"], 1)
+        self.assertEqual(report["warning_count_delta"], 0)
+        self.assertEqual(fake_converter.converted_styles, [raw_style, qfit_style])
+        self.assertEqual(len(fake_app.created), 1)
+        self.assertEqual(fake_app.created[0].args, [])
+        self.assertFalse(fake_app.created[0].gui_enabled)
+        self.assertEqual(fake_app.created[0].init_qgis_calls, 1)
+        self.assertEqual(fake_app.created[0].exit_qgis_calls, 1)
+
+    def test_qgis_converter_warning_report_reuses_existing_qgis_app(self):
+        existing_app = object()
+        fake_qgis, fake_core, fake_app, _fake_converter = _fake_qgis_modules(
+            [["raw warning"], ["qfit warning"]],
+            existing_app=existing_app,
+        )
+
+        with patch.dict(sys.modules, {"qgis": fake_qgis, "qgis.core": fake_core}):
+            report = mapbox_outdoors_style_audit._qgis_converter_warning_report(
+                raw_style={"layers": []},
+                qfit_preprocessed_style={"layers": []},
+            )
+
+        self.assertEqual(report["raw"]["warnings"], ["raw warning"])
+        self.assertEqual(report["qfit_preprocessed"]["warnings"], ["qfit warning"])
+        self.assertEqual(fake_app.created, [])
+
     def test_markdown_summarizes_source_filter_preserved_and_unresolved_cues(self):
         audit = build_style_audit(SAMPLE_STYLE)
         markdown = build_audit_markdown(audit)
@@ -185,6 +333,26 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("`paint.line-width`", markdown)
         self.assertIn("`layout.icon-image`", markdown)
         self.assertIn("Mapbox sprite references", markdown)
+
+    def test_markdown_can_include_qgis_converter_warning_summary(self):
+        audit = build_style_audit(SAMPLE_STYLE)
+        audit["qgis_converter_warnings"] = {
+            "raw": {"count": 3},
+            "qfit_preprocessed": {
+                "count": 2,
+                "by_message": [{"message": "Skipping unsupported expression", "count": 2}],
+                "by_layer": [{"layer": "poi-label", "count": 2}],
+            },
+            "warning_count_delta": 1,
+        }
+
+        markdown = build_audit_markdown(audit)
+
+        self.assertIn("### QGIS converter warnings", markdown)
+        self.assertIn("Raw style warnings: 3", markdown)
+        self.assertIn("After qfit preprocessing: 2", markdown)
+        self.assertIn("| `Skipping unsupported expression` | 2 |", markdown)
+        self.assertIn("| `poi-label` | 2 |", markdown)
 
     def test_render_json_returns_machine_readable_audit(self):
         audit = build_style_audit(SAMPLE_STYLE)
@@ -223,10 +391,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             print_mock.assert_called_once_with(output_path)
 
     def test_parser_exposes_json_and_style_json_options(self):
-        args = build_parser().parse_args(["--style-json", "style.json", "--format", "json"])
+        args = build_parser().parse_args(
+            ["--style-json", "style.json", "--format", "json", "--include-qgis-converter-warnings"]
+        )
 
         self.assertEqual(args.style_json, Path("style.json"))
         self.assertEqual(args.format, "json")
+        self.assertTrue(args.include_qgis_converter_warnings)
 
 
 if __name__ == "__main__":

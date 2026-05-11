@@ -54,6 +54,7 @@ class StyleAuditConfig:
     style_owner: str = DEFAULT_MAPBOX_STYLE_OWNER
     style_id: str = DEFAULT_MAPBOX_STYLE_ID
     generated_at: dt.datetime | None = None
+    include_qgis_converter_warnings: bool = False
 
 
 def _utc_timestamp(now: dt.datetime | None = None) -> str:
@@ -273,6 +274,72 @@ def _property_count_summary(layers: list[dict[str, object]], key: str) -> list[d
     ]
 
 
+def _warning_count_summary(warnings: list[str], *, by_layer: bool) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for warning in warnings:
+        layer, separator, message = warning.partition(": ")
+        if not separator:
+            key = "" if by_layer else warning
+        elif by_layer:
+            key = layer
+        else:
+            key = message
+        if key:
+            counts[key] += 1
+    key_name = "layer" if by_layer else "message"
+    return [
+        {key_name: key, "count": count}
+        for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _qgis_warning_summary(warnings: list[str]) -> dict[str, object]:
+    return {
+        "count": len(warnings),
+        "by_message": _warning_count_summary(warnings, by_layer=False),
+        "by_layer": _warning_count_summary(warnings, by_layer=True),
+        "warnings": warnings,
+    }
+
+
+def _collect_qgis_converter_warnings(style_definition: dict[str, object]) -> list[str]:
+    from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
+
+    converter = QgsMapBoxGlStyleConverter()
+    converter.convert(style_definition)
+    return list(converter.warnings())
+
+
+def _qgis_converter_warning_report(
+    *,
+    raw_style: dict[str, object],
+    qfit_preprocessed_style: dict[str, object],
+) -> dict[str, object]:
+    # Converter-only audits do not render, but headless environments can still abort when Qt
+    # defaults to xcb. Prefer offscreen unless the caller explicitly chose another platform.
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from qgis.core import QgsApplication  # noqa: PLC0415
+
+    app = QgsApplication.instance()
+    created_app = False
+    if app is None:
+        app = QgsApplication([], False)
+        app.initQgis()
+        created_app = True
+
+    try:
+        raw_warnings = _collect_qgis_converter_warnings(raw_style)
+        qfit_warnings = _collect_qgis_converter_warnings(qfit_preprocessed_style)
+    finally:
+        if created_app:
+            app.exitQgis()
+    return {
+        "raw": _qgis_warning_summary(raw_warnings),
+        "qfit_preprocessed": _qgis_warning_summary(qfit_warnings),
+        "warning_count_delta": len(raw_warnings) - len(qfit_warnings),
+    }
+
+
 def build_style_audit(
     style_definition: dict[str, object],
     *,
@@ -292,7 +359,7 @@ def build_style_audit(
         if isinstance(layer, dict)
     ]
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
-    return {
+    audit = {
         "style": {
             "owner": resolved_config.style_owner,
             "id": resolved_config.style_id,
@@ -306,6 +373,12 @@ def build_style_audit(
         },
         "layers": layers,
     }
+    if resolved_config.include_qgis_converter_warnings:
+        audit["qgis_converter_warnings"] = _qgis_converter_warning_report(
+            raw_style=style_definition,
+            qfit_preprocessed_style=simplified_style,
+        )
+    return audit
 
 
 def _markdown_list(items: list[str], *, empty: str = "—") -> str:
@@ -340,6 +413,44 @@ def _markdown_count_table(items: list[dict[str, object]], *, empty: str = "—")
     return lines
 
 
+def _markdown_named_count_table(
+    items: list[dict[str, object]],
+    *,
+    key: str,
+    label: str,
+    empty: str = "—",
+) -> list[str]:
+    if not items:
+        return [empty, ""]
+    lines = [f"| {label} | Count |", "| --- | ---: |"]
+    for item in items:
+        lines.append(f"| `{item.get(key, '')}` | {item.get('count', 0)} |")
+    lines.append("")
+    return lines
+
+
+def _markdown_qgis_converter_warnings(report: object) -> list[str]:
+    if not isinstance(report, dict):
+        return []
+    raw = report.get("raw") if isinstance(report.get("raw"), dict) else {}
+    qfit = report.get("qfit_preprocessed") if isinstance(report.get("qfit_preprocessed"), dict) else {}
+    lines = [
+        "### QGIS converter warnings",
+        "",
+        f"Raw style warnings: {raw.get('count', 0)}",
+        f"After qfit preprocessing: {qfit.get('count', 0)}",
+        f"Warning count delta: {report.get('warning_count_delta', 0)}",
+        "",
+        "#### Remaining warnings by message",
+        "",
+        *_markdown_named_count_table(list(qfit.get("by_message") or []), key="message", label="Message"),
+        "#### Remaining warnings by layer",
+        "",
+        *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
+    ]
+    return lines
+
+
 def build_audit_markdown(audit: dict[str, object]) -> str:
     style = audit["style"] if isinstance(audit.get("style"), dict) else {}
     layers = audit.get("layers") if isinstance(audit.get("layers"), list) else []
@@ -361,6 +472,7 @@ def build_audit_markdown(audit: dict[str, object]) -> str:
         "### QGIS-dependent / unresolved",
         "",
         *_markdown_count_table(list(summary.get("qfit_unresolved_by_property") or [])),
+        *_markdown_qgis_converter_warnings(audit.get("qgis_converter_warnings")),
         "## Layers",
         "",
         "| Layer | Group | Source/filter | Zoom | Preserved | Simplified/substituted by qfit | QGIS-dependent / unresolved |",
@@ -446,6 +558,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="markdown",
         help="Audit output format. Defaults to markdown.",
     )
+    parser.add_argument(
+        "--include-qgis-converter-warnings",
+        action="store_true",
+        help=(
+            "Also run QGIS' Mapbox GL style converter on the raw and qfit-preprocessed "
+            "style to summarize native conversion warnings. Requires PyQGIS."
+        ),
+    )
     return parser
 
 
@@ -461,7 +581,11 @@ def main(argv: list[str] | None = None) -> int:
 
     audit = build_style_audit(
         style_definition,
-        config=StyleAuditConfig(style_owner=args.style_owner, style_id=args.style_id),
+        config=StyleAuditConfig(
+            style_owner=args.style_owner,
+            style_id=args.style_id,
+            include_qgis_converter_warnings=args.include_qgis_converter_warnings,
+        ),
     )
     content = render_audit(audit, output_format=args.format)
     output_path = write_audit(content, output_format=args.format)

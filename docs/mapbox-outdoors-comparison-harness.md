@@ -137,6 +137,17 @@ debug/mapbox-outdoors-style-audit/<style>/<UTC timestamp>/audit.md
 
 The audit summarizes each relevant style layer's source layer, filter, zoom band, paint/layout symbology, properties qfit preserves, properties qfit simplifies or substitutes before handing the style to QGIS, and cues that remain QGIS-dependent such as sprites, patterns, fonts, or still-live expressions.
 
+When PyQGIS is available, include QGIS' native Mapbox GL converter warnings to compare the raw Mapbox style with qfit's preprocessed style and see which warnings remain after qfit simplification:
+
+```bash
+QT_QPA_PLATFORM=offscreen \
+python3 validation/mapbox_outdoors_style_audit.py \
+  --format json \
+  --include-qgis-converter-warnings
+```
+
+This optional probe does not render screenshots. It records converter warning counts and warning summaries in the audit artifact so the next #949 slice can target issues QGIS itself reports, not just qfit's static style-expression audit.
+
 Use the audit together with the screenshot harness: first identify high-signal gaps visually, then check the corresponding style layers to decide the smallest safe qfit preprocessing improvement.
 
 ## PR notes
