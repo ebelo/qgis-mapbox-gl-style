@@ -180,6 +180,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(simplified_counts["layout.text-field"], 2)
         self.assertEqual(simplified_counts["paint.line-width"], 1)
         self.assertEqual(simplified_counts["layout.visibility"], 1)
+        self.assertEqual(unresolved_counts["filter"], 1)
         self.assertEqual(unresolved_counts["layout.icon-image"], 1)
         self.assertEqual(unresolved_counts["paint.line-dasharray"], 1)
 
@@ -208,9 +209,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("layout.text-offset", layers["poi-label"]["qfit_preserves"])
 
         unresolved = {item["property"]: item["reason"] for item in layers["poi-label"]["qfit_unresolved"]}
+        self.assertIn("filter", unresolved)
         self.assertIn("layout.icon-image", unresolved)
         self.assertNotIn("layout.text-field", unresolved)
         self.assertNotIn("layout.text-offset", unresolved)
+        self.assertIn("filter expression", unresolved["filter"])
         self.assertIn("sprites", unresolved["layout.icon-image"])
 
         hidden_layer = layers["settlement-subdivision-label"]
@@ -346,6 +349,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("### Simplified/substituted by qfit", markdown)
         self.assertIn("| `paint.line-width` | 1 |", markdown)
         self.assertIn("### QGIS-dependent / unresolved", markdown)
+        self.assertIn("| `filter` | 1 |", markdown)
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
         self.assertIn("## Layers", markdown)
         self.assertIn("composite / road", markdown)

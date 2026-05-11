@@ -212,6 +212,15 @@ def _unresolved_cues(layer: dict[str, object], simplified_layer: dict[str, objec
 
     unresolved: list[dict[str, str]] = []
     comparison_layer = simplified_layer or layer
+    filter_value = comparison_layer.get("filter")
+    if isinstance(filter_value, list):
+        unresolved.append(
+            {
+                "property": "filter",
+                "value": _compact_json(filter_value),
+                "reason": "Mapbox filter expression is still handed to QGIS after qfit simplification; verify native support visually.",
+            }
+        )
     for section, prop, value in _iter_symbology(comparison_layer):
         reason = _UNSUPPORTED_CUES.get((section, prop))
         if reason is not None:
