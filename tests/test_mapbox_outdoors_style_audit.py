@@ -177,9 +177,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         unresolved_counts = {
             item["property"]: item["count"] for item in summary["qfit_unresolved_by_property"]
         }
+        unresolved_group_counts = {
+            (item["group"], item["property"]): item["count"]
+            for item in summary["qfit_unresolved_by_layer_group_and_property"]
+        }
         operator_counts = {
             (item["property"], item["operator"]): item["count"]
             for item in summary["qfit_unresolved_expression_operators_by_property"]
+        }
+        operator_group_counts = {
+            (item["group"], item["property"], item["operator"]): item["count"]
+            for item in summary["qfit_unresolved_expression_operators_by_layer_group_and_property"]
         }
         self.assertEqual(simplified_counts["layout.text-field"], 2)
         self.assertEqual(simplified_counts["paint.line-width"], 1)
@@ -187,10 +195,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(unresolved_counts["filter"], 1)
         self.assertEqual(unresolved_counts["layout.icon-image"], 1)
         self.assertEqual(unresolved_counts["paint.line-dasharray"], 1)
+        self.assertEqual(unresolved_group_counts[("pois/labels", "filter")], 1)
+        self.assertEqual(unresolved_group_counts[("pois/labels", "layout.icon-image")], 1)
+        self.assertEqual(unresolved_group_counts[("roads/trails", "paint.line-dasharray")], 1)
         self.assertEqual(operator_counts[("filter", "==")], 1)
         self.assertEqual(operator_counts[("filter", "get")], 1)
         self.assertEqual(operator_counts[("layout.icon-image", "get")], 1)
         self.assertEqual(operator_counts[("paint.line-dasharray", "step")], 1)
+        self.assertEqual(operator_group_counts[("pois/labels", "filter", "==")], 1)
+        self.assertEqual(operator_group_counts[("pois/labels", "layout.icon-image", "get")], 1)
+        self.assertEqual(operator_group_counts[("roads/trails", "paint.line-dasharray", "step")], 1)
 
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(layers["background"]["group"], "background")
@@ -447,9 +461,15 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("### QGIS-dependent / unresolved", markdown)
         self.assertIn("| `filter` | 1 |", markdown)
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
+        self.assertIn("### QGIS-dependent / unresolved by layer group", markdown)
+        self.assertIn("| `pois/labels` | `filter` | 1 |", markdown)
+        self.assertIn("| `roads/trails` | `paint.line-dasharray` | 1 |", markdown)
         self.assertIn("### Unresolved expression operators", markdown)
         self.assertIn("| `filter` | `==` | 1 |", markdown)
         self.assertIn("| `paint.line-dasharray` | `step` | 1 |", markdown)
+        self.assertIn("### Unresolved expression operators by layer group", markdown)
+        self.assertIn("| `pois/labels` | `filter` | `==` | 1 |", markdown)
+        self.assertIn("| `roads/trails` | `paint.line-dasharray` | `step` | 1 |", markdown)
         self.assertIn("## Layers", markdown)
         self.assertIn("composite / road", markdown)
         self.assertIn("`paint.line-width`", markdown)
