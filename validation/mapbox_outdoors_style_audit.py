@@ -18,6 +18,7 @@ DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 _DEFAULT_OUTPUT_STYLE_SLUG = "mapbox-outdoors-v12"
 _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR = "| --- | --- | ---: |"
+_MARKDOWN_LAYER_GROUP_LABEL = "Layer group"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -636,6 +637,24 @@ def _annotate_qgis_warning_group_summaries(
             list(qfit_summary.get("by_layer_group") or []),
             key="group",
         )
+    filterless_probe = (
+        warning_report.get("without_filters_probe")
+        if isinstance(warning_report.get("without_filters_probe"), dict)
+        else {}
+    )
+    filterless_summary = (
+        filterless_probe.get("summary")
+        if isinstance(filterless_probe.get("summary"), dict)
+        else {}
+    )
+    _annotate_warning_summary_groups(filterless_summary, layer_groups)
+    reduced_from_qfit = filterless_probe.setdefault("reduced_from_qfit", {})
+    if isinstance(reduced_from_qfit, dict):
+        reduced_from_qfit["by_layer_group"] = _warning_reduction_summary(
+            list(qfit_summary.get("by_layer_group") or []),
+            list(filterless_summary.get("by_layer_group") or []),
+            key="group",
+        )
 
 
 def _annotate_layers_with_qgis_warnings(
@@ -696,6 +715,21 @@ def _qgis_warning_reduction_report(
     }
 
 
+def _style_without_filters(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
+    """Return a copy of a style with layer filters removed for converter diagnostics only."""
+    style_without_filters = copy.deepcopy(style_definition)
+    removed_count = 0
+    layers = style_without_filters.get("layers")
+    if not isinstance(layers, list):
+        return style_without_filters, removed_count
+    for layer in layers:
+        if not isinstance(layer, dict) or "filter" not in layer:
+            continue
+        layer.pop("filter")
+        removed_count += 1
+    return style_without_filters, removed_count
+
+
 def _collect_qgis_converter_warnings(style_definition: dict[str, object]) -> list[str]:
     from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
 
@@ -724,16 +758,25 @@ def _qgis_converter_warning_report(
     try:
         raw_warnings = _collect_qgis_converter_warnings(raw_style)
         qfit_warnings = _collect_qgis_converter_warnings(qfit_preprocessed_style)
+        filterless_style, filter_count_removed = _style_without_filters(qfit_preprocessed_style)
+        filterless_warnings = _collect_qgis_converter_warnings(filterless_style)
     finally:
         if created_app:
             app.exitQgis()
     raw_summary = _qgis_warning_summary(raw_warnings)
     qfit_summary = _qgis_warning_summary(qfit_warnings)
+    filterless_summary = _qgis_warning_summary(filterless_warnings)
     return {
         "raw": raw_summary,
         "qfit_preprocessed": qfit_summary,
         "warning_count_delta": len(raw_warnings) - len(qfit_warnings),
         "reduced_by_qfit": _qgis_warning_reduction_report(raw_summary, qfit_summary),
+        "without_filters_probe": {
+            "filter_count_removed": filter_count_removed,
+            "summary": filterless_summary,
+            "warning_count_delta_from_qfit": len(qfit_warnings) - len(filterless_warnings),
+            "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, filterless_summary),
+        },
     }
 
 
@@ -967,11 +1010,13 @@ def _markdown_warning_reduction_table(
     *,
     key: str,
     label: str,
+    before_label: str = "Raw",
+    after_label: str = "After qfit",
     empty: str = "—",
 ) -> list[str]:
     if not items:
         return [empty, ""]
-    lines = [f"| {label} | Raw | After qfit | Reduced |", "| --- | ---: | ---: | ---: |"]
+    lines = [f"| {label} | {before_label} | {after_label} | Reduced |", "| --- | ---: | ---: | ---: |"]
     for item in items:
         lines.append(
             "| `{name}` | {raw_count} | {qfit_count} | {reduced_count} |".format(
@@ -985,6 +1030,55 @@ def _markdown_warning_reduction_table(
     return lines
 
 
+def _markdown_filterless_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    lines = [
+        "#### Diagnostic filter-removal probe",
+        "",
+        "This is not a rendering-safe qfit preprocessing mode; filters control feature inclusion.",
+        "Use it only as an upper-bound signal for how much converter warning debt is tied to filters.",
+        "",
+        f"Filters removed in probe: {probe.get('filter_count_removed', 0)}",
+        f"Warnings after removing filters: {summary.get('count', 0)}",
+        f"Warning count delta from qfit preprocessing: {probe.get('warning_count_delta_from_qfit', 0)}",
+        "",
+    ]
+    by_message = list(reduced.get("by_message") or [])
+    by_group = list(reduced.get("by_layer_group") or [])
+    if by_message:
+        lines.extend(
+            [
+                "##### Probe reductions by message",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_message,
+                    key="message",
+                    label="Message",
+                    before_label="Before probe",
+                    after_label="Without filters",
+                ),
+            ]
+        )
+    if by_group:
+        lines.extend(
+            [
+                "##### Probe reductions by layer group",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_group,
+                    key="group",
+                    label=_MARKDOWN_LAYER_GROUP_LABEL,
+                    before_label="Before probe",
+                    after_label="Without filters",
+                ),
+            ]
+        )
+    return lines
+
+
 def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     if not isinstance(report, dict):
         return []
@@ -994,6 +1088,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     reduced_by_message = list(reduced.get("by_message") or [])
     reduced_by_layer = list(reduced.get("by_layer") or [])
     reduced_by_group = list(reduced.get("by_layer_group") or [])
+    filterless_probe = report.get("without_filters_probe")
     lines = [
         "### QGIS converter warnings",
         "",
@@ -1023,7 +1118,11 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             [
                 "#### Layer groups with fewer warnings after qfit preprocessing",
                 "",
-                *_markdown_warning_reduction_table(reduced_by_group, key="group", label="Layer group"),
+                *_markdown_warning_reduction_table(
+                    reduced_by_group,
+                    key="group",
+                    label=_MARKDOWN_LAYER_GROUP_LABEL,
+                ),
             ]
         )
     lines.extend(
@@ -1033,13 +1132,18 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             *_markdown_named_count_table(list(qfit.get("by_message") or []), key="message", label="Message"),
             "#### Remaining warnings by layer group",
             "",
-            *_markdown_named_count_table(list(qfit.get("by_layer_group") or []), key="group", label="Layer group"),
+            *_markdown_named_count_table(
+                list(qfit.get("by_layer_group") or []),
+                key="group",
+                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            ),
             "#### Remaining warnings by layer group and message",
             "",
             *_markdown_group_message_count_table(list(qfit.get("by_layer_group_and_message") or [])),
             "#### Remaining warnings by layer",
             "",
             *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
+            *_markdown_filterless_probe(filterless_probe),
         ]
     )
     return lines

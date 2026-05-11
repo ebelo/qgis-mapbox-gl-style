@@ -534,7 +534,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
 
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
-        qfit_style = {"layers": [{"id": "poi-label"}]}
+        qfit_style = {"layers": [{"id": "poi-label", "filter": ["==", ["get", "maki"], "park"]}]}
         fake_qgis, fake_core, fake_app, fake_converter = _fake_qgis_modules(
             [
                 [
@@ -542,6 +542,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     "poi-label: Skipping unsupported expression",
                 ],
                 ["poi-label: Skipping unsupported expression"],
+                [],
             ]
         )
 
@@ -557,6 +558,25 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["raw"]["count"], 2)
         self.assertEqual(report["qfit_preprocessed"]["count"], 1)
         self.assertEqual(report["warning_count_delta"], 1)
+        self.assertEqual(report["without_filters_probe"]["filter_count_removed"], 1)
+        self.assertEqual(report["without_filters_probe"]["summary"]["count"], 0)
+        self.assertEqual(report["without_filters_probe"]["warning_count_delta_from_qfit"], 1)
+        self.assertEqual(
+            report["without_filters_probe"]["reduced_from_qfit"],
+            {
+                "by_message": [
+                    {
+                        "message": "Skipping unsupported expression",
+                        "raw_count": 1,
+                        "qfit_count": 0,
+                        "reduced_count": 1,
+                    }
+                ],
+                "by_layer": [
+                    {"layer": "poi-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                ],
+            },
+        )
         self.assertEqual(
             report["reduced_by_qfit"],
             {
@@ -573,7 +593,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(fake_converter.converted_styles, [raw_style, qfit_style])
+        self.assertEqual(fake_converter.converted_styles[:2], [raw_style, qfit_style])
+        self.assertEqual(fake_converter.converted_styles[2], {"layers": [{"id": "poi-label"}]})
+        self.assertIn("filter", qfit_style["layers"][0])
         self.assertEqual(len(fake_app.created), 1)
         self.assertEqual(fake_app.created[0].args, [])
         self.assertFalse(fake_app.created[0].gui_enabled)
@@ -583,7 +605,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
     def test_qgis_converter_warning_report_reuses_existing_qgis_app(self):
         existing_app = object()
         fake_qgis, fake_core, fake_app, _fake_converter = _fake_qgis_modules(
-            [["raw warning"], ["qfit warning"]],
+            [["raw warning"], ["qfit warning"], ["filterless warning"]],
             existing_app=existing_app,
         )
 
@@ -595,6 +617,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
 
         self.assertEqual(report["raw"]["warnings"], ["raw warning"])
         self.assertEqual(report["qfit_preprocessed"]["warnings"], ["qfit warning"])
+        self.assertEqual(report["without_filters_probe"]["summary"]["warnings"], ["filterless warning"])
         self.assertEqual(fake_app.created, [])
 
     def test_markdown_summarizes_source_filter_preserved_and_unresolved_cues(self):
@@ -672,6 +695,24 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     {"group": "water", "raw_count": 4, "qfit_count": 0, "reduced_count": 4}
                 ],
             },
+            "without_filters_probe": {
+                "filter_count_removed": 1,
+                "summary": {"count": 1},
+                "warning_count_delta_from_qfit": 1,
+                "reduced_from_qfit": {
+                    "by_message": [
+                        {
+                            "message": "Skipping unsupported expression",
+                            "raw_count": 2,
+                            "qfit_count": 1,
+                            "reduced_count": 1,
+                        }
+                    ],
+                    "by_layer_group": [
+                        {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                    ],
+                },
+            },
         }
         layers = {layer["id"]: layer for layer in audit["layers"]}
         layers["poi-label"]["qgis_converter_warnings"] = {
@@ -706,6 +747,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertIn("| `pois/labels` | `Skipping unsupported expression` | 1 |", markdown)
         self.assertIn("| `poi-label` | 2 |", markdown)
+        self.assertIn("#### Diagnostic filter-removal probe", markdown)
+        self.assertIn("This is not a rendering-safe qfit preprocessing mode", markdown)
+        self.assertIn("Filters removed in probe: 1", markdown)
+        self.assertIn("Warnings after removing filters: 1", markdown)
+        self.assertIn("Warning count delta from qfit preprocessing: 1", markdown)
+        self.assertIn("##### Probe reductions by message", markdown)
+        self.assertIn("| Message | Before probe | Without filters | Reduced |", markdown)
+        self.assertIn("| `Skipping unsupported expression` | 2 | 1 | 1 |", markdown)
+        self.assertIn("##### Probe reductions by layer group", markdown)
+        self.assertIn("| Layer group | Before probe | Without filters | Reduced |", markdown)
+        self.assertIn("| `pois/labels` | 2 | 1 | 1 |", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 
