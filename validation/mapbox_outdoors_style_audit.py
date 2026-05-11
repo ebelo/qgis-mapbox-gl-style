@@ -470,6 +470,54 @@ def _expression_operator_group_count_summary(layers: list[dict[str, object]]) ->
     ]
 
 
+def _iter_filter_expression_signature_keys(
+    layers: list[dict[str, object]],
+) -> Iterable[tuple[str, tuple[str, ...], str]]:
+    for layer in layers:
+        group = str(layer.get("group") or "other")
+        layer_id = str(layer.get("id") or "")
+        unresolved = layer.get("qfit_unresolved")
+        if not isinstance(unresolved, list):
+            continue
+        for item in unresolved:
+            if not isinstance(item, dict) or item.get("property") != "filter":
+                continue
+            operators = tuple(str(operator) for operator in item.get("expression_operators") or [])
+            yield group, operators, layer_id
+
+
+def _record_filter_signature_example(
+    example_layers: dict[tuple[str, tuple[str, ...]], list[str]],
+    key: tuple[str, tuple[str, ...]],
+    layer_id: str,
+) -> None:
+    examples = example_layers.setdefault(key, [])
+    if layer_id and len(examples) < 5:
+        examples.append(layer_id)
+
+
+def _filter_expression_signature_group_summary(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    counts: Counter[tuple[str, tuple[str, ...]]] = Counter()
+    example_layers: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+    for group, operators, layer_id in _iter_filter_expression_signature_keys(layers):
+        key = (group, operators)
+        counts[key] += 1
+        _record_filter_signature_example(example_layers, key, layer_id)
+    return [
+        {
+            "group": group,
+            "operators": list(operators),
+            "operator_signature": ", ".join(operators) or "(none)",
+            "count": count,
+            "example_layers": example_layers[(group, operators)],
+        }
+        for (group, operators), count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0][0], ", ".join(item[0][1])),
+        )
+    ]
+
+
 def _warning_count_summary(warnings: list[str], *, by_layer: bool) -> list[dict[str, object]]:
     counts: Counter[str] = Counter()
     for warning in warnings:
@@ -727,6 +775,9 @@ def build_style_audit(
             "qfit_unresolved_expression_operators_by_layer_group_and_property": (
                 _expression_operator_group_count_summary(layers)
             ),
+            "qfit_unresolved_filter_expression_signatures_by_layer_group": (
+                _filter_expression_signature_group_summary(layers)
+            ),
         },
         "layers": layers,
     }
@@ -843,6 +894,32 @@ def _markdown_group_expression_operator_table(
                 property_name=item.get("property", ""),
                 operator=item.get("operator", ""),
                 count=item.get("count", 0),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_filter_signature_group_table(
+    items: list[dict[str, object]],
+    *,
+    empty: str = "—",
+) -> list[str]:
+    if not items:
+        return [empty, ""]
+    lines = [
+        "| Layer group | Operators | # Layers | Example layers |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for item in items:
+        example_layers = item.get("example_layers") if isinstance(item.get("example_layers"), list) else []
+        examples = ", ".join(f"`{layer_id}`" for layer_id in example_layers)
+        lines.append(
+            "| `{group}` | `{operators}` | {count} | {examples} |".format(
+                group=item.get("group", ""),
+                operators=item.get("operator_signature", ""),
+                count=item.get("count", 0),
+                examples=examples or "—",
             )
         )
     lines.append("")
@@ -990,6 +1067,11 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         "",
         *_markdown_group_expression_operator_table(
             list(summary.get("qfit_unresolved_expression_operators_by_layer_group_and_property") or [])
+        ),
+        "### Unresolved filter expression signatures by layer group",
+        "",
+        *_markdown_filter_signature_group_table(
+            list(summary.get("qfit_unresolved_filter_expression_signatures_by_layer_group") or [])
         ),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]

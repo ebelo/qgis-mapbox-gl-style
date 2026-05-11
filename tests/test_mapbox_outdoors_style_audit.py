@@ -189,6 +189,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             (item["group"], item["property"], item["operator"]): item["count"]
             for item in summary["qfit_unresolved_expression_operators_by_layer_group_and_property"]
         }
+        filter_signatures = {
+            (item["group"], item["operator_signature"]): item
+            for item in summary["qfit_unresolved_filter_expression_signatures_by_layer_group"]
+        }
         self.assertEqual(simplified_counts["layout.text-field"], 2)
         self.assertEqual(simplified_counts["paint.line-width"], 1)
         self.assertEqual(simplified_counts["layout.visibility"], 1)
@@ -205,6 +209,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(operator_group_counts[("pois/labels", "filter", "==")], 1)
         self.assertEqual(operator_group_counts[("pois/labels", "layout.icon-image", "get")], 1)
         self.assertEqual(operator_group_counts[("roads/trails", "paint.line-dasharray", "step")], 1)
+        self.assertEqual(filter_signatures[("pois/labels", "==, get")]["count"], 1)
+        self.assertEqual(filter_signatures[("pois/labels", "==, get")]["operators"], ["==", "get"])
+        self.assertEqual(filter_signatures[("pois/labels", "==, get")]["example_layers"], ["poi-label"])
 
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(layers["background"]["group"], "background")
@@ -479,6 +486,52 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ],
         )
 
+    def test_filter_expression_signature_group_summary_keeps_examples(self):
+        layers = [
+            {
+                "id": "road-primary",
+                "group": "roads/trails",
+                "qfit_unresolved": [
+                    {"property": "filter", "expression_operators": ["==", "all", "get"]}
+                ],
+            },
+            {
+                "id": "road-secondary",
+                "group": "roads/trails",
+                "qfit_unresolved": [
+                    {"property": "filter", "expression_operators": ["==", "all", "get"]}
+                ],
+            },
+            {
+                "id": "poi-label",
+                "group": "pois/labels",
+                "qfit_unresolved": [
+                    {"property": "filter", "expression_operators": ["==", "get"]},
+                    {"property": "layout.icon-image", "expression_operators": ["get"]},
+                ],
+            },
+        ]
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._filter_expression_signature_group_summary(layers),
+            [
+                {
+                    "group": "roads/trails",
+                    "operators": ["==", "all", "get"],
+                    "operator_signature": "==, all, get",
+                    "count": 2,
+                    "example_layers": ["road-primary", "road-secondary"],
+                },
+                {
+                    "group": "pois/labels",
+                    "operators": ["==", "get"],
+                    "operator_signature": "==, get",
+                    "count": 1,
+                    "example_layers": ["poi-label"],
+                },
+            ],
+        )
+
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
         qfit_style = {"layers": [{"id": "poi-label"}]}
@@ -565,6 +618,8 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("### Unresolved expression operators by layer group", markdown)
         self.assertIn("| `pois/labels` | `filter` | `==` | 1 |", markdown)
         self.assertIn("| `roads/trails` | `paint.line-dasharray` | `step` | 1 |", markdown)
+        self.assertIn("### Unresolved filter expression signatures by layer group", markdown)
+        self.assertIn("| `pois/labels` | `==, get` | 1 | `poi-label` |", markdown)
         self.assertIn("## Layers", markdown)
         self.assertIn("composite / road", markdown)
         self.assertIn("`paint.line-width`", markdown)
