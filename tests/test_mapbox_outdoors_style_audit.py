@@ -69,6 +69,7 @@ SAMPLE_STYLE = {
             "layout": {
                 "text-field": ["format", ["get", "name"], {}, "\n", {}, ["get", "name_en"], {}],
                 "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 14, 14],
+                "text-offset": [0, 0.8],
                 "icon-image": ["get", "maki"],
             },
             "paint": {
@@ -142,10 +143,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("layout.text-size", poi_simplified)
         self.assertIn("paint.text-halo-color", poi_simplified)
         self.assertIn("filter", layers["poi-label"]["qfit_preserves"])
+        self.assertIn("layout.text-offset", layers["poi-label"]["qfit_preserves"])
 
         unresolved = {item["property"]: item["reason"] for item in layers["poi-label"]["qfit_unresolved"]}
         self.assertIn("layout.icon-image", unresolved)
         self.assertNotIn("layout.text-field", unresolved)
+        self.assertNotIn("layout.text-offset", unresolved)
         self.assertIn("sprites", unresolved["layout.icon-image"])
 
         hidden_layer = layers["settlement-subdivision-label"]

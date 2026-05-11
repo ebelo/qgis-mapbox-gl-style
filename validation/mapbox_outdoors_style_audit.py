@@ -222,7 +222,7 @@ def _unresolved_cues(layer: dict[str, object], simplified_layer: dict[str, objec
             )
         elif isinstance(value, list) and not (
             (section == "layout" and prop == "text-field" and _is_supported_simple_text_field(value))
-            or (section == "paint" and prop == "line-dasharray" and _is_literal_number_array(value))
+            or _is_literal_number_array(value)
         ):
             unresolved.append(
                 {
