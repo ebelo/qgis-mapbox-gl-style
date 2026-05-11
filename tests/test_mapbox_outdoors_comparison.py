@@ -26,7 +26,9 @@ from qfit.validation.mapbox_outdoors_comparison import (
     encode_browser_capture_html,
     is_valid_qgis_vector_tile_layer,
     list_cameras,
+    load_style_definition,
     redact_sensitive_text,
+    render_browser_reference,
     render_qgis_vector,
     resolve_mapbox_token,
     run_comparison,
@@ -34,6 +36,16 @@ from qfit.validation.mapbox_outdoors_comparison import (
 
 
 PNG_PLACEHOLDER = b"not-a-real-png-for-unit-tests"
+SAMPLE_STYLE = {
+    "version": 8,
+    "sources": {
+        "composite": {
+            "type": "vector",
+            "url": "mapbox://mapbox.mapbox-streets-v8",
+        }
+    },
+    "layers": [{"id": "background", "type": "background"}],
+}
 
 
 class MapboxOutdoorsComparisonTests(unittest.TestCase):
@@ -125,15 +137,25 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertIn("qfitMapboxReady", html)
         self.assertNotIn("test-mapbox-token", html)
 
+    def test_build_mapbox_html_can_inline_downloaded_style_json(self):
+        camera = CAMERAS["valais-geneva-outdoors"]
+        html = build_mapbox_gl_html(camera=camera, style_definition=SAMPLE_STYLE)
+
+        self.assertIn('"version": 8', html)
+        self.assertIn('"mapbox://mapbox.mapbox-streets-v8"', html)
+        self.assertNotIn("mapbox://styles/mapbox/outdoors-v12", html)
+        self.assertNotIn("test-mapbox-token", html)
+
     def test_node_capture_script_uses_playwright_and_file_url_without_token(self):
         script = build_node_playwright_capture_script()
 
         self.assertIn("require('playwright')", script)
-        self.assertIn("Buffer.from", script)
         self.assertIn("setContent", script)
         self.assertIn("startQfitMapboxComparison", script)
         self.assertIn("window.qfitMapboxReady", script)
+        self.assertIn("JSON.parse", script)
         self.assertIn("readFileSync(0", script)
+        self.assertNotIn("Buffer.from", script)
         self.assertNotIn("accessToken", script)
         self.assertNotIn("MAPBOX_ACCESS_TOKEN", script)
         self.assertNotIn("pk.", script)
@@ -145,6 +167,47 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertIn("startQfitMapboxComparison", html)
         self.assertNotIn("test-mapbox-token", html)
         self.assertNotIn("accessToken", html)
+
+    def test_render_browser_reference_passes_large_html_on_stdin_instead_of_argv(self):
+        captured = {}
+        large_style = {
+            **SAMPLE_STYLE,
+            "metadata": {"qfit-large-style-padding": "x" * 150_000},
+        }
+
+        def fake_run(command, **kwargs):
+            captured["command"] = command
+            captured["payload"] = json.loads(kwargs["input"])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "reference.png"
+            with patch("qfit.validation.mapbox_outdoors_comparison.shutil.which", return_value="/usr/bin/node"):
+                with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
+                    render_browser_reference(
+                        camera=CAMERAS["valais-geneva-outdoors"],
+                        token="test-mapbox-token",
+                        output_path=output_path,
+                        timeout_ms=5_000,
+                        style_definition=large_style,
+                    )
+
+        self.assertEqual(captured["payload"]["credential"], "test-mapbox-token")
+        self.assertLess(max(len(value) for value in captured["command"]), 1_000)
+        self.assertIn("qfit-large-style-padding", captured["payload"]["html"])
+        self.assertNotIn("test-mapbox-token", captured["payload"]["html"])
+
+    def test_load_style_definition_requires_json_object(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "mapbox-outdoors.json"
+            path.write_text(json.dumps(SAMPLE_STYLE), encoding="utf-8")
+
+            self.assertEqual(load_style_definition(path), SAMPLE_STYLE)
+
+            bad_path = Path(tmpdir) / "bad-style.json"
+            bad_path.write_text("[]", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_style_definition(bad_path)
 
     def test_qgis_vector_tile_guard_rejects_raster_or_invalid_layers(self):
         class FakeVectorTileLayer:
@@ -255,7 +318,11 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         fake_qt_gui.QColor = lambda *values: values
 
         fake_mapbox_config = types.ModuleType("qfit.mapbox_config")
-        fake_mapbox_config.fetch_mapbox_style_definition = lambda *_args: {"version": 8}
+
+        def fail_fetch_style_definition(*_args):
+            raise AssertionError("style should be loaded from the provided style JSON")
+
+        fake_mapbox_config.fetch_mapbox_style_definition = fail_fetch_style_definition
         fake_mapbox_config.simplify_mapbox_style_expressions = lambda style: style
         fake_mapbox_config.extract_mapbox_vector_source_ids = lambda _style: ["mapbox.mapbox-streets-v8"]
         fake_mapbox_config.build_vector_tile_layer_uri = lambda *_args, **_kwargs: "vector://style"
@@ -281,6 +348,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                 camera=CAMERAS["valais-geneva-outdoors"],
                 token="test-mapbox-token",
                 output_path=output_path,
+                style_definition=SAMPLE_STYLE,
             )
 
             self.assertEqual(output_path.read_bytes(), PNG_PLACEHOLDER)
@@ -357,6 +425,45 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(manifest["metrics"]["changed_pixel_ratio"], 0.25)
         self.assertEqual(metrics["changed_pixel_ratio"], 0.25)
 
+    def test_run_comparison_passes_downloaded_style_json_to_renderers(self):
+        captured_style_definitions = []
+
+        def fake_browser_renderer(*, output_path, style_definition, **_kwargs):
+            captured_style_definitions.append(("browser", style_definition))
+            output_path.write_bytes(PNG_PLACEHOLDER)
+
+        def fake_qgis_renderer(*, output_path, style_definition, **_kwargs):
+            captured_style_definitions.append(("qgis", style_definition))
+            output_path.write_bytes(PNG_PLACEHOLDER)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            style_path = root / "mapbox-outdoors-v12.json"
+            style_path.write_text(json.dumps(SAMPLE_STYLE), encoding="utf-8")
+
+            result = run_comparison(
+                ComparisonConfig(
+                    camera=CAMERAS["valais-geneva-outdoors"],
+                    token="test-mapbox-token",
+                    output_root=root,
+                    style_json_path=style_path,
+                    diff=False,
+                    now=dt.datetime(2026, 5, 10, 19, 45, tzinfo=dt.timezone.utc),
+                ),
+                browser_renderer=fake_browser_renderer,
+                qgis_renderer=fake_qgis_renderer,
+            )
+
+            manifest = json.loads(result.paths.manifest_json.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            captured_style_definitions,
+            [("browser", SAMPLE_STYLE), ("qgis", SAMPLE_STYLE)],
+        )
+        self.assertEqual(result.style_json_path, str(style_path))
+        self.assertEqual(manifest["style_json_path"], str(style_path))
+        self.assertIsNone(manifest["style_url"])
+
     def test_run_comparison_skips_diff_when_one_capture_is_disabled(self):
         def fake_qgis_renderer(*, output_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
@@ -394,6 +501,8 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             "test-mapbox-token",
             "--output-root",
             "/tmp/qfit-mapbox",
+            "--style-json",
+            "/tmp/mapbox-outdoors-v12.json",
             "--skip-qgis",
             "--browser-timeout-ms",
             "5000",
@@ -402,6 +511,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(args.camera.name, "valais-geneva-outdoors")
         self.assertEqual(args.mapbox_token, "test-mapbox-token")
         self.assertEqual(args.output_root, "/tmp/qfit-mapbox")
+        self.assertEqual(args.style_json, Path("/tmp/mapbox-outdoors-v12.json"))
         self.assertTrue(args.skip_qgis)
         self.assertEqual(args.browser_timeout_ms, 5000)
 
@@ -511,6 +621,28 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
         self.assertEqual(result, 2)
         self.assertIn("Mapbox token required", "".join(call.args[0] for call in stderr_mock.write.call_args_list))
+
+    def test_main_returns_targeted_error_when_style_json_is_missing(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_path = Path(tmpdir) / "missing-style.json"
+            with patch.dict("os.environ", {"MAPBOX_ACCESS_TOKEN": "test-mapbox-token"}, clear=True):
+                with patch("sys.stderr") as stderr_mock:
+                    result = mapbox_outdoors_comparison.main([
+                        "valais-geneva-outdoors",
+                        "--style-json",
+                        str(missing_path),
+                        "--skip-browser",
+                        "--skip-qgis",
+                        "--skip-diff",
+                    ])
+
+        stderr_text = "".join(call.args[0] for call in stderr_mock.write.call_args_list)
+        self.assertEqual(result, 2)
+        self.assertIn("style JSON not found", stderr_text)
+        self.assertIn(str(missing_path), stderr_text)
+        self.assertNotIn("comparison capture failed", stderr_text)
 
     def test_main_uses_generic_error_for_runtime_failures(self):
         from qfit.validation import mapbox_outdoors_comparison

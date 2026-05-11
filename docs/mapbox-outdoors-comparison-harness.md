@@ -65,10 +65,20 @@ python3 validation/mapbox_outdoors_comparison.py valais-geneva-outdoors
 
 The command prints only artifact paths. It does not print the token, and `manifest.json` intentionally excludes token values. The QGIS capture builds a temporary vector-tile layer for rendering and does not clear the active QGIS project.
 
+To compare against a pinned/downloaded style snapshot instead of fetching live style metadata, pass `--style-json`. The browser reference uses the same style object and the QGIS render uses it for qfit's style preprocessing; Mapbox vector tiles, glyphs, and sprites still require a token.
+
+```bash
+python3 validation/mapbox_outdoors_comparison.py \
+  valais-geneva-outdoors \
+  --style-json /tmp/mapbox-outdoors-v12.json
+```
+
 To refresh the full inspection matrix manually, run the z5-z18 camera matrix and compare the generated run directories:
 
 ```bash
-python3 validation/mapbox_outdoors_comparison.py --all-cameras
+python3 validation/mapbox_outdoors_comparison.py \
+  --all-cameras \
+  --style-json /tmp/mapbox-outdoors-v12.json
 ```
 
 `--all-cameras` uses the same capture options as a single-camera run, so you can combine it with setup-isolation flags such as `--skip-qgis` or `--skip-browser`.
