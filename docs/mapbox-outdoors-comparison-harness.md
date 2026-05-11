@@ -65,19 +65,14 @@ python3 validation/mapbox_outdoors_comparison.py valais-geneva-outdoors
 
 The command prints only artifact paths. It does not print the token, and `manifest.json` intentionally excludes token values. The QGIS capture builds a temporary vector-tile layer for rendering and does not clear the active QGIS project.
 
-To refresh the full inspection matrix manually, run each listed camera and compare the generated run directories:
+To refresh the full inspection matrix manually, run the z5-z18 camera matrix and compare the generated run directories:
 
 ```bash
-for camera in \
-  switzerland-alps-z5-outdoors \
-  valais-geneva-outdoors \
-  lausanne-lavaux-z10-outdoors \
-  chamonix-trails-z14-outdoors \
-  zermatt-trails-z18-outdoors
-do
-  python3 validation/mapbox_outdoors_comparison.py "$camera"
-done
+python3 validation/mapbox_outdoors_comparison.py --all-cameras
 ```
+
+`--all-cameras` uses the same capture options as a single-camera run, so you can combine it with setup-isolation flags such as `--skip-qgis` or `--skip-browser`.
+Do not pass a positional camera name with `--all-cameras`; use one mode or the other.
 
 ## Partial captures
 

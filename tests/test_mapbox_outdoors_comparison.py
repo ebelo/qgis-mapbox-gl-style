@@ -405,6 +405,88 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(args.skip_qgis)
         self.assertEqual(args.browser_timeout_ms, 5000)
 
+    def test_main_all_cameras_runs_full_inspection_matrix(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        captured_camera_names = []
+
+        def fake_run_comparison(config):
+            captured_camera_names.append(config.camera.name)
+            paths = mapbox_outdoors_comparison.build_comparison_paths(
+                run_dir=Path("/tmp/qfit-mapbox") / config.camera.name / "20260511T130000Z"
+            )
+            return mapbox_outdoors_comparison.ComparisonResult(
+                paths=paths,
+                browser_captured=False,
+                qgis_captured=False,
+                diff_captured=False,
+            )
+
+        with patch.dict("os.environ", {"MAPBOX_ACCESS_TOKEN": "test-mapbox-token"}, clear=True):
+            with patch("qfit.validation.mapbox_outdoors_comparison.run_comparison", side_effect=fake_run_comparison):
+                with patch("builtins.print"):
+                    result = mapbox_outdoors_comparison.main([
+                        "--all-cameras",
+                        "--skip-browser",
+                        "--skip-qgis",
+                        "--skip-diff",
+                    ])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured_camera_names, list(CAMERAS))
+
+    def test_main_rejects_single_camera_with_all_cameras(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with patch("qfit.validation.mapbox_outdoors_comparison.run_comparison") as run_mock:
+            with patch("sys.stderr") as stderr_mock:
+                result = mapbox_outdoors_comparison.main([
+                    "valais-geneva-outdoors",
+                    "--all-cameras",
+                ])
+
+        self.assertEqual(result, 2)
+        run_mock.assert_not_called()
+        stderr_text = "".join(call.args[0] for call in stderr_mock.write.call_args_list)
+        self.assertIn("either a single camera or --all-cameras", stderr_text)
+
+    def test_main_all_cameras_prints_finished_camera_before_later_failure(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        captured_camera_names = []
+
+        def fake_run_comparison(config):
+            captured_camera_names.append(config.camera.name)
+            if len(captured_camera_names) > 1:
+                raise RuntimeError("qgis setup failed")
+            paths = mapbox_outdoors_comparison.build_comparison_paths(
+                run_dir=Path("/tmp/qfit-mapbox") / config.camera.name / "20260511T130000Z"
+            )
+            return mapbox_outdoors_comparison.ComparisonResult(
+                paths=paths,
+                browser_captured=False,
+                qgis_captured=False,
+                diff_captured=False,
+            )
+
+        with patch.dict("os.environ", {"MAPBOX_ACCESS_TOKEN": "test-mapbox-token"}, clear=True):
+            with patch("qfit.validation.mapbox_outdoors_comparison.run_comparison", side_effect=fake_run_comparison):
+                with patch("builtins.print") as print_mock:
+                    with patch("sys.stderr"):
+                        result = mapbox_outdoors_comparison.main([
+                            "--all-cameras",
+                            "--skip-browser",
+                            "--skip-qgis",
+                            "--skip-diff",
+                        ])
+
+        self.assertEqual(result, 2)
+        self.assertEqual(captured_camera_names[:2], list(CAMERAS)[:2])
+        print_mock.assert_any_call("Camera: switzerland-alps-z5-outdoors")
+        print_mock.assert_any_call(
+            "Manifest: /tmp/qfit-mapbox/switzerland-alps-z5-outdoors/20260511T130000Z/manifest.json"
+        )
+
     def test_redact_sensitive_text_removes_token_from_errors(self):
         self.assertEqual(
             redact_sensitive_text("failed for test-mapbox-token", "test-mapbox-token"),
