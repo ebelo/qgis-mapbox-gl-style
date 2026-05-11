@@ -358,6 +358,13 @@ def _extract_midrange_size(expr: object) -> float | None:
     return None
 
 
+def _line_layout_choice(expr: object, choices: set[str]) -> str | None:
+    if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
+        return None
+    output = expr[-1] if len(expr) >= 5 else expr[2]
+    return output if isinstance(output, str) and output in choices else None
+
+
 def _is_simple_text_field_reference(expr: object) -> bool:
     return isinstance(expr, list) and len(expr) == 2 and expr[0] == "get" and isinstance(expr[1], str)
 
@@ -520,6 +527,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     # We extract a z12-representative value and cap to a sane maximum.
     _WIDTH_PROPS = {"line-width", "line-gap-width", "line-offset"}
     _MAX_LINE_WIDTH_MM = 3.0  # ~11px at 96 DPI — sane max for cartographic lines
+    _LINE_LAYOUT_CHOICES = {
+        "line-cap": {"butt", "round", "square"},
+        "line-join": {"bevel", "round", "miter"},
+    }
     # Per-layer-id text-size overrides to restore cartographic hierarchy.
     _TEXT_SIZE_OVERRIDES: dict[str, object] = {
         "natural-point-label": 9.0,
@@ -598,6 +609,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         size = _extract_midrange_size(val)
                         if size is not None:
                             props[prop] = size
+                elif prop in _LINE_LAYOUT_CHOICES:
+                    choice = _line_layout_choice(val, _LINE_LAYOUT_CHOICES[prop])
+                    if choice is not None:
+                        props[prop] = choice
     return style
 
 
