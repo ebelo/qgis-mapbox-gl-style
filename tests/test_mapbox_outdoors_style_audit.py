@@ -177,12 +177,20 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         unresolved_counts = {
             item["property"]: item["count"] for item in summary["qfit_unresolved_by_property"]
         }
+        operator_counts = {
+            (item["property"], item["operator"]): item["count"]
+            for item in summary["qfit_unresolved_expression_operators_by_property"]
+        }
         self.assertEqual(simplified_counts["layout.text-field"], 2)
         self.assertEqual(simplified_counts["paint.line-width"], 1)
         self.assertEqual(simplified_counts["layout.visibility"], 1)
         self.assertEqual(unresolved_counts["filter"], 1)
         self.assertEqual(unresolved_counts["layout.icon-image"], 1)
         self.assertEqual(unresolved_counts["paint.line-dasharray"], 1)
+        self.assertEqual(operator_counts[("filter", "==")], 1)
+        self.assertEqual(operator_counts[("filter", "get")], 1)
+        self.assertEqual(operator_counts[("layout.icon-image", "get")], 1)
+        self.assertEqual(operator_counts[("paint.line-dasharray", "step")], 1)
 
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(layers["background"]["group"], "background")
@@ -208,13 +216,15 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("filter", layers["poi-label"]["qfit_preserves"])
         self.assertIn("layout.text-offset", layers["poi-label"]["qfit_preserves"])
 
-        unresolved = {item["property"]: item["reason"] for item in layers["poi-label"]["qfit_unresolved"]}
+        unresolved = {item["property"]: item for item in layers["poi-label"]["qfit_unresolved"]}
         self.assertIn("filter", unresolved)
         self.assertIn("layout.icon-image", unresolved)
         self.assertNotIn("layout.text-field", unresolved)
         self.assertNotIn("layout.text-offset", unresolved)
-        self.assertIn("filter expression", unresolved["filter"])
-        self.assertIn("sprites", unresolved["layout.icon-image"])
+        self.assertIn("filter expression", unresolved["filter"]["reason"])
+        self.assertIn("sprites", unresolved["layout.icon-image"]["reason"])
+        self.assertEqual(unresolved["filter"]["expression_operators"], ["==", "get"])
+        self.assertEqual(unresolved["layout.icon-image"]["expression_operators"], ["get"])
 
         hidden_layer = layers["settlement-subdivision-label"]
         hidden_changes = {change["property"]: change for change in hidden_layer["qfit_simplifies"]}
@@ -293,6 +303,56 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 {"layer": "road-primary", "count": 1},
             ],
         )
+
+    def test_expression_operator_names_ignore_literal_string_arrays(self):
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(
+                ["match", ["get", "class"], ["primary", "secondary"], "#fff", "#ccc"]
+            ),
+            ["get", "match"],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(["DIN Pro Medium", "Arial Unicode MS Regular"]),
+            [],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(
+                ["in", ["get", "class"], ["literal", ["primary", "secondary"]]]
+            ),
+            ["get", "in", "literal"],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(["literal", ["step", 1, 2]]),
+            ["literal"],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(
+                ["slice", ["get", "ref"], ["index-of", "A", ["get", "ref"]]]
+            ),
+            ["get", "index-of", "slice"],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(["accumulated"]),
+            ["accumulated"],
+        )
+
+    def test_expression_operator_names_include_current_mapbox_reference_operators(self):
+        reference_operators = [
+            "at-interpolated",
+            "distance-from-center",
+            "hsl",
+            "hsla",
+            "number-format",
+            "pitch",
+            "random",
+            "split",
+            "to-hsla",
+            "to-rgba",
+            "worldview",
+        ]
+        for operator in reference_operators:
+            with self.subTest(operator=operator):
+                self.assertEqual(mapbox_outdoors_style_audit._expression_operator_names([operator]), [operator])
 
     def test_qgis_warning_summaries_by_layer_skip_unprefixed_warnings(self):
         summaries = mapbox_outdoors_style_audit._qgis_warning_summaries_by_layer(
@@ -387,6 +447,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("### QGIS-dependent / unresolved", markdown)
         self.assertIn("| `filter` | 1 |", markdown)
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
+        self.assertIn("### Unresolved expression operators", markdown)
+        self.assertIn("| `filter` | `==` | 1 |", markdown)
+        self.assertIn("| `paint.line-dasharray` | `step` | 1 |", markdown)
         self.assertIn("## Layers", markdown)
         self.assertIn("composite / road", markdown)
         self.assertIn("`paint.line-width`", markdown)
