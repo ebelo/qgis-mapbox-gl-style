@@ -248,10 +248,18 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
 
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
-            "raw": {"count": 3},
+            "raw": {
+                "count": 3,
+                "warnings": [
+                    "road-primary: Skipping unsupported expression",
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Referenced font DIN Pro Medium is not available on system",
+                ],
+            },
             "qfit_preprocessed": {
                 "count": 2,
                 "by_message": [{"message": "Skipping unsupported expression", "count": 2}],
+                "by_layer_group": [{"group": "pois/labels", "count": 2}],
                 "by_layer": [{"layer": "poi-label", "count": 2}],
                 "warnings": [
                     "poi-label: Skipping unsupported expression",
@@ -271,6 +279,18 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             )
 
         self.assertEqual(audit["qgis_converter_warnings"], warning_report)
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["raw"]["by_layer_group"],
+            [{"group": "pois/labels", "count": 2}, {"group": "roads/trails", "count": 1}],
+        )
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["qfit_preprocessed"]["by_layer_group"],
+            [{"group": "pois/labels", "count": 2}],
+        )
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["reduced_by_qfit"]["by_layer_group"],
+            [{"group": "roads/trails", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}],
+        )
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(
             layers["poi-label"]["qgis_converter_warnings"],
@@ -384,6 +404,20 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [{"message": "Skipping unsupported expression", "count": 1}],
         )
 
+    def test_warning_group_count_summary_skips_unprefixed_warnings(self):
+        self.assertEqual(
+            mapbox_outdoors_style_audit._warning_group_count_summary(
+                [
+                    "road-primary: Skipping unsupported expression",
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Referenced font DIN Pro Medium is not available on system",
+                    "Could not find sprite image",
+                ],
+                {"road-primary": "roads/trails", "poi-label": "pois/labels"},
+            ),
+            [{"group": "pois/labels", "count": 2}, {"group": "roads/trails", "count": 1}],
+        )
+
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
         qfit_style = {"layers": [{"id": "poi-label"}]}
@@ -483,6 +517,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             "qfit_preprocessed": {
                 "count": 2,
                 "by_message": [{"message": "Skipping unsupported expression", "count": 2}],
+                "by_layer_group": [{"group": "pois/labels", "count": 2}],
                 "by_layer": [{"layer": "poi-label", "count": 2}],
                 "warnings": [
                     "poi-label: Skipping unsupported expression",
@@ -501,6 +536,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
                 "by_layer": [
                     {"layer": "water-depth", "raw_count": 4, "qfit_count": 0, "reduced_count": 4}
+                ],
+                "by_layer_group": [
+                    {"group": "water", "raw_count": 4, "qfit_count": 0, "reduced_count": 4}
                 ],
             },
         }
@@ -525,7 +563,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("#### Warnings reduced by qfit preprocessing", markdown)
         self.assertIn("| `Could not parse non-string color , skipping` | 3 | 0 | 3 |", markdown)
         self.assertIn("| `water-depth` | 4 | 0 | 4 |", markdown)
+        self.assertIn("#### Layer groups with fewer warnings after qfit preprocessing", markdown)
+        self.assertIn("| `water` | 4 | 0 | 4 |", markdown)
         self.assertIn("| `Skipping unsupported expression` | 2 |", markdown)
+        self.assertIn("#### Remaining warnings by layer group", markdown)
+        self.assertIn("| `pois/labels` | 2 |", markdown)
         self.assertIn("| `poi-label` | 2 |", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)

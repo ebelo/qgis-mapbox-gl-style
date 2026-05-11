@@ -514,6 +514,57 @@ def _qgis_warning_summaries_by_layer(warnings: list[str]) -> dict[str, dict[str,
     }
 
 
+def _warning_group_count_summary(
+    warnings: list[str],
+    layer_groups: dict[str, str],
+) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for warning in warnings:
+        layer, separator, _message = warning.partition(": ")
+        if not separator or not layer:
+            continue
+        counts[layer_groups.get(layer, "other")] += 1
+    return [
+        {"group": group, "count": count}
+        for group, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _annotate_warning_summary_groups(
+    summary: dict[str, object],
+    layer_groups: dict[str, str],
+) -> None:
+    warnings = summary.get("warnings")
+    if not isinstance(warnings, list):
+        return
+    summary["by_layer_group"] = _warning_group_count_summary(
+        [str(warning) for warning in warnings],
+        layer_groups,
+    )
+
+
+def _annotate_qgis_warning_group_summaries(
+    layers: list[dict[str, object]],
+    warning_report: dict[str, object],
+) -> None:
+    layer_groups = {str(layer.get("id") or ""): str(layer.get("group") or "other") for layer in layers}
+    raw_summary = warning_report.get("raw") if isinstance(warning_report.get("raw"), dict) else {}
+    qfit_summary = (
+        warning_report.get("qfit_preprocessed")
+        if isinstance(warning_report.get("qfit_preprocessed"), dict)
+        else {}
+    )
+    _annotate_warning_summary_groups(raw_summary, layer_groups)
+    _annotate_warning_summary_groups(qfit_summary, layer_groups)
+    reduced = warning_report.setdefault("reduced_by_qfit", {})
+    if isinstance(reduced, dict):
+        reduced["by_layer_group"] = _warning_reduction_summary(
+            list(raw_summary.get("by_layer_group") or []),
+            list(qfit_summary.get("by_layer_group") or []),
+            key="group",
+        )
+
+
 def _annotate_layers_with_qgis_warnings(
     layers: list[dict[str, object]],
     warning_report: dict[str, object],
@@ -659,6 +710,7 @@ def build_style_audit(
             raw_style=style_definition,
             qfit_preprocessed_style=simplified_style,
         )
+        _annotate_qgis_warning_group_summaries(layers, warning_report)
         audit["qgis_converter_warnings"] = warning_report
         _annotate_layers_with_qgis_warnings(layers, warning_report)
     return audit
@@ -819,6 +871,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     reduced = report.get("reduced_by_qfit") if isinstance(report.get("reduced_by_qfit"), dict) else {}
     reduced_by_message = list(reduced.get("by_message") or [])
     reduced_by_layer = list(reduced.get("by_layer") or [])
+    reduced_by_group = list(reduced.get("by_layer_group") or [])
     lines = [
         "### QGIS converter warnings",
         "",
@@ -843,11 +896,22 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
                 *_markdown_warning_reduction_table(reduced_by_layer, key="layer", label="Layer"),
             ]
         )
+    if reduced_by_group:
+        lines.extend(
+            [
+                "#### Layer groups with fewer warnings after qfit preprocessing",
+                "",
+                *_markdown_warning_reduction_table(reduced_by_group, key="group", label="Layer group"),
+            ]
+        )
     lines.extend(
         [
             "#### Remaining warnings by message",
             "",
             *_markdown_named_count_table(list(qfit.get("by_message") or []), key="message", label="Message"),
+            "#### Remaining warnings by layer group",
+            "",
+            *_markdown_named_count_table(list(qfit.get("by_layer_group") or []), key="group", label="Layer group"),
             "#### Remaining warnings by layer",
             "",
             *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
