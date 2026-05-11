@@ -137,7 +137,7 @@ debug/mapbox-outdoors-style-audit/<style>/<UTC timestamp>/audit.md
 
 The audit summarizes each relevant style layer's source layer, filter, zoom band, paint/layout symbology, properties qfit preserves, properties qfit simplifies or substitutes before handing the style to QGIS, and cues that remain QGIS-dependent such as Mapbox filter expressions, sprites, patterns, fonts, or still-live paint/layout expressions. It also records unresolved properties and expression operators by visual layer group, so follow-up work can distinguish broad buckets such as filters from concrete Mapbox operators like `match`, `step`, or `interpolate` and see whether they concentrate in roads/trails, terrain/landcover, labels, or other groups.
 
-When PyQGIS is available, include QGIS' native Mapbox GL converter warnings to compare the raw Mapbox style with qfit's preprocessed style and see which warnings remain after qfit simplification. The optional warning report includes message, layer, and visual layer-group summaries to show whether remaining converter gaps concentrate in categories such as roads/trails, terrain/landcover, or labels:
+When PyQGIS is available, include QGIS' native Mapbox GL converter warnings to compare the raw Mapbox style with qfit's preprocessed style and see which warnings remain after qfit simplification. The optional warning report includes message, layer, visual layer-group, and layer-group-by-message summaries to show which converter messages concentrate in categories such as roads/trails, terrain/landcover, or labels:
 
 ```bash
 QT_QPA_PLATFORM=offscreen \

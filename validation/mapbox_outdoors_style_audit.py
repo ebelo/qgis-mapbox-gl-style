@@ -17,6 +17,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-style-audit"
 DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 _DEFAULT_OUTPUT_STYLE_SLUG = "mapbox-outdoors-v12"
+_MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR = "| --- | --- | ---: |"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -530,6 +531,25 @@ def _warning_group_count_summary(
     ]
 
 
+def _warning_group_message_count_summary(
+    warnings: list[str],
+    layer_groups: dict[str, str],
+) -> list[dict[str, object]]:
+    counts: Counter[tuple[str, str]] = Counter()
+    for warning in warnings:
+        layer, separator, message = warning.partition(": ")
+        if not separator or not layer or not message:
+            continue
+        counts[(layer_groups.get(layer, "other"), message)] += 1
+    return [
+        {"group": group, "message": message, "count": count}
+        for (group, message), count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )
+    ]
+
+
 def _annotate_warning_summary_groups(
     summary: dict[str, object],
     layer_groups: dict[str, str],
@@ -537,8 +557,13 @@ def _annotate_warning_summary_groups(
     warnings = summary.get("warnings")
     if not isinstance(warnings, list):
         return
+    warning_strings = [str(warning) for warning in warnings]
     summary["by_layer_group"] = _warning_group_count_summary(
-        [str(warning) for warning in warnings],
+        warning_strings,
+        layer_groups,
+    )
+    summary["by_layer_group_and_message"] = _warning_group_message_count_summary(
+        warning_strings,
         layer_groups,
     )
 
@@ -774,7 +799,7 @@ def _markdown_count_table(items: list[dict[str, object]], *, empty: str = "—")
 def _markdown_group_count_table(items: list[dict[str, object]], *, empty: str = "—") -> list[str]:
     if not items:
         return [empty, ""]
-    lines = ["| Layer group | Property | # Layers |", "| --- | --- | ---: |"]
+    lines = ["| Layer group | Property | # Layers |", _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR]
     for item in items:
         lines.append(
             "| `{group}` | `{property_name}` | {count} |".format(
@@ -790,7 +815,7 @@ def _markdown_group_count_table(items: list[dict[str, object]], *, empty: str = 
 def _markdown_expression_operator_table(items: list[dict[str, object]], *, empty: str = "—") -> list[str]:
     if not items:
         return [empty, ""]
-    lines = ["| Property | Operator | # Layers |", "| --- | --- | ---: |"]
+    lines = ["| Property | Operator | # Layers |", _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR]
     for item in items:
         lines.append(
             "| `{property_name}` | `{operator}` | {count} |".format(
@@ -836,6 +861,26 @@ def _markdown_named_count_table(
     lines = [f"| {label} | Count |", "| --- | ---: |"]
     for item in items:
         lines.append(f"| `{item.get(key, '')}` | {item.get('count', 0)} |")
+    lines.append("")
+    return lines
+
+
+def _markdown_group_message_count_table(
+    items: list[dict[str, object]],
+    *,
+    empty: str = "—",
+) -> list[str]:
+    if not items:
+        return [empty, ""]
+    lines = ["| Layer group | Message | Count |", _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR]
+    for item in items:
+        lines.append(
+            "| `{group}` | `{message}` | {count} |".format(
+                group=item.get("group", ""),
+                message=item.get("message", ""),
+                count=item.get("count", 0),
+            )
+        )
     lines.append("")
     return lines
 
@@ -912,6 +957,9 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             "#### Remaining warnings by layer group",
             "",
             *_markdown_named_count_table(list(qfit.get("by_layer_group") or []), key="group", label="Layer group"),
+            "#### Remaining warnings by layer group and message",
+            "",
+            *_markdown_group_message_count_table(list(qfit.get("by_layer_group_and_message") or [])),
             "#### Remaining warnings by layer",
             "",
             *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
