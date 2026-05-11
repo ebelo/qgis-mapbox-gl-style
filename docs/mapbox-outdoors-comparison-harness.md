@@ -105,6 +105,35 @@ Use the browser image as the Mapbox GL reference. Inspect the QGIS image for hig
 
 Use the brightness-enhanced diff image and metrics as navigation aids, not as pass/fail gates. Label placement and antialiasing differences will create expected diff noise.
 
+## Style audit before tuning
+
+Before choosing another rendering-tuning slice, generate a style audit so the work is tied to the actual Mapbox Outdoors layer rules and qfit's current QGIS preprocessing choices.
+
+From the live Mapbox style JSON:
+
+```bash
+export MAPBOX_ACCESS_TOKEN="***"
+python3 validation/mapbox_outdoors_style_audit.py
+```
+
+From an already downloaded style JSON, which is useful for offline review and credential-free test fixtures:
+
+```bash
+python3 validation/mapbox_outdoors_style_audit.py \
+  --style-json /tmp/mapbox-outdoors-v12.json \
+  --format json
+```
+
+Default audit outputs are written under:
+
+```text
+debug/mapbox-outdoors-style-audit/<style>/<UTC timestamp>/audit.md
+```
+
+The audit summarizes each relevant style layer's source layer, filter, zoom band, paint/layout symbology, properties qfit preserves, properties qfit simplifies or substitutes before handing the style to QGIS, and cues that remain QGIS-dependent such as sprites, patterns, fonts, or still-live expressions.
+
+Use the audit together with the screenshot harness: first identify high-signal gaps visually, then check the corresponding style layers to decide the smallest safe qfit preprocessing improvement.
+
 ## PR notes
 
 For rendering-sensitive Mapbox vector-style changes, include a concise validation note such as:
