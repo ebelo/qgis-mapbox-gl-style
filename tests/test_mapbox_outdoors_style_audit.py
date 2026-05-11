@@ -697,7 +697,21 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             },
             "without_filters_probe": {
                 "filter_count_removed": 1,
-                "summary": {"count": 1},
+                "summary": {
+                    "count": 1,
+                    "by_message": [
+                        {"message": "Referenced font DIN Pro Medium is not available on system", "count": 1}
+                    ],
+                    "by_layer_group": [{"group": "pois/labels", "count": 1}],
+                    "by_layer_group_and_message": [
+                        {
+                            "group": "pois/labels",
+                            "message": "Referenced font DIN Pro Medium is not available on system",
+                            "count": 1,
+                        }
+                    ],
+                    "by_layer": [{"layer": "poi-label", "count": 1}],
+                },
                 "warning_count_delta_from_qfit": 1,
                 "reduced_from_qfit": {
                     "by_message": [
@@ -758,6 +772,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("##### Probe reductions by layer group", markdown)
         self.assertIn("| Layer group | Before probe | Without filters | Reduced |", markdown)
         self.assertIn("| `pois/labels` | 2 | 1 | 1 |", markdown)
+        self.assertIn("##### Remaining probe warnings by message", markdown)
+        self.assertIn("| `Referenced font DIN Pro Medium is not available on system` | 1 |", markdown)
+        self.assertIn("##### Remaining probe warnings by layer group", markdown)
+        self.assertIn("| `pois/labels` | 1 |", markdown)
+        self.assertIn("##### Remaining probe warnings by layer group and message", markdown)
+        self.assertIn(
+            "| `pois/labels` | `Referenced font DIN Pro Medium is not available on system` | 1 |",
+            markdown,
+        )
+        self.assertIn("##### Remaining probe warnings by layer", markdown)
+        self.assertIn("| `poi-label` | 1 |", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 

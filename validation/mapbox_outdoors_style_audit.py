@@ -19,6 +19,8 @@ DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 _DEFAULT_OUTPUT_STYLE_SLUG = "mapbox-outdoors-v12"
 _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR = "| --- | --- | ---: |"
 _MARKDOWN_LAYER_GROUP_LABEL = "Layer group"
+_MARKDOWN_MESSAGE_LABEL = "Message"
+_MARKDOWN_LAYER_LABEL = "Layer"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -1048,6 +1050,10 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
     ]
     by_message = list(reduced.get("by_message") or [])
     by_group = list(reduced.get("by_layer_group") or [])
+    remaining_by_message = list(summary.get("by_message") or [])
+    remaining_by_group = list(summary.get("by_layer_group") or [])
+    remaining_by_group_message = list(summary.get("by_layer_group_and_message") or [])
+    remaining_by_layer = list(summary.get("by_layer") or [])
     if by_message:
         lines.extend(
             [
@@ -1056,7 +1062,7 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
                 *_markdown_warning_reduction_table(
                     by_message,
                     key="message",
-                    label="Message",
+                    label=_MARKDOWN_MESSAGE_LABEL,
                     before_label="Before probe",
                     after_label="Without filters",
                 ),
@@ -1076,6 +1082,34 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
                 ),
             ]
         )
+    lines.extend(
+        [
+            "##### Remaining probe warnings by message",
+            "",
+            *_markdown_named_count_table(
+                remaining_by_message,
+                key="message",
+                label=_MARKDOWN_MESSAGE_LABEL,
+            ),
+            "##### Remaining probe warnings by layer group",
+            "",
+            *_markdown_named_count_table(
+                remaining_by_group,
+                key="group",
+                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            ),
+            "##### Remaining probe warnings by layer group and message",
+            "",
+            *_markdown_group_message_count_table(remaining_by_group_message),
+            "##### Remaining probe warnings by layer",
+            "",
+            *_markdown_named_count_table(
+                remaining_by_layer,
+                key="layer",
+                label=_MARKDOWN_LAYER_LABEL,
+            ),
+        ]
+    )
     return lines
 
 
@@ -1102,7 +1136,11 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             [
                 "#### Warnings reduced by qfit preprocessing",
                 "",
-                *_markdown_warning_reduction_table(reduced_by_message, key="message", label="Message"),
+                *_markdown_warning_reduction_table(
+                    reduced_by_message,
+                    key="message",
+                    label=_MARKDOWN_MESSAGE_LABEL,
+                ),
             ]
         )
     if reduced_by_layer:
@@ -1110,7 +1148,11 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             [
                 "#### Layers with fewer warnings after qfit preprocessing",
                 "",
-                *_markdown_warning_reduction_table(reduced_by_layer, key="layer", label="Layer"),
+                *_markdown_warning_reduction_table(
+                    reduced_by_layer,
+                    key="layer",
+                    label=_MARKDOWN_LAYER_LABEL,
+                ),
             ]
         )
     if reduced_by_group:
@@ -1129,7 +1171,11 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
         [
             "#### Remaining warnings by message",
             "",
-            *_markdown_named_count_table(list(qfit.get("by_message") or []), key="message", label="Message"),
+            *_markdown_named_count_table(
+                list(qfit.get("by_message") or []),
+                key="message",
+                label=_MARKDOWN_MESSAGE_LABEL,
+            ),
             "#### Remaining warnings by layer group",
             "",
             *_markdown_named_count_table(
@@ -1142,7 +1188,11 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             *_markdown_group_message_count_table(list(qfit.get("by_layer_group_and_message") or [])),
             "#### Remaining warnings by layer",
             "",
-            *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
+            *_markdown_named_count_table(
+                list(qfit.get("by_layer") or []),
+                key="layer",
+                label=_MARKDOWN_LAYER_LABEL,
+            ),
             *_markdown_filterless_probe(filterless_probe),
         ]
     )
