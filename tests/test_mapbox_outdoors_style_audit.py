@@ -229,6 +229,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "count": 2,
                 "by_message": [{"message": "Skipping unsupported expression", "count": 2}],
                 "by_layer": [{"layer": "poi-label", "count": 2}],
+                "warnings": [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Referenced font DIN Pro Medium is not available on system",
+                ],
             },
             "warning_count_delta": 1,
         }
@@ -243,6 +247,22 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             )
 
         self.assertEqual(audit["qgis_converter_warnings"], warning_report)
+        layers = {layer["id"]: layer for layer in audit["layers"]}
+        self.assertEqual(
+            layers["poi-label"]["qgis_converter_warnings"],
+            {
+                "count": 2,
+                "by_message": [
+                    {"message": "Referenced font DIN Pro Medium is not available on system", "count": 1},
+                    {"message": "Skipping unsupported expression", "count": 1},
+                ],
+                "warnings": [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Referenced font DIN Pro Medium is not available on system",
+                ],
+            },
+        )
+        self.assertNotIn("qgis_converter_warnings", layers["road-primary"])
         report_mock.assert_called_once()
         self.assertIs(report_mock.call_args.kwargs["raw_style"], SAMPLE_STYLE)
         self.assertIsInstance(report_mock.call_args.kwargs["qfit_preprocessed_style"], dict)
@@ -272,6 +292,22 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 {"layer": "poi-label", "count": 2},
                 {"layer": "road-primary", "count": 1},
             ],
+        )
+
+    def test_qgis_warning_summaries_by_layer_skip_unprefixed_warnings(self):
+        summaries = mapbox_outdoors_style_audit._qgis_warning_summaries_by_layer(
+            [
+                "road-primary: Skipping unsupported expression",
+                "poi-label: Skipping unsupported expression",
+                "Could not find sprite image",
+            ]
+        )
+
+        self.assertEqual(sorted(summaries), ["poi-label", "road-primary"])
+        self.assertEqual(summaries["poi-label"]["count"], 1)
+        self.assertEqual(
+            summaries["road-primary"]["by_message"],
+            [{"message": "Skipping unsupported expression", "count": 1}],
         )
 
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
@@ -365,6 +401,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "count": 2,
                 "by_message": [{"message": "Skipping unsupported expression", "count": 2}],
                 "by_layer": [{"layer": "poi-label", "count": 2}],
+                "warnings": [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Referenced font DIN Pro Medium is not available on system",
+                ],
             },
             "warning_count_delta": 1,
             "reduced_by_qfit": {
@@ -381,6 +421,18 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
             },
         }
+        layers = {layer["id"]: layer for layer in audit["layers"]}
+        layers["poi-label"]["qgis_converter_warnings"] = {
+            "count": 2,
+            "by_message": [
+                {"message": "Referenced font DIN Pro Medium is not available on system", "count": 1},
+                {"message": "Skipping unsupported expression", "count": 1},
+            ],
+            "warnings": [
+                "poi-label: Skipping unsupported expression",
+                "poi-label: Referenced font DIN Pro Medium is not available on system",
+            ],
+        }
 
         markdown = build_audit_markdown(audit)
 
@@ -392,6 +444,21 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| `water-depth` | 4 | 0 | 4 |", markdown)
         self.assertIn("| `Skipping unsupported expression` | 2 |", markdown)
         self.assertIn("| `poi-label` | 2 |", markdown)
+        self.assertIn("QGIS converter warnings: 2", markdown)
+        self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
+
+    def test_markdown_layer_unresolved_omits_empty_unresolved_sentinel_for_qgis_warnings(self):
+        rendered = mapbox_outdoors_style_audit._markdown_layer_unresolved(
+            {
+                "qfit_unresolved": [],
+                "qgis_converter_warnings": {
+                    "count": 1,
+                    "by_message": [{"message": "Skipping unsupported expression", "count": 1}],
+                },
+            }
+        )
+
+        self.assertEqual(rendered, "QGIS converter warnings: 1<br>`Skipping unsupported expression` (1)")
 
     def test_markdown_omits_qgis_reduction_sections_when_no_reductions_exist(self):
         audit = build_style_audit(SAMPLE_STYLE)

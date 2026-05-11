@@ -311,6 +311,41 @@ def _qgis_warning_summary(warnings: list[str]) -> dict[str, object]:
     }
 
 
+def _qgis_warning_summaries_by_layer(warnings: list[str]) -> dict[str, dict[str, object]]:
+    grouped: dict[str, list[str]] = {}
+    for warning in warnings:
+        layer, separator, _message = warning.partition(": ")
+        if not separator or not layer:
+            continue
+        grouped.setdefault(layer, []).append(warning)
+    return {
+        layer: {
+            "count": len(layer_warnings),
+            "by_message": _warning_count_summary(layer_warnings, by_layer=False),
+            "warnings": layer_warnings,
+        }
+        for layer, layer_warnings in sorted(grouped.items())
+    }
+
+
+def _annotate_layers_with_qgis_warnings(
+    layers: list[dict[str, object]],
+    warning_report: dict[str, object],
+) -> None:
+    qfit_summary = warning_report.get("qfit_preprocessed")
+    if not isinstance(qfit_summary, dict):
+        return
+    warnings = qfit_summary.get("warnings")
+    if not isinstance(warnings, list):
+        return
+    warnings_by_layer = _qgis_warning_summaries_by_layer([str(warning) for warning in warnings])
+    for layer in layers:
+        layer_id = str(layer.get("id") or "")
+        layer_warnings = warnings_by_layer.get(layer_id)
+        if layer_warnings is not None:
+            layer["qgis_converter_warnings"] = layer_warnings
+
+
 def _warning_reduction_summary(
     raw_counts: list[dict[str, object]],
     qfit_counts: list[dict[str, object]],
@@ -426,10 +461,12 @@ def build_style_audit(
         "layers": layers,
     }
     if resolved_config.include_qgis_converter_warnings:
-        audit["qgis_converter_warnings"] = _qgis_converter_warning_report(
+        warning_report = _qgis_converter_warning_report(
             raw_style=style_definition,
             qfit_preprocessed_style=simplified_style,
         )
+        audit["qgis_converter_warnings"] = warning_report
+        _annotate_layers_with_qgis_warnings(layers, warning_report)
     return audit
 
 
@@ -453,6 +490,29 @@ def _markdown_unresolved_list(unresolved: list[dict[str, str]], *, empty: str = 
     return "<br>".join(
         f"`{item['property']}`: {item['reason']}" for item in unresolved
     )
+
+
+def _markdown_layer_qgis_warnings(layer_obj: dict[str, object]) -> str:
+    report = layer_obj.get("qgis_converter_warnings")
+    if not isinstance(report, dict) or not report.get("count"):
+        return ""
+    messages = report.get("by_message") if isinstance(report.get("by_message"), list) else []
+    warning_parts = [f"QGIS converter warnings: {report.get('count', 0)}"]
+    for item in messages[:3]:
+        if not isinstance(item, dict):
+            continue
+        warning_parts.append(f"`{item.get('message', '')}` ({item.get('count', 0)})")
+    return "<br>".join(warning_parts)
+
+
+def _markdown_layer_unresolved(layer_obj: dict[str, object]) -> str:
+    raw_unresolved = list(layer_obj.get("qfit_unresolved") or [])
+    qgis_warnings = _markdown_layer_qgis_warnings(layer_obj)
+    if not qgis_warnings:
+        return _markdown_unresolved_list(raw_unresolved)
+    if not raw_unresolved:
+        return qgis_warnings
+    return f"{_markdown_unresolved_list(raw_unresolved)}<br>{qgis_warnings}"
 
 
 def _markdown_count_table(items: list[dict[str, object]], *, empty: str = "—") -> list[str]:
@@ -592,7 +652,7 @@ def build_audit_markdown(audit: dict[str, object]) -> str:
                 zoom=layer_obj.get("zoom_band", "all zooms"),
                 preserved=_markdown_list(list(layer_obj.get("qfit_preserves") or [])),
                 simplified=_markdown_change_list(list(layer_obj.get("qfit_simplifies") or [])),
-                unresolved=_markdown_unresolved_list(list(layer_obj.get("qfit_unresolved") or [])),
+                unresolved=_markdown_layer_unresolved(layer_obj),
             )
         )
     lines.append("")

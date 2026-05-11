@@ -146,7 +146,7 @@ python3 validation/mapbox_outdoors_style_audit.py \
   --include-qgis-converter-warnings
 ```
 
-This optional probe does not render screenshots. It records converter warning counts, remaining warning summaries, and warnings reduced by qfit preprocessing in the audit artifact so the next #949 slice can target issues QGIS itself reports, not just qfit's static style-expression audit.
+This optional probe does not render screenshots. It records converter warning counts, remaining warning summaries, warnings reduced by qfit preprocessing, and per-layer qfit-preprocessed warning summaries in the audit artifact so the next #949 slice can target issues QGIS itself reports, not just qfit's static style-expression audit.
 
 Use the audit together with the screenshot harness: first identify high-signal gaps visually, then check the corresponding style layers to decide the smallest safe qfit preprocessing improvement.
 
