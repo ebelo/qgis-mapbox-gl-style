@@ -276,8 +276,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         qfit_style = {"layers": [{"id": "poi-label"}]}
         fake_qgis, fake_core, fake_app, fake_converter = _fake_qgis_modules(
             [
-                ["road-primary: Skipping unsupported expression"],
-                ["poi-label: Referenced font DIN Pro Medium is not available on system"],
+                [
+                    "road-primary: Skipping unsupported expression",
+                    "poi-label: Skipping unsupported expression",
+                ],
+                ["poi-label: Skipping unsupported expression"],
             ]
         )
 
@@ -290,9 +293,25 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 qfit_preprocessed_style=qfit_style,
             )
 
-        self.assertEqual(report["raw"]["count"], 1)
+        self.assertEqual(report["raw"]["count"], 2)
         self.assertEqual(report["qfit_preprocessed"]["count"], 1)
-        self.assertEqual(report["warning_count_delta"], 0)
+        self.assertEqual(report["warning_count_delta"], 1)
+        self.assertEqual(
+            report["reduced_by_qfit"],
+            {
+                "by_message": [
+                    {
+                        "message": "Skipping unsupported expression",
+                        "raw_count": 2,
+                        "qfit_count": 1,
+                        "reduced_count": 1,
+                    }
+                ],
+                "by_layer": [
+                    {"layer": "road-primary", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                ],
+            },
+        )
         self.assertEqual(fake_converter.converted_styles, [raw_style, qfit_style])
         self.assertEqual(len(fake_app.created), 1)
         self.assertEqual(fake_app.created[0].args, [])
@@ -344,6 +363,19 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "by_layer": [{"layer": "poi-label", "count": 2}],
             },
             "warning_count_delta": 1,
+            "reduced_by_qfit": {
+                "by_message": [
+                    {
+                        "message": "Could not parse non-string color , skipping",
+                        "raw_count": 3,
+                        "qfit_count": 0,
+                        "reduced_count": 3,
+                    }
+                ],
+                "by_layer": [
+                    {"layer": "water-depth", "raw_count": 4, "qfit_count": 0, "reduced_count": 4}
+                ],
+            },
         }
 
         markdown = build_audit_markdown(audit)
@@ -351,8 +383,29 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("### QGIS converter warnings", markdown)
         self.assertIn("Raw style warnings: 3", markdown)
         self.assertIn("After qfit preprocessing: 2", markdown)
+        self.assertIn("#### Warnings reduced by qfit preprocessing", markdown)
+        self.assertIn("| `Could not parse non-string color , skipping` | 3 | 0 | 3 |", markdown)
+        self.assertIn("| `water-depth` | 4 | 0 | 4 |", markdown)
         self.assertIn("| `Skipping unsupported expression` | 2 |", markdown)
         self.assertIn("| `poi-label` | 2 |", markdown)
+
+    def test_markdown_omits_qgis_reduction_sections_when_no_reductions_exist(self):
+        audit = build_style_audit(SAMPLE_STYLE)
+        audit["qgis_converter_warnings"] = {
+            "raw": {"count": 1},
+            "qfit_preprocessed": {
+                "count": 1,
+                "by_message": [{"message": "Skipping unsupported expression", "count": 1}],
+                "by_layer": [{"layer": "poi-label", "count": 1}],
+            },
+            "warning_count_delta": 0,
+        }
+
+        markdown = build_audit_markdown(audit)
+
+        self.assertNotIn("#### Warnings reduced by qfit preprocessing", markdown)
+        self.assertNotIn("#### Layers with fewer warnings after qfit preprocessing", markdown)
+        self.assertIn("#### Remaining warnings by message", markdown)
 
     def test_render_json_returns_machine_readable_audit(self):
         audit = build_style_audit(SAMPLE_STYLE)

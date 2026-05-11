@@ -302,6 +302,46 @@ def _qgis_warning_summary(warnings: list[str]) -> dict[str, object]:
     }
 
 
+def _warning_reduction_summary(
+    raw_counts: list[dict[str, object]],
+    qfit_counts: list[dict[str, object]],
+    *,
+    key: str,
+) -> list[dict[str, object]]:
+    raw_by_key = {str(item.get(key) or ""): int(item.get("count") or 0) for item in raw_counts}
+    qfit_by_key = {str(item.get(key) or ""): int(item.get("count") or 0) for item in qfit_counts}
+    reductions = []
+    for name, raw_count in raw_by_key.items():
+        if not name:
+            continue
+        qfit_count = qfit_by_key.get(name, 0)
+        reduced_count = raw_count - qfit_count
+        if reduced_count > 0:
+            reductions.append(
+                {
+                    key: name,
+                    "raw_count": raw_count,
+                    "qfit_count": qfit_count,
+                    "reduced_count": reduced_count,
+                }
+            )
+    return sorted(reductions, key=lambda item: (-int(item["reduced_count"]), str(item[key])))
+
+
+def _qgis_warning_reduction_report(
+    raw_summary: dict[str, object],
+    qfit_summary: dict[str, object],
+) -> dict[str, object]:
+    raw_by_message = list(raw_summary.get("by_message") or [])
+    qfit_by_message = list(qfit_summary.get("by_message") or [])
+    raw_by_layer = list(raw_summary.get("by_layer") or [])
+    qfit_by_layer = list(qfit_summary.get("by_layer") or [])
+    return {
+        "by_message": _warning_reduction_summary(raw_by_message, qfit_by_message, key="message"),
+        "by_layer": _warning_reduction_summary(raw_by_layer, qfit_by_layer, key="layer"),
+    }
+
+
 def _collect_qgis_converter_warnings(style_definition: dict[str, object]) -> list[str]:
     from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
 
@@ -333,10 +373,13 @@ def _qgis_converter_warning_report(
     finally:
         if created_app:
             app.exitQgis()
+    raw_summary = _qgis_warning_summary(raw_warnings)
+    qfit_summary = _qgis_warning_summary(qfit_warnings)
     return {
-        "raw": _qgis_warning_summary(raw_warnings),
-        "qfit_preprocessed": _qgis_warning_summary(qfit_warnings),
+        "raw": raw_summary,
+        "qfit_preprocessed": qfit_summary,
         "warning_count_delta": len(raw_warnings) - len(qfit_warnings),
+        "reduced_by_qfit": _qgis_warning_reduction_report(raw_summary, qfit_summary),
     }
 
 
@@ -429,11 +472,37 @@ def _markdown_named_count_table(
     return lines
 
 
+def _markdown_warning_reduction_table(
+    items: list[dict[str, object]],
+    *,
+    key: str,
+    label: str,
+    empty: str = "—",
+) -> list[str]:
+    if not items:
+        return [empty, ""]
+    lines = [f"| {label} | Raw | After qfit | Reduced |", "| --- | ---: | ---: | ---: |"]
+    for item in items:
+        lines.append(
+            "| `{name}` | {raw_count} | {qfit_count} | {reduced_count} |".format(
+                name=item.get(key, ""),
+                raw_count=item.get("raw_count", 0),
+                qfit_count=item.get("qfit_count", 0),
+                reduced_count=item.get("reduced_count", 0),
+            )
+        )
+    lines.append("")
+    return lines
+
+
 def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     if not isinstance(report, dict):
         return []
     raw = report.get("raw") if isinstance(report.get("raw"), dict) else {}
     qfit = report.get("qfit_preprocessed") if isinstance(report.get("qfit_preprocessed"), dict) else {}
+    reduced = report.get("reduced_by_qfit") if isinstance(report.get("reduced_by_qfit"), dict) else {}
+    reduced_by_message = list(reduced.get("by_message") or [])
+    reduced_by_layer = list(reduced.get("by_layer") or [])
     lines = [
         "### QGIS converter warnings",
         "",
@@ -441,13 +510,33 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
         f"After qfit preprocessing: {qfit.get('count', 0)}",
         f"Warning count delta: {report.get('warning_count_delta', 0)}",
         "",
-        "#### Remaining warnings by message",
-        "",
-        *_markdown_named_count_table(list(qfit.get("by_message") or []), key="message", label="Message"),
-        "#### Remaining warnings by layer",
-        "",
-        *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
     ]
+    if reduced_by_message:
+        lines.extend(
+            [
+                "#### Warnings reduced by qfit preprocessing",
+                "",
+                *_markdown_warning_reduction_table(reduced_by_message, key="message", label="Message"),
+            ]
+        )
+    if reduced_by_layer:
+        lines.extend(
+            [
+                "#### Layers with fewer warnings after qfit preprocessing",
+                "",
+                *_markdown_warning_reduction_table(reduced_by_layer, key="layer", label="Layer"),
+            ]
+        )
+    lines.extend(
+        [
+            "#### Remaining warnings by message",
+            "",
+            *_markdown_named_count_table(list(qfit.get("by_message") or []), key="message", label="Message"),
+            "#### Remaining warnings by layer",
+            "",
+            *_markdown_named_count_table(list(qfit.get("by_layer") or []), key="layer", label="Layer"),
+        ]
+    )
     return lines
 
 
