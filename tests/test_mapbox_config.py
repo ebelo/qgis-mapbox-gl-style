@@ -331,6 +331,144 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         width = result["layers"][0]["paint"]["line-width"]
         self.assertEqual(width, 3.0)
 
+    def test_format_text_field_expression_uses_primary_label_field(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "format",
+                            ["get", "name"],
+                            {"font-scale": 1.0},
+                            "\n",
+                            {},
+                            ["get", "ele"],
+                            {"font-scale": 0.8},
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_nested_format_text_field_expression_uses_first_coalesced_field(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "format",
+                            ["coalesce", ["get", "name_en"], ["get", "name"]],
+                            {"font-scale": 1.0},
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name_en"])
+
+    def test_coalesce_text_field_expression_searches_nested_stringified_field(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "coalesce",
+                            ["to-string", ["get", "name"]],
+                            "",
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_coalesce_text_field_expression_preserves_direct_fallback_before_nested_optional_field(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "coalesce",
+                            ["concat", ["get", "ref"], " ", ["get", "name"]],
+                            ["get", "name"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_coalesce_text_field_expression_preserves_direct_fallback_before_stringified_optional_field(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "coalesce",
+                            ["to-string", ["get", "ref"]],
+                            ["get", "name"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_coalesce_text_field_expression_preserves_formatted_operand_order(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "coalesce",
+                            ["format", ["get", "name_en"], {}],
+                            ["get", "name"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name_en"])
+
+    def test_concat_text_field_expression_uses_first_stringified_field(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "concat",
+                            ["to-string", ["get", "ref"]],
+                            " ",
+                            ["get", "name"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "ref"])
+
     def test_original_style_not_mutated(self):
         expr = ["match", ["get", "class"], "motorway", "hsl(15, 100%, 75%)", "hsl(35, 89%, 75%)"]
         style = {"layers": [{"paint": {"line-color": expr}, "layout": {}}]}

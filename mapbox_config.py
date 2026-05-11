@@ -358,20 +358,87 @@ def _extract_midrange_size(expr: object) -> float | None:
     return None
 
 
+def _is_simple_text_field_reference(expr: object) -> bool:
+    return isinstance(expr, list) and len(expr) == 2 and expr[0] == "get" and isinstance(expr[1], str)
+
+
+def _first_text_field_reference_child(
+    children: list[object],
+    *,
+    allow_concat: bool,
+    allow_to_string: bool = True,
+) -> object | None:
+    for child in children:
+        if isinstance(child, dict):
+            continue
+        reference = _first_simple_text_field_reference(
+            child,
+            allow_concat=allow_concat,
+            allow_to_string=allow_to_string,
+        )
+        if reference is not None:
+            return reference
+    return None
+
+
+def _first_coalesced_text_field_reference(expr: list[object]) -> object | None:
+    reference = _first_text_field_reference_child(
+        expr[1:],
+        allow_concat=False,
+        allow_to_string=False,
+    )
+    if reference is not None:
+        return reference
+    return _first_text_field_reference_child(expr[1:], allow_concat=True)
+
+
+def _first_simple_text_field_reference(
+    expr: object,
+    *,
+    allow_concat: bool = True,
+    allow_to_string: bool = True,
+) -> object | None:
+    """Return the first direct ``['get', field]`` from text-oriented expressions."""
+    if not isinstance(expr, list) or not expr:
+        return None
+    if _is_simple_text_field_reference(expr):
+        return expr
+    op = expr[0]
+    if op == "coalesce":
+        return _first_coalesced_text_field_reference(expr)
+    if op == "concat" and not allow_concat:
+        return None
+    if op in {"concat", "format"}:
+        return _first_text_field_reference_child(
+            expr[1:],
+            allow_concat=allow_concat,
+            allow_to_string=allow_to_string,
+        )
+    if op == "to-string" and len(expr) >= 2:
+        if not allow_to_string:
+            return None
+        return _first_simple_text_field_reference(
+            expr[1],
+            allow_concat=allow_concat,
+            allow_to_string=allow_to_string,
+        )
+    return None
+
+
 def _simplify_text_field(expr: object) -> object:
     """Simplify a Mapbox text-field expression to the first simple field reference.
 
-    QGIS handles ``['get', 'name']`` but not ``['coalesce', ['get', 'name_en'], ['get', 'name'], ...]``.
-    We extract the first ``['get', <field>]`` from a coalesce and return it directly.
+    QGIS handles ``['get', 'name']`` but not richer Mapbox label expressions such
+    as ``coalesce`` or ``format``. We extract the first useful ``['get', <field>]``
+    reference so formatted labels still render with their primary label text.
     """
     if not isinstance(expr, list) or not expr:
         return expr
     op = expr[0]
-    if op == "coalesce":
-        # Return the first simple ['get', field] child
-        for child in expr[1:]:
-            if isinstance(child, list) and len(child) == 2 and child[0] == "get" and isinstance(child[1], str):
-                return child
+    if op in {"coalesce", "concat", "format", "to-string"}:
+        reference = _first_simple_text_field_reference(expr)
+        if reference is not None:
+            return reference
     if op == "step":
         # step expressions for text-field — find the first literal string fallback
         for item in expr[1:]:
