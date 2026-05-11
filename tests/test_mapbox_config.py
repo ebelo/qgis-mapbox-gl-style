@@ -354,7 +354,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
 
-    def test_nested_format_text_field_expression_uses_first_coalesced_field(self):
+    def test_nested_format_text_field_expression_prefers_generic_name_fallback(self):
         style = {
             "layers": [
                 {
@@ -371,7 +371,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name_en"])
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
 
     def test_coalesce_text_field_expression_searches_nested_stringified_field(self):
         style = {
@@ -430,7 +430,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
 
-    def test_coalesce_text_field_expression_preserves_formatted_operand_order(self):
+    def test_coalesce_text_field_expression_prefers_generic_name_over_formatted_locale(self):
         style = {
             "layers": [
                 {
@@ -447,7 +447,45 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_coalesce_text_field_expression_keeps_first_reference_without_generic_name(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "coalesce",
+                            ["get", "name_en"],
+                            ["get", "name_fr"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
         self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name_en"])
+
+    def test_coalesce_text_field_expression_preserves_non_locale_primary_before_name(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "coalesce",
+                            ["get", "ref"],
+                            ["get", "name"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "ref"])
 
     def test_concat_text_field_expression_uses_first_stringified_field(self):
         style = {
