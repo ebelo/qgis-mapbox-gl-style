@@ -120,6 +120,18 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
 
         self.assertEqual(audit["style"]["label"], "mapbox/outdoors-v12")
         self.assertEqual(audit["layer_count"], 5)
+        summary = audit["summary"]
+        simplified_counts = {
+            item["property"]: item["count"] for item in summary["qfit_simplifies_by_property"]
+        }
+        unresolved_counts = {
+            item["property"]: item["count"] for item in summary["qfit_unresolved_by_property"]
+        }
+        self.assertEqual(simplified_counts["layout.text-field"], 2)
+        self.assertEqual(simplified_counts["paint.line-width"], 1)
+        self.assertEqual(simplified_counts["layout.visibility"], 1)
+        self.assertEqual(unresolved_counts["layout.icon-image"], 1)
+        self.assertEqual(unresolved_counts["paint.line-dasharray"], 1)
 
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(layers["background"]["group"], "background")
@@ -163,6 +175,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
 
         self.assertIn("# Mapbox Outdoors style audit", markdown)
         self.assertIn("`road-primary`", markdown)
+        self.assertIn("## Summary", markdown)
+        self.assertIn("### Simplified/substituted by qfit", markdown)
+        self.assertIn("| `paint.line-width` | 1 |", markdown)
+        self.assertIn("### QGIS-dependent / unresolved", markdown)
+        self.assertIn("| `layout.icon-image` | 1 |", markdown)
+        self.assertIn("## Layers", markdown)
         self.assertIn("composite / road", markdown)
         self.assertIn("`paint.line-width`", markdown)
         self.assertIn("`layout.icon-image`", markdown)

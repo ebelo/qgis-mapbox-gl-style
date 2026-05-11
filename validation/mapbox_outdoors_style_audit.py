@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 import sys
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -255,6 +256,23 @@ def build_layer_audit(
     }
 
 
+def _property_count_summary(layers: list[dict[str, object]], key: str) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for layer in layers:
+        values = layer.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if isinstance(item, str):
+                counts[item] += 1
+            elif isinstance(item, dict) and isinstance(item.get("property"), str):
+                counts[item["property"]] += 1
+    return [
+        {"property": property_name, "count": count}
+        for property_name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def build_style_audit(
     style_definition: dict[str, object],
     *,
@@ -282,6 +300,10 @@ def build_style_audit(
         },
         "generated_at": generated_at.isoformat(),
         "layer_count": len(layers),
+        "summary": {
+            "qfit_simplifies_by_property": _property_count_summary(layers, "qfit_simplifies"),
+            "qfit_unresolved_by_property": _property_count_summary(layers, "qfit_unresolved"),
+        },
         "layers": layers,
     }
 
@@ -308,9 +330,20 @@ def _markdown_unresolved_list(unresolved: list[dict[str, str]], *, empty: str = 
     )
 
 
+def _markdown_count_table(items: list[dict[str, object]], *, empty: str = "—") -> list[str]:
+    if not items:
+        return [empty, ""]
+    lines = ["| Property | # Layers |", "| --- | ---: |"]
+    for item in items:
+        lines.append(f"| `{item.get('property', '')}` | {item.get('count', 0)} |")
+    lines.append("")
+    return lines
+
+
 def build_audit_markdown(audit: dict[str, object]) -> str:
     style = audit["style"] if isinstance(audit.get("style"), dict) else {}
     layers = audit.get("layers") if isinstance(audit.get("layers"), list) else []
+    summary = audit.get("summary") if isinstance(audit.get("summary"), dict) else {}
     lines = [
         f"# Mapbox Outdoors style audit — {style.get('label', 'mapbox/outdoors-v12')}",
         "",
@@ -319,6 +352,16 @@ def build_audit_markdown(audit: dict[str, object]) -> str:
         "",
         "This developer audit compares the live Mapbox style rules with qfit's current QGIS preprocessing.",
         "Use it to choose the next visual-parity slice before making rendering-sensitive changes.",
+        "",
+        "## Summary",
+        "",
+        "### Simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(list(summary.get("qfit_simplifies_by_property") or [])),
+        "### QGIS-dependent / unresolved",
+        "",
+        *_markdown_count_table(list(summary.get("qfit_unresolved_by_property") or [])),
+        "## Layers",
         "",
         "| Layer | Group | Source/filter | Zoom | Preserved | Simplified/substituted by qfit | QGIS-dependent / unresolved |",
         "| --- | --- | --- | --- | --- | --- | --- |",
