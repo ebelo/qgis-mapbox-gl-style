@@ -2561,6 +2561,10 @@ def build_style_audit(
         "layer_count": len(layers),
         "summary": {
             "qfit_simplifies_by_property": _property_count_summary(layers, "qfit_simplifies"),
+            "qfit_simplifies_by_layer_group_and_property": _property_group_count_summary(
+                layers,
+                "qfit_simplifies",
+            ),
             "qfit_unresolved_by_property": _property_count_summary(layers, "qfit_unresolved"),
             "qfit_unresolved_by_layer_group_and_property": _property_group_count_summary(
                 layers,
@@ -4097,6 +4101,11 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         "### Simplified/substituted by qfit",
         "",
         *_markdown_count_table(list(summary.get("qfit_simplifies_by_property") or [])),
+        "### Simplified/substituted by qfit by layer group",
+        "",
+        *_markdown_group_count_table(
+            list(summary.get("qfit_simplifies_by_layer_group_and_property") or [])
+        ),
         "### QGIS-dependent / unresolved",
         "",
         *_markdown_count_table(list(summary.get("qfit_unresolved_by_property") or [])),

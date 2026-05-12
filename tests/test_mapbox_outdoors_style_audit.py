@@ -201,6 +201,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         simplified_counts = {
             item["property"]: item["count"] for item in summary["qfit_simplifies_by_property"]
         }
+        simplified_group_counts = {
+            (item["group"], item["property"]): item["count"]
+            for item in summary["qfit_simplifies_by_layer_group_and_property"]
+        }
         unresolved_counts = {
             item["property"]: item["count"] for item in summary["qfit_unresolved_by_property"]
         }
@@ -223,6 +227,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(simplified_counts["layout.text-field"], 2)
         self.assertEqual(simplified_counts["paint.line-width"], 1)
         self.assertEqual(simplified_counts["layout.visibility"], 1)
+        self.assertEqual(simplified_group_counts[("pois/labels", "layout.text-field")], 1)
+        self.assertEqual(simplified_group_counts[("settlements/places", "layout.text-field")], 1)
+        self.assertEqual(simplified_group_counts[("roads/trails", "paint.line-width")], 1)
+        self.assertEqual(simplified_group_counts[("settlements/places", "layout.visibility")], 1)
         self.assertEqual(unresolved_counts["filter"], 1)
         self.assertEqual(unresolved_counts["layout.icon-image"], 1)
         self.assertEqual(unresolved_counts["paint.line-dasharray"], 1)
@@ -2635,6 +2643,8 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("## Summary", markdown)
         self.assertIn("### Simplified/substituted by qfit", markdown)
         self.assertIn("| `paint.line-width` | 1 |", markdown)
+        self.assertIn("### Simplified/substituted by qfit by layer group", markdown)
+        self.assertIn("| `roads/trails` | `paint.line-width` | 1 |", markdown)
         self.assertIn("### QGIS-dependent / unresolved", markdown)
         self.assertIn("| `filter` | 1 |", markdown)
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
