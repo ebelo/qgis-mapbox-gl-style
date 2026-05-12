@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import html
 import json
 import os
 import sys
@@ -961,6 +962,48 @@ def _style_without_property_path(
     return stripped_style, removed_count
 
 
+def _property_value_for_layer_path(layer: dict[str, object], property_path: str) -> object:
+    if "." not in property_path:
+        return layer.get(property_path, _ABSENT)
+    section_name, property_name = property_path.split(".", 1)
+    section = layer.get(section_name)
+    if isinstance(section, dict):
+        return section.get(property_name, _ABSENT)
+    return _ABSENT
+
+
+def _expression_property_values_by_layer(
+    style_definition: dict[str, object],
+    property_path: str,
+) -> dict[str, object]:
+    layers = style_definition.get("layers")
+    if not isinstance(layers, list):
+        return {}
+    values: dict[str, object] = {}
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        layer_id = str(layer.get("id") or "")
+        value = _property_value_for_layer_path(layer, property_path)
+        if layer_id and value is not _ABSENT and _is_mapbox_expression(value):
+            values[layer_id] = value
+    return values
+
+
+def _layer_reductions_with_property_values(
+    layer_reductions: list[dict[str, object]],
+    property_values_by_layer: dict[str, object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer_reduction in layer_reductions:
+        row = dict(layer_reduction)
+        layer_id = str(row.get("layer") or "")
+        if layer_id in property_values_by_layer:
+            row["property_value"] = property_values_by_layer[layer_id]
+        rows.append(row)
+    return rows
+
+
 def _warning_count_for_message(summary: dict[str, object], message: str) -> int:
     for item in summary.get("by_message") or []:
         if item.get("message") == message:
@@ -985,6 +1028,14 @@ def _qgis_property_removal_impact_report(
         stripped_warnings = _collect_qgis_converter_warnings(stripped_style)
         stripped_summary = _qgis_warning_summary(stripped_warnings)
         stripped_warning_count = len(stripped_warnings)
+        by_layer = _layer_reductions_with_property_values(
+            _warning_reduction_summary(
+                list(qfit_summary.get("by_layer") or []),
+                list(stripped_summary.get("by_layer") or []),
+                key="layer",
+            ),
+            _expression_property_values_by_layer(qfit_preprocessed_style, property_path),
+        )
         rows.append(
             {
                 "property": property_path,
@@ -999,11 +1050,7 @@ def _qgis_property_removal_impact_report(
                         list(stripped_summary.get("by_message") or []),
                         key="message",
                     ),
-                    "by_layer": _warning_reduction_summary(
-                        list(qfit_summary.get("by_layer") or []),
-                        list(stripped_summary.get("by_layer") or []),
-                        key="layer",
-                    ),
+                    "by_layer": by_layer,
                 },
             }
         )
@@ -2040,6 +2087,11 @@ def _markdown_property_removal_impact_table(rows: list[dict[str, object]]) -> li
     return lines
 
 
+def _markdown_code_cell(text: str) -> str:
+    escaped = html.escape(text, quote=False).replace("|", "&#124;")
+    return f"<code>{escaped}</code>"
+
+
 def _property_removal_impact_layer_reductions(
     rows: list[dict[str, object]],
     *,
@@ -2067,14 +2119,18 @@ def _markdown_property_removal_impact_layer_table(rows: list[dict[str, object]])
     lines = [
         "##### Top warning reductions by property and layer",
         "",
-        "| Property | Layer | Before removal | After removal | Reduced |",
-        "| --- | --- | ---: | ---: | ---: |",
+        "| Property | Layer | Expression | Before removal | After removal | Reduced |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
     ]
     for row in rows:
+        expression = "—"
+        if "property_value" in row:
+            expression = _markdown_code_cell(_compact_json(row.get("property_value")))
         lines.append(
-            "| `{property}` | `{layer}` | {raw_count} | {qfit_count} | {reduced_count} |".format(
+            "| `{property}` | `{layer}` | {expression} | {raw_count} | {qfit_count} | {reduced_count} |".format(
                 property=row.get("property", ""),
                 layer=row.get("layer", ""),
+                expression=expression,
                 raw_count=row.get("raw_count", 0),
                 qfit_count=row.get("qfit_count", 0),
                 reduced_count=row.get("reduced_count", 0),

@@ -537,7 +537,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                             }
                         ],
                         "by_layer": [
-                            {"layer": "road-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                            {
+                                "layer": "road-label",
+                                "raw_count": 1,
+                                "qfit_count": 0,
+                                "reduced_count": 1,
+                                "property_value": ["==", ["get", "class"], "road"],
+                            }
                         ],
                     },
                 },
@@ -557,7 +563,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                             }
                         ],
                         "by_layer": [
-                            {"layer": "poi-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                            {
+                                "layer": "poi-label",
+                                "raw_count": 1,
+                                "qfit_count": 0,
+                                "reduced_count": 1,
+                                "property_value": ["get", "maki"],
+                            }
                         ],
                     },
                 },
@@ -631,6 +643,72 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     "qfit_count": 1,
                     "reduced_count": 2,
                 }
+            ],
+        )
+
+    def test_expression_property_values_by_layer_keeps_expression_instances(self):
+        style = {
+            "version": 8,
+            "layers": [
+                {"id": "literal", "paint": {"line-opacity": 0.5}},
+                {"id": "expr", "paint": {"line-opacity": ["step", ["zoom"], 0.4, 12, 1.0]}},
+                {"id": "filter", "filter": ["==", ["get", "class"], "road"]},
+            ],
+        }
+        layer_reductions = [
+            {"layer": "expr", "raw_count": 2, "qfit_count": 1, "reduced_count": 1},
+            {"layer": "literal", "raw_count": 1, "qfit_count": 0, "reduced_count": 1},
+        ]
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_property_values_by_layer(style, "paint.line-opacity"),
+            {"expr": ["step", ["zoom"], 0.4, 12, 1.0]},
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_property_values_by_layer(style, "filter"),
+            {"filter": ["==", ["get", "class"], "road"]},
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._layer_reductions_with_property_values(
+                layer_reductions,
+                {"expr": ["step", ["zoom"], 0.4, 12, 1.0]},
+            ),
+            [
+                {
+                    "layer": "expr",
+                    "raw_count": 2,
+                    "qfit_count": 1,
+                    "reduced_count": 1,
+                    "property_value": ["step", ["zoom"], 0.4, 12, 1.0],
+                },
+                {"layer": "literal", "raw_count": 1, "qfit_count": 0, "reduced_count": 1},
+            ],
+        )
+
+    def test_markdown_property_impact_layer_table_escapes_expression_cells(self):
+        self.assertEqual(
+            mapbox_outdoors_style_audit._markdown_property_removal_impact_layer_table(
+                [
+                    {
+                        "property": "layout.text-field",
+                        "layer": "pipe-label",
+                        "property_value": ["concat", ["get", "a|b"], "`suffix`"],
+                        "raw_count": 2,
+                        "qfit_count": 1,
+                        "reduced_count": 1,
+                    }
+                ]
+            ),
+            [
+                "##### Top warning reductions by property and layer",
+                "",
+                "| Property | Layer | Expression | Before removal | After removal | Reduced |",
+                "| --- | --- | --- | ---: | ---: | ---: |",
+                (
+                    "| `layout.text-field` | `pipe-label` | "
+                    '<code>["concat",["get","a&#124;b"],"`suffix`"]</code> | 2 | 1 | 1 |'
+                ),
+                "",
             ],
         )
 
@@ -1567,7 +1645,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "skipping_unsupported_expression_delta": 1,
                         "reduced_from_qfit": {
                             "by_layer": [
-                                {"layer": "poi-label", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                                {
+                                    "layer": "poi-label",
+                                    "raw_count": 2,
+                                    "qfit_count": 1,
+                                    "reduced_count": 1,
+                                    "property_value": ["==", ["get", "class"], "poi"],
+                                }
                             ]
                         },
                     },
@@ -1579,7 +1663,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "skipping_unsupported_expression_delta": -2,
                         "reduced_from_qfit": {
                             "by_layer": [
-                                {"layer": "road-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                                {
+                                    "layer": "road-label",
+                                    "raw_count": 1,
+                                    "qfit_count": 0,
+                                    "reduced_count": 1,
+                                    "property_value": ["get", "name"],
+                                }
                             ]
                         },
                     },
@@ -1831,9 +1921,15 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| `filter` | 3 | 1 | 1 | 1 |", markdown)
         self.assertIn("| `layout.text-field` | 1 | 5 | -3 | -2 |", markdown)
         self.assertIn("##### Top warning reductions by property and layer", markdown)
-        self.assertIn("| Property | Layer | Before removal | After removal | Reduced |", markdown)
-        self.assertIn("| `filter` | `poi-label` | 2 | 1 | 1 |", markdown)
-        self.assertNotIn("| `layout.text-field` | `road-label` | 1 | 0 | 1 |", markdown)
+        self.assertIn("| Property | Layer | Expression | Before removal | After removal | Reduced |", markdown)
+        self.assertIn(
+            '| `filter` | `poi-label` | <code>["==",["get","class"],"poi"]</code> | 2 | 1 | 1 |',
+            markdown,
+        )
+        self.assertNotIn(
+            '| `layout.text-field` | `road-label` | <code>["get","name"]</code> | 1 | 0 | 1 |',
+            markdown,
+        )
         self.assertIn("#### Diagnostic filter-removal probe", markdown)
         self.assertIn("This is not a rendering-safe qfit preprocessing mode", markdown)
         self.assertIn("Filters removed in probe: 1", markdown)
