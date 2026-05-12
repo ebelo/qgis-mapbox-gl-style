@@ -23,6 +23,9 @@ _MARKDOWN_MESSAGE_LABEL = "Message"
 _MARKDOWN_LAYER_LABEL = "Layer"
 _MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL = "Warning count delta from qfit preprocessing"
 _LINE_OPACITY_PROBE_ZOOM = 12.0
+_SPRITE_CONTEXT_PROBE_KEY = "with_sprite_context_probe"
+_SPRITE_CONTEXT_DEFINITION_COUNT_KEY = "sprite_definition_count"
+_SPRITE_CONTEXT_IMAGE_LOADED_KEY = "sprite_image_loaded"
 _SCALAR_LINE_OPACITY_PROBE_KEY = "with_scalar_line_opacity_probe"
 _LINE_OPACITY_EXPRESSION_COUNT_KEY = "line_opacity_expression_count_replaced"
 
@@ -30,8 +33,10 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from qfit.mapbox_config import (  # noqa: E402
+    MapboxSpriteResources,
     QGIS_TEXT_FONT_FALLBACK,
     fetch_mapbox_style_definition,
+    fetch_mapbox_sprite_resources,
     simplify_mapbox_style_expressions,
 )
 
@@ -40,7 +45,10 @@ _MAPBOX_SPRITE_PATTERN_LIMITATION = (
     "Mapbox sprite patterns are handed to QGIS and may not render without an equivalent local pattern."
 )
 _UNSUPPORTED_CUES: dict[tuple[str, str], str] = {
-    ("layout", "icon-image"): "Mapbox sprite references are handed to QGIS, but native vector mode cannot consume Mapbox sprites directly.",
+    ("layout", "icon-image"): (
+        "Mapbox sprite references use qfit-supplied Mapbox sprites when available, "
+        "but QGIS may still not interpret data-driven sprite expressions."
+    ),
     ("layout", "text-font"): "Mapbox font stacks are handed to QGIS and may be substituted by locally available fonts.",
     ("paint", "fill-pattern"): _MAPBOX_SPRITE_PATTERN_LIMITATION,
     ("paint", "line-pattern"): _MAPBOX_SPRITE_PATTERN_LIMITATION,
@@ -162,6 +170,7 @@ class StyleAuditConfig:
     style_id: str = DEFAULT_MAPBOX_STYLE_ID
     generated_at: dt.datetime | None = None
     include_qgis_converter_warnings: bool = False
+    sprite_resources: MapboxSpriteResources | None = None
 
 
 def _utc_timestamp(now: dt.datetime | None = None) -> str:
@@ -737,6 +746,12 @@ def _annotate_qgis_warning_group_summaries(
         else {}
     )
     _annotate_probe_warning_groups(line_opacity_probe, qfit_summary, layer_groups)
+    sprite_context_probe = (
+        warning_report.get(_SPRITE_CONTEXT_PROBE_KEY)
+        if isinstance(warning_report.get(_SPRITE_CONTEXT_PROBE_KEY), dict)
+        else {}
+    )
+    _annotate_probe_warning_groups(sprite_context_probe, qfit_summary, layer_groups)
 
 
 def _annotate_layers_with_qgis_warnings(
@@ -914,7 +929,38 @@ def _style_with_scalar_line_opacity(style_definition: dict[str, object]) -> tupl
     return style_with_scalar_opacity, replaced_count
 
 
-def _collect_qgis_converter_warnings(style_definition: dict[str, object]) -> list[str]:
+def _qgis_conversion_context_with_sprites(sprite_resources: MapboxSpriteResources):
+    from qgis.PyQt.QtGui import QImage  # noqa: PLC0415
+    from qgis.core import QgsMapBoxGlStyleConversionContext, Qgis  # noqa: PLC0415
+
+    ctx = QgsMapBoxGlStyleConversionContext()
+    ctx.setTargetUnit(Qgis.RenderUnit.Millimeters)
+    ctx.setPixelSizeConversionFactor(25.4 / 96.0)
+    sprite_image = QImage()
+    sprite_image_loaded = sprite_image.loadFromData(sprite_resources.image_bytes)
+    if sprite_image_loaded:
+        argb_format = getattr(QImage, "Format_ARGB32", None)
+        if argb_format is not None:
+            sprite_image = sprite_image.convertToFormat(argb_format)
+        ctx.setSprites(sprite_image, sprite_resources.definitions)
+    return ctx, sprite_image_loaded
+
+
+def _collect_qgis_converter_warnings_with_sprite_context(
+    style_definition: dict[str, object],
+    sprite_resources: MapboxSpriteResources,
+) -> tuple[list[str], bool]:
+    from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
+
+    converter = QgsMapBoxGlStyleConverter()
+    sprite_context, sprite_image_loaded = _qgis_conversion_context_with_sprites(sprite_resources)
+    converter.convert(style_definition, sprite_context)
+    return list(converter.warnings()), sprite_image_loaded
+
+
+def _collect_qgis_converter_warnings(
+    style_definition: dict[str, object],
+) -> list[str]:
     from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
 
     converter = QgsMapBoxGlStyleConverter()
@@ -926,6 +972,7 @@ def _qgis_converter_warning_report(
     *,
     raw_style: dict[str, object],
     qfit_preprocessed_style: dict[str, object],
+    sprite_resources: MapboxSpriteResources | None = None,
 ) -> dict[str, object]:
     # Converter-only audits do not render, but headless environments can still abort when Qt
     # defaults to xcb. Prefer offscreen unless the caller explicitly chose another platform.
@@ -950,6 +997,14 @@ def _qgis_converter_warning_report(
             qfit_preprocessed_style
         )
         scalar_line_opacity_warnings = _collect_qgis_converter_warnings(scalar_line_opacity_style)
+        sprite_image_loaded = None
+        if sprite_resources is not None:
+            sprite_context_warnings, sprite_image_loaded = _collect_qgis_converter_warnings_with_sprite_context(
+                qfit_preprocessed_style,
+                sprite_resources,
+            )
+        else:
+            sprite_context_warnings = None
     finally:
         if created_app:
             app.exitQgis()
@@ -958,7 +1013,7 @@ def _qgis_converter_warning_report(
     filterless_summary = _qgis_warning_summary(filterless_warnings)
     iconless_summary = _qgis_warning_summary(iconless_warnings)
     scalar_line_opacity_summary = _qgis_warning_summary(scalar_line_opacity_warnings)
-    return {
+    report = {
         "raw": raw_summary,
         "qfit_preprocessed": qfit_summary,
         "warning_count_delta": len(raw_warnings) - len(qfit_warnings),
@@ -982,6 +1037,16 @@ def _qgis_converter_warning_report(
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, scalar_line_opacity_summary),
         },
     }
+    if sprite_context_warnings is not None:
+        sprite_context_summary = _qgis_warning_summary(sprite_context_warnings)
+        report[_SPRITE_CONTEXT_PROBE_KEY] = {
+            _SPRITE_CONTEXT_DEFINITION_COUNT_KEY: len(sprite_resources.definitions),
+            _SPRITE_CONTEXT_IMAGE_LOADED_KEY: bool(sprite_image_loaded),
+            "summary": sprite_context_summary,
+            "warning_count_delta_from_qfit": len(qfit_warnings) - len(sprite_context_warnings),
+            "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, sprite_context_summary),
+        }
+    return report
 
 
 def build_style_audit(
@@ -1032,6 +1097,7 @@ def build_style_audit(
         warning_report = _qgis_converter_warning_report(
             raw_style=style_definition,
             qfit_preprocessed_style=simplified_style,
+            sprite_resources=resolved_config.sprite_resources,
         )
         _annotate_qgis_warning_group_summaries(layers, warning_report)
         audit["qgis_converter_warnings"] = warning_report
@@ -1043,6 +1109,10 @@ def _markdown_list(items: list[str], *, empty: str = "—") -> str:
     if not items:
         return empty
     return "<br>".join(items)
+
+
+def _markdown_yes_no(value: object) -> str:
+    return "yes" if value is True else "no"
 
 
 def _markdown_change_list(changes: list[dict[str, str]], *, empty: str = "—") -> str:
@@ -1482,6 +1552,84 @@ def _markdown_line_opacity_probe(probe: object) -> list[str]:
     return lines
 
 
+def _markdown_sprite_context_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    lines = [
+        "#### Runtime sprite context probe",
+        "",
+        "This mirrors qfit's sprite-aware vector styling path when Mapbox sprite resources are available.",
+        "Use it to separate missing sprite resources from remaining unsupported data-driven sprite expressions.",
+        "",
+        f"Sprite definitions available in probe: {probe.get(_SPRITE_CONTEXT_DEFINITION_COUNT_KEY, 0)}",
+        f"Sprite image loaded in probe: {_markdown_yes_no(probe.get(_SPRITE_CONTEXT_IMAGE_LOADED_KEY))}",
+        f"Warnings with sprite context: {summary.get('count', 0)}",
+        f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
+        "",
+    ]
+    by_message = list(reduced.get("by_message") or [])
+    by_group = list(reduced.get("by_layer_group") or [])
+    if by_message:
+        lines.extend(
+            [
+                "##### Sprite context reductions by message",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_message,
+                    key="message",
+                    label=_MARKDOWN_MESSAGE_LABEL,
+                    before_label="Before sprite context",
+                    after_label="With sprite context",
+                ),
+            ]
+        )
+    if by_group:
+        lines.extend(
+            [
+                "##### Sprite context reductions by layer group",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_group,
+                    key="group",
+                    label=_MARKDOWN_LAYER_GROUP_LABEL,
+                    before_label="Before sprite context",
+                    after_label="With sprite context",
+                ),
+            ]
+        )
+    lines.extend(
+        [
+            "##### Remaining sprite-context warnings by message",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_message") or []),
+                key="message",
+                label=_MARKDOWN_MESSAGE_LABEL,
+            ),
+            "##### Remaining sprite-context warnings by layer group",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer_group") or []),
+                key="group",
+                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            ),
+            "##### Remaining sprite-context warnings by layer group and message",
+            "",
+            *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
+            "##### Remaining sprite-context warnings by layer",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer") or []),
+                key="layer",
+                label=_MARKDOWN_LAYER_LABEL,
+            ),
+        ]
+    )
+    return lines
+
+
 def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     if not isinstance(report, dict):
         return []
@@ -1494,6 +1642,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     filterless_probe = report.get("without_filters_probe")
     icon_image_probe = report.get("without_icon_images_probe")
     line_opacity_probe = report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
+    sprite_context_probe = report.get(_SPRITE_CONTEXT_PROBE_KEY)
     lines = [
         "### QGIS converter warnings",
         "",
@@ -1565,6 +1714,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
                 label=_MARKDOWN_LAYER_LABEL,
             ),
             *_markdown_filterless_probe(filterless_probe),
+            *_markdown_sprite_context_probe(sprite_context_probe),
             *_markdown_icon_image_probe(icon_image_probe),
             *_markdown_line_opacity_probe(line_opacity_probe),
         ]
@@ -1724,11 +1874,30 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    token = None
     if args.style_json is not None:
         style_definition = load_style_definition(args.style_json)
+        token = (
+            args.mapbox_token
+            or os.environ.get("MAPBOX_ACCESS_TOKEN")
+            or os.environ.get("QFIT_MAPBOX_ACCESS_TOKEN")
+        )
     else:
         token = resolve_mapbox_token(provided_token=args.mapbox_token)
         style_definition = fetch_mapbox_style_definition(token, args.style_owner, args.style_id)
+
+    sprite_resources = None
+    sprite_url = style_definition.get("sprite") if isinstance(style_definition.get("sprite"), str) else None
+    if args.include_qgis_converter_warnings and token:
+        try:
+            sprite_resources = fetch_mapbox_sprite_resources(
+                token,
+                args.style_owner,
+                args.style_id,
+                sprite_url=sprite_url,
+            )
+        except (RuntimeError, KeyError, ValueError, OSError):
+            sprite_resources = None
 
     audit = build_style_audit(
         style_definition,
@@ -1736,6 +1905,7 @@ def main(argv: list[str] | None = None) -> int:
             style_owner=args.style_owner,
             style_id=args.style_id,
             include_qgis_converter_warnings=args.include_qgis_converter_warnings,
+            sprite_resources=sprite_resources,
         ),
     )
     content = render_audit(audit, output_format=args.format)

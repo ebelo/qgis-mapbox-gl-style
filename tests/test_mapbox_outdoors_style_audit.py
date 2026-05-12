@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from tests import _path  # noqa: F401
 
+from qfit.mapbox_config import MapboxSpriteResources
 from qfit.validation import mapbox_outdoors_style_audit
 from qfit.validation.mapbox_outdoors_style_audit import (
     StyleAuditConfig,
@@ -123,20 +124,46 @@ def _fake_qgis_modules(warning_sets, *, existing_app=None):
 
     class FakeQgsMapBoxGlStyleConverter:
         converted_styles = []
+        converted_contexts = []
         created_count = 0
 
         def __init__(self):
             self.index = FakeQgsMapBoxGlStyleConverter.created_count
             FakeQgsMapBoxGlStyleConverter.created_count += 1
 
-        def convert(self, style_definition):
+        def convert(self, style_definition, context=None):
             FakeQgsMapBoxGlStyleConverter.converted_styles.append(style_definition)
+            FakeQgsMapBoxGlStyleConverter.converted_contexts.append(context)
 
         def warnings(self):
             return warning_sets[self.index]
 
+    class FakeQgsMapBoxGlStyleConversionContext:
+        created = []
+
+        def __init__(self):
+            self.target_unit = None
+            self.pixel_size_conversion_factor = None
+            self.sprites = None
+            FakeQgsMapBoxGlStyleConversionContext.created.append(self)
+
+        def setTargetUnit(self, unit):
+            self.target_unit = unit
+
+        def setPixelSizeConversionFactor(self, factor):
+            self.pixel_size_conversion_factor = factor
+
+        def setSprites(self, image, definitions):
+            self.sprites = (image, definitions)
+
+    class FakeQgis:
+        class RenderUnit:
+            Millimeters = "millimeters"
+
     qgis_core.QgsApplication = FakeQgsApplication
     qgis_core.QgsMapBoxGlStyleConverter = FakeQgsMapBoxGlStyleConverter
+    qgis_core.QgsMapBoxGlStyleConversionContext = FakeQgsMapBoxGlStyleConversionContext
+    qgis_core.Qgis = FakeQgis
     qgis_module.core = qgis_core
     return qgis_module, qgis_core, FakeQgsApplication, FakeQgsMapBoxGlStyleConverter
 
@@ -845,6 +872,123 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["warnings"], ["line opacity warning"])
         self.assertEqual(fake_app.created, [])
 
+    def test_qgis_converter_warning_report_can_include_sprite_context_probe(self):
+        class FakeQImage:
+            Format_ARGB32 = "argb32"
+
+            def __init__(self):
+                self.loaded_data = None
+                self.converted_format = None
+
+            def loadFromData(self, data):
+                self.loaded_data = data
+                return True
+
+            def convertToFormat(self, image_format):
+                self.converted_format = image_format
+                return self
+
+        fake_qt = ModuleType("qgis.PyQt")
+        fake_qt_gui = ModuleType("qgis.PyQt.QtGui")
+        fake_qt_gui.QImage = FakeQImage
+        fake_qgis, fake_core, fake_app, fake_converter = _fake_qgis_modules(
+            [
+                ["raw warning"],
+                ["poi-label: Could not retrieve sprite 'park'", "poi-label: Skipping unsupported expression"],
+                ["filterless warning"],
+                ["iconless warning"],
+                ["line opacity warning"],
+                ["poi-label: Skipping unsupported expression"],
+            ]
+        )
+        sprite_resources = MapboxSpriteResources(definitions={"park": {"x": 0}}, image_bytes=b"png-bytes")
+
+        with patch.dict(
+            sys.modules,
+            {
+                "qgis": fake_qgis,
+                "qgis.core": fake_core,
+                "qgis.PyQt": fake_qt,
+                "qgis.PyQt.QtGui": fake_qt_gui,
+            },
+        ):
+            report = mapbox_outdoors_style_audit._qgis_converter_warning_report(
+                raw_style={"layers": []},
+                qfit_preprocessed_style={"layers": [{"id": "poi-label"}]},
+                sprite_resources=sprite_resources,
+            )
+
+        probe = report["with_sprite_context_probe"]
+        self.assertEqual(probe["sprite_definition_count"], 1)
+        self.assertTrue(probe["sprite_image_loaded"])
+        self.assertEqual(probe["summary"]["warnings"], ["poi-label: Skipping unsupported expression"])
+        self.assertEqual(probe["warning_count_delta_from_qfit"], 1)
+        self.assertEqual(
+            probe["reduced_from_qfit"]["by_message"],
+            [
+                {
+                    "message": "Could not retrieve sprite 'park'",
+                    "raw_count": 1,
+                    "qfit_count": 0,
+                    "reduced_count": 1,
+                }
+            ],
+        )
+        sprite_context = fake_converter.converted_contexts[5]
+        self.assertEqual(sprite_context.target_unit, "millimeters")
+        self.assertAlmostEqual(sprite_context.pixel_size_conversion_factor, 25.4 / 96.0)
+        image, definitions = sprite_context.sprites
+        self.assertEqual(image.loaded_data, b"png-bytes")
+        self.assertEqual(image.converted_format, "argb32")
+        self.assertEqual(definitions, {"park": {"x": 0}})
+        self.assertEqual(len(fake_app.created), 1)
+
+    def test_qgis_converter_warning_report_marks_failed_sprite_image_load(self):
+        class FakeQImage:
+            Format_ARGB32 = "argb32"
+
+            def loadFromData(self, _data):
+                return False
+
+            def convertToFormat(self, _image_format):
+                raise AssertionError("undecodable sprite images must not be converted")
+
+        fake_qt = ModuleType("qgis.PyQt")
+        fake_qt_gui = ModuleType("qgis.PyQt.QtGui")
+        fake_qt_gui.QImage = FakeQImage
+        fake_qgis, fake_core, _fake_app, fake_converter = _fake_qgis_modules(
+            [
+                ["raw warning"],
+                ["poi-label: Could not retrieve sprite 'park'"],
+                ["filterless warning"],
+                ["iconless warning"],
+                ["line opacity warning"],
+                ["poi-label: Could not retrieve sprite 'park'"],
+            ]
+        )
+        sprite_resources = MapboxSpriteResources(definitions={"park": {"x": 0}}, image_bytes=b"not-an-image")
+
+        with patch.dict(
+            sys.modules,
+            {
+                "qgis": fake_qgis,
+                "qgis.core": fake_core,
+                "qgis.PyQt": fake_qt,
+                "qgis.PyQt.QtGui": fake_qt_gui,
+            },
+        ):
+            report = mapbox_outdoors_style_audit._qgis_converter_warning_report(
+                raw_style={"layers": []},
+                qfit_preprocessed_style={"layers": [{"id": "poi-label"}]},
+                sprite_resources=sprite_resources,
+            )
+
+        probe = report["with_sprite_context_probe"]
+        self.assertEqual(probe["sprite_definition_count"], 1)
+        self.assertFalse(probe["sprite_image_loaded"])
+        self.assertEqual(probe["warning_count_delta_from_qfit"], 0)
+        self.assertIsNone(fake_converter.converted_contexts[5].sprites)
+
     def test_markdown_summarizes_source_filter_preserved_and_unresolved_cues(self):
         audit = build_style_audit(SAMPLE_STYLE)
         markdown = build_audit_markdown(audit)
@@ -1018,6 +1162,33 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     ],
                 },
             },
+            "with_sprite_context_probe": {
+                "sprite_definition_count": 2,
+                "sprite_image_loaded": True,
+                "summary": {
+                    "count": 1,
+                    "by_message": [{"message": "Skipping unsupported expression", "count": 1}],
+                    "by_layer_group": [{"group": "pois/labels", "count": 1}],
+                    "by_layer_group_and_message": [
+                        {"group": "pois/labels", "message": "Skipping unsupported expression", "count": 1}
+                    ],
+                    "by_layer": [{"layer": "poi-label", "count": 1}],
+                },
+                "warning_count_delta_from_qfit": 1,
+                "reduced_from_qfit": {
+                    "by_message": [
+                        {
+                            "message": "Could not retrieve sprite 'park'",
+                            "raw_count": 1,
+                            "qfit_count": 0,
+                            "reduced_count": 1,
+                        }
+                    ],
+                    "by_layer_group": [
+                        {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                    ],
+                },
+            },
         }
         layers = {layer["id"]: layer for layer in audit["layers"]}
         layers["poi-label"]["qgis_converter_warnings"] = {
@@ -1088,6 +1259,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| Layer group | Before icon probe | Without icon-image | Reduced |", markdown)
         self.assertIn("##### Remaining icon probe warnings by message", markdown)
         self.assertIn("##### Remaining icon probe warnings by layer", markdown)
+        self.assertIn("#### Runtime sprite context probe", markdown)
+        self.assertIn("Sprite definitions available in probe: 2", markdown)
+        self.assertIn("Sprite image loaded in probe: yes", markdown)
+        self.assertIn("Warnings with sprite context: 1", markdown)
+        self.assertIn("##### Sprite context reductions by message", markdown)
+        self.assertIn("| Message | Before sprite context | With sprite context | Reduced |", markdown)
+        self.assertIn("| `Could not retrieve sprite 'park'` | 1 | 0 | 1 |", markdown)
+        self.assertIn("##### Sprite context reductions by layer group", markdown)
+        self.assertIn("##### Remaining sprite-context warnings by message", markdown)
+        self.assertIn("##### Remaining sprite-context warnings by layer", markdown)
         self.assertIn("#### Diagnostic line-opacity scalarization probe", markdown)
         self.assertIn("Line opacity expressions replaced in probe: 2", markdown)
         self.assertIn("Warnings after scalar line opacity: 1", markdown)
@@ -1165,6 +1346,47 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             self.assertIn("poi-label", output_path.read_text(encoding="utf-8"))
             self.assertTrue(output_path.is_relative_to(Path(tmp_dir)))
             print_mock.assert_called_once_with(output_path)
+
+    def test_main_fetches_sprite_resources_for_live_qgis_warning_audit(self):
+        style_definition = {"version": 8, "sprite": "mapbox://sprites/shared-owner/shared-style", "layers": []}
+        sprite_resources = MapboxSpriteResources(definitions={"park": {"x": 0}}, image_bytes=b"png-bytes")
+        audit = {
+            "style": {"label": "mapbox/outdoors-v12"},
+            "generated_at": "2026-05-12T01:45:00+00:00",
+            "layer_count": 0,
+            "summary": {},
+            "layers": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.object(
+            mapbox_outdoors_style_audit,
+            "DEFAULT_OUTPUT_ROOT",
+            Path(tmp_dir),
+        ), patch.object(
+            mapbox_outdoors_style_audit,
+            "fetch_mapbox_style_definition",
+            return_value=style_definition,
+        ), patch.object(
+            mapbox_outdoors_style_audit,
+            "fetch_mapbox_sprite_resources",
+            return_value=sprite_resources,
+        ) as sprite_fetch, patch.object(
+            mapbox_outdoors_style_audit,
+            "build_style_audit",
+            return_value=audit,
+        ) as build_audit, patch("builtins.print"):
+            result = main(["--mapbox-token", "pk.test", "--include-qgis-converter-warnings", "--format", "json"])
+
+        self.assertEqual(result, 0)
+        sprite_fetch.assert_called_once_with(
+            "pk.test",
+            "mapbox",
+            "outdoors-v12",
+            sprite_url="mapbox://sprites/shared-owner/shared-style",
+        )
+        config = build_audit.call_args.kwargs["config"]
+        self.assertTrue(config.include_qgis_converter_warnings)
+        self.assertIs(config.sprite_resources, sprite_resources)
 
     def test_parser_exposes_json_and_style_json_options(self):
         args = build_parser().parse_args(
