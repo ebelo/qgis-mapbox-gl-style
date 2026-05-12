@@ -1660,11 +1660,8 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     "filter": [
                         "all",
                         [
-                            "match",
-                            ["get", "class"],
-                            "path",
-                            ["step", ["zoom"], True, 12, False],
-                            False,
+                            "!",
+                            ["match", ["get", "type"], ["steps", "sidewalk"], True, False],
                         ],
                     ],
                 }
@@ -1678,14 +1675,30 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ["road-label: Skipping unsupported expression"],
                 ["road-label: Skipping unsupported expression"],
                 ["road-label: Skipping unsupported expression"],
+                [],
             ],
         ):
             report = mapbox_outdoors_style_audit._qgis_filter_parse_support_report(style)
 
         self.assertEqual(report["qgis_parser_supported_zoom_normalized_part_count"], 0)
         self.assertEqual(report["qgis_parser_unsupported_zoom_normalized_part_count"], 1)
+        self.assertEqual(report["parser_friendly_direct_part_count"], 1)
+        self.assertEqual(report["parser_friendly_changed_direct_part_count"], 1)
+        self.assertEqual(report["qgis_parser_supported_parser_friendly_part_count"], 1)
+        self.assertEqual(report["qgis_parser_unsupported_parser_friendly_part_count"], 0)
         self.assertEqual(
             report["zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature"],
+            [
+                {
+                    "group": "roads/trails",
+                    "operator_signature": "!, get, match",
+                    "count": 1,
+                    "example_layers": ["road-label"],
+                }
+            ],
+        )
+        self.assertEqual(
+            report["parser_friendly_supported_parts_by_layer_group_and_operator_signature"],
             [
                 {
                     "group": "roads/trails",
@@ -1699,11 +1712,20 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         row = report["zoom_normalized_unsupported_parts"][0]
         self.assertEqual(row["layer"], "road-label")
         self.assertEqual(row["part_index"], 1)
-        self.assertEqual(row["original_operator_signature"], "get, match, step, zoom")
-        self.assertEqual(row["operator_signature"], "get, match")
-        self.assertTrue(row["changed_by_zoom_normalization"])
+        self.assertEqual(row["original_operator_signature"], "!, get, match")
+        self.assertEqual(row["operator_signature"], "!, get, match")
+        self.assertFalse(row["changed_by_zoom_normalization"])
         self.assertEqual(row["unsupported_warning_count"], 1)
-        self.assertEqual(row["filter"], ["match", ["get", "class"], "path", False, False])
+        self.assertEqual(row["filter"], ["!", ["match", ["get", "type"], ["steps", "sidewalk"], True, False]])
+        self.assertEqual(len(report["parser_friendly_supported_parts"]), 1)
+        parser_friendly_row = report["parser_friendly_supported_parts"][0]
+        self.assertEqual(parser_friendly_row["zoom_normalized_operator_signature"], "!, get, match")
+        self.assertEqual(parser_friendly_row["operator_signature"], "get, match")
+        self.assertTrue(parser_friendly_row["changed_by_parser_friendly_normalization"])
+        self.assertEqual(
+            parser_friendly_row["filter"],
+            ["match", ["get", "type"], ["steps", "sidewalk"], False, True],
+        )
 
     def test_diagnostic_filter_value_at_zoom_evaluates_zoom_driven_steps(self):
         self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_value_at_zoom(["zoom"]), 12.0)
@@ -1744,6 +1766,92 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| `road-label` | 1 | `get, match, step, zoom` | `get, match` | 2 |", markdown)
         self.assertIn("<code>Skipping unsupported expression</code>", markdown)
         self.assertIn('<code>["match",["get","class"],"path",false,false]</code>', markdown)
+
+    def test_markdown_filter_parse_parser_friendly_part_table_lists_simplified_parts(self):
+        markdown = "\n".join(
+            mapbox_outdoors_style_audit._markdown_filter_parse_parser_friendly_part_table(
+                [
+                    {
+                        "layer": "road-path",
+                        "part_index": 2,
+                        "zoom_normalized_operator_signature": "!, get, match",
+                        "operator_signature": "get, match",
+                        "filter": ["match", ["get", "type"], ["steps", "sidewalk"], False, True],
+                    }
+                ]
+            )
+        )
+
+        self.assertIn(
+            "| Layer | Part | Zoom-normalized operators | Parser-friendly operators | Parser-friendly filter part |",
+            markdown,
+        )
+        self.assertIn("| `road-path` | 2 | `!, get, match` | `get, match` |", markdown)
+        self.assertIn('<code>["match",["get","type"],["steps","sidewalk"],false,true]</code>', markdown)
+
+    def test_markdown_filter_parse_parser_friendly_unsupported_part_table_lists_messages(self):
+        markdown = "\n".join(
+            mapbox_outdoors_style_audit._markdown_filter_parse_parser_friendly_unsupported_part_table(
+                [
+                    {
+                        "layer": "road-path",
+                        "part_index": 2,
+                        "zoom_normalized_operator_signature": "!, get, match",
+                        "operator_signature": "get, match",
+                        "unsupported_warning_count": 1,
+                        "unsupported_warning_messages": [
+                            {"message": "Skipping unsupported expression", "count": 1}
+                        ],
+                        "filter": ["match", ["get", "type"], ["steps", "sidewalk"], False, True],
+                    }
+                ]
+            )
+        )
+
+        self.assertIn(
+            "| Layer | Part | Zoom-normalized operators | Parser-friendly operators | Unsupported warnings | Messages | Parser-friendly filter part |",
+            markdown,
+        )
+        self.assertIn("| `road-path` | 2 | `!, get, match` | `get, match` | 1 |", markdown)
+        self.assertIn("<code>Skipping unsupported expression</code>", markdown)
+        self.assertIn('<code>["match",["get","type"],["steps","sidewalk"],false,true]</code>', markdown)
+
+    def test_diagnostic_filter_parser_friendly_value_handles_remaining_probe_shapes(self):
+        self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(True), ["==", 1, 1])
+        self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(False), ["==", 1, 0])
+        literal_filter = ["literal", [True, ["match", "label"]]]
+        self.assertIs(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(literal_filter),
+            literal_filter,
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
+                ["!", ["match", ["get", "type"], ["steps", "sidewalk"], True, False]]
+            ),
+            ["match", ["get", "type"], ["steps", "sidewalk"], False, True],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
+                ["case", ["has", "layer"], [">=", ["get", "layer"], 0], True]
+            ),
+            ["any", ["!", ["has", "layer"]], [">=", ["get", "layer"], 0]],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
+                ["<=", ["-", ["to-number", ["get", "sizerank"]], 0], 14]
+            ),
+            ["<=", ["to-number", ["get", "sizerank"]], 14],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(["-", ["get", "sizerank"], False]),
+            ["-", ["get", "sizerank"], False],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
+                ["match", ["get", "class"], "path", True, False]
+            ),
+            ["match", ["get", "class"], "path", True, False],
+        )
 
     def test_diagnostic_filter_value_at_zoom_handles_arithmetic_and_interpolation_edges(self):
         self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_value_at_zoom(["+", 1, ["zoom"], 3]), 16.0)
@@ -2656,6 +2764,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("Changed by zoom-normalization: 1", markdown)
         self.assertIn("Accepted after zoom-normalization: 1", markdown)
         self.assertIn("Still rejected after zoom-normalization: 0", markdown)
+        self.assertIn("Still-rejected parts re-tested with parser-friendly simplifications: 0", markdown)
+        self.assertIn("Changed by parser-friendly simplification: 0", markdown)
+        self.assertIn("Accepted after parser-friendly simplification: 0", markdown)
+        self.assertIn("Still rejected after parser-friendly simplification: 0", markdown)
         self.assertIn("##### Unsupported filter probes by layer group", markdown)
         self.assertIn("| `pois/labels` | 1 |", markdown)
         self.assertIn("##### Unsupported filter parser warnings by message", markdown)
@@ -2665,11 +2777,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("##### Unsupported direct filter parts by layer group and operators", markdown)
         self.assertIn("| `pois/labels` | `step, zoom` | 1 | `poi-label` |", markdown)
         self.assertIn("##### Zoom-normalized direct parts still rejected by layer group and operators", markdown)
+        self.assertIn("##### Parser-friendly direct parts accepted by layer group and operators", markdown)
+        self.assertIn("##### Parser-friendly direct parts still rejected by layer group and operators", markdown)
         self.assertIn("##### Direct filter parts accepted after zoom-normalization", markdown)
         self.assertIn("This diagnostic evaluates zoom-driven `step`/`interpolate` filter fragments at z12", markdown)
         self.assertIn("| `poi-label` | 2 | `step, zoom` | `(none)` | <code>true</code> |", markdown)
         self.assertIn("##### Direct filter parts still rejected after zoom-normalization", markdown)
         self.assertIn("These rows distinguish remaining parser gaps", markdown)
+        self.assertIn("##### Direct filter parts accepted after parser-friendly simplification", markdown)
+        self.assertIn("This diagnostic applies parser-friendly", markdown)
+        self.assertIn("##### Direct filter parts still rejected after parser-friendly simplification", markdown)
         self.assertIn("##### Unsupported direct filter parts", markdown)
         self.assertIn("| `poi-label` | `all` | 2 | `step, zoom` | 1 |", markdown)
         self.assertIn('<code>["step",["zoom"],false,12,true]</code>', markdown)
