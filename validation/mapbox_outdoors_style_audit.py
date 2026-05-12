@@ -22,12 +22,14 @@ _MARKDOWN_LAYER_GROUP_LABEL = "Layer group"
 _MARKDOWN_MESSAGE_LABEL = "Message"
 _MARKDOWN_LAYER_LABEL = "Layer"
 _MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL = "Warning count delta from qfit preprocessing"
-_LINE_OPACITY_PROBE_ZOOM = 12.0
+_EXPRESSION_PROBE_ZOOM = 12.0
 _SPRITE_CONTEXT_PROBE_KEY = "with_sprite_context_probe"
 _SPRITE_CONTEXT_DEFINITION_COUNT_KEY = "sprite_definition_count"
 _SPRITE_CONTEXT_IMAGE_LOADED_KEY = "sprite_image_loaded"
 _SCALAR_LINE_OPACITY_PROBE_KEY = "with_scalar_line_opacity_probe"
 _LINE_OPACITY_EXPRESSION_COUNT_KEY = "line_opacity_expression_count_replaced"
+_LITERAL_LINE_DASHARRAY_PROBE_KEY = "with_literal_line_dasharray_probe"
+_LINE_DASHARRAY_EXPRESSION_COUNT_KEY = "line_dasharray_expression_count_replaced"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -757,6 +759,17 @@ def _annotate_qgis_warning_group_summaries(
         else {}
     )
     _annotate_probe_warning_groups(line_opacity_probe, qfit_summary, layer_groups)
+    line_dasharray_probe = (
+        warning_report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY)
+        if isinstance(warning_report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY), dict)
+        else {}
+    )
+    _annotate_probe_warning_groups(line_dasharray_probe, qfit_summary, layer_groups)
+    _annotate_probe_remaining_warning_unresolved_properties(
+        line_dasharray_probe,
+        layers,
+        exclude_properties={"paint.line-dasharray"},
+    )
     sprite_context_probe = (
         warning_report.get(_SPRITE_CONTEXT_PROBE_KEY)
         if isinstance(warning_report.get(_SPRITE_CONTEXT_PROBE_KEY), dict)
@@ -876,7 +889,7 @@ def _representative_interpolate_output(expr: list[object]) -> object | None:
         stops.append((float(stop), expr[index + 1]))
     if not stops:
         return None
-    return min(stops, key=lambda stop: abs(stop[0] - _LINE_OPACITY_PROBE_ZOOM))[1]
+    return min(stops, key=lambda stop: abs(stop[0] - _EXPRESSION_PROBE_ZOOM))[1]
 
 
 def _representative_step_output(expr: list[object]) -> object | None:
@@ -889,7 +902,7 @@ def _representative_step_output(expr: list[object]) -> object | None:
         stop = expr[index]
         if isinstance(stop, bool) or not isinstance(stop, (int, float)):
             continue
-        if _LINE_OPACITY_PROBE_ZOOM < float(stop):
+        if _EXPRESSION_PROBE_ZOOM < float(stop):
             break
         value = expr[index + 1]
     return value
@@ -939,6 +952,75 @@ def _style_with_scalar_line_opacity(style_definition: dict[str, object]) -> tupl
         paint["line-opacity"] = scalar_opacity
         replaced_count += 1
     return style_with_scalar_opacity, replaced_count
+
+
+def _literal_line_dasharray(value: object) -> list[object] | None:
+    if _is_literal_number_array(value):
+        return list(value)
+    if not isinstance(value, list) or not value:
+        return None
+    if value[0] == "literal" and len(value) == 2 and _is_literal_number_array(value[1]):
+        return list(value[1])
+    return None
+
+
+def _first_line_dasharray_literal(candidates: Iterable[object]) -> list[object] | None:
+    for candidate in candidates:
+        literal_dasharray = _extract_line_dasharray_literal(candidate)
+        if literal_dasharray is not None:
+            return literal_dasharray
+    return None
+
+
+def _case_line_dasharray_output_candidates(expr: list[object]) -> list[object]:
+    if len(expr) < 4:
+        return []
+    return [expr[-1], *(expr[index] for index in range(len(expr) - 2, 1, -2))]
+
+
+def _extract_line_dasharray_literal(expr: object) -> list[object] | None:
+    literal_dasharray = _literal_line_dasharray(expr)
+    if literal_dasharray is not None:
+        return literal_dasharray
+    if not isinstance(expr, list) or not expr:
+        return None
+
+    op = expr[0]
+    if op == "interpolate":
+        return _extract_line_dasharray_literal(_representative_interpolate_output(expr))
+    if op == "step":
+        return _extract_line_dasharray_literal(_representative_step_output(expr))
+    if op == "match":
+        return _extract_line_dasharray_literal(expr[-1]) if len(expr) >= 5 else None
+    if op == "case":
+        return _first_line_dasharray_literal(_case_line_dasharray_output_candidates(expr))
+    if op == "coalesce":
+        return _first_line_dasharray_literal(reversed(expr[1:]))
+    return None
+
+
+def _style_with_literal_line_dasharray(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
+    """Return a copy with line-dasharray expressions literalized for converter diagnostics only."""
+    style_with_literal_dasharray = copy.deepcopy(style_definition)
+    replaced_count = 0
+    layers = style_with_literal_dasharray.get("layers")
+    if not isinstance(layers, list):
+        return style_with_literal_dasharray, replaced_count
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        paint = layer.get("paint")
+        if not isinstance(paint, dict):
+            continue
+        line_dasharray = paint.get("line-dasharray")
+        if not isinstance(line_dasharray, list) or _is_literal_number_array(line_dasharray):
+            continue
+        literal_dasharray = _extract_line_dasharray_literal(line_dasharray)
+        if literal_dasharray is None:
+            continue
+        paint["line-dasharray"] = literal_dasharray
+        replaced_count += 1
+    return style_with_literal_dasharray, replaced_count
 
 
 def _qgis_conversion_context_with_sprites(sprite_resources: MapboxSpriteResources):
@@ -1009,6 +1091,10 @@ def _qgis_converter_warning_report(
             qfit_preprocessed_style
         )
         scalar_line_opacity_warnings = _collect_qgis_converter_warnings(scalar_line_opacity_style)
+        literal_line_dasharray_style, line_dasharray_expression_count_replaced = _style_with_literal_line_dasharray(
+            qfit_preprocessed_style
+        )
+        literal_line_dasharray_warnings = _collect_qgis_converter_warnings(literal_line_dasharray_style)
         sprite_image_loaded = None
         if sprite_resources is not None:
             sprite_context_warnings, sprite_image_loaded = _collect_qgis_converter_warnings_with_sprite_context(
@@ -1025,6 +1111,7 @@ def _qgis_converter_warning_report(
     filterless_summary = _qgis_warning_summary(filterless_warnings)
     iconless_summary = _qgis_warning_summary(iconless_warnings)
     scalar_line_opacity_summary = _qgis_warning_summary(scalar_line_opacity_warnings)
+    literal_line_dasharray_summary = _qgis_warning_summary(literal_line_dasharray_warnings)
     report = {
         "raw": raw_summary,
         "qfit_preprocessed": qfit_summary,
@@ -1047,6 +1134,12 @@ def _qgis_converter_warning_report(
             "summary": scalar_line_opacity_summary,
             "warning_count_delta_from_qfit": len(qfit_warnings) - len(scalar_line_opacity_warnings),
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, scalar_line_opacity_summary),
+        },
+        _LITERAL_LINE_DASHARRAY_PROBE_KEY: {
+            _LINE_DASHARRAY_EXPRESSION_COUNT_KEY: line_dasharray_expression_count_replaced,
+            "summary": literal_line_dasharray_summary,
+            "warning_count_delta_from_qfit": len(qfit_warnings) - len(literal_line_dasharray_warnings),
+            "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, literal_line_dasharray_summary),
         },
     }
     if sprite_context_warnings is not None:
@@ -1564,6 +1657,96 @@ def _markdown_line_opacity_probe(probe: object) -> list[str]:
     return lines
 
 
+def _markdown_line_dasharray_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    unresolved_property_summary = (
+        probe.get("remaining_warning_layers_by_unresolved_property")
+        if isinstance(probe.get("remaining_warning_layers_by_unresolved_property"), dict)
+        else {}
+    )
+    lines = [
+        "#### Diagnostic line-dasharray literalization probe",
+        "",
+        "This is not a rendering-safe qfit preprocessing mode; line dash arrays preserve zoom/data-driven cartographic distinctions.",
+        "Use it only to estimate how much converter warning debt is tied to Mapbox line-dasharray expressions.",
+        "",
+        f"Line dasharray expressions replaced in probe: {probe.get(_LINE_DASHARRAY_EXPRESSION_COUNT_KEY, 0)}",
+        f"Warnings after literal line dasharray: {summary.get('count', 0)}",
+        f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
+        "",
+    ]
+    by_message = list(reduced.get("by_message") or [])
+    by_group = list(reduced.get("by_layer_group") or [])
+    unresolved_by_property = list(unresolved_property_summary.get("by_property") or [])
+    unresolved_by_group_property = list(unresolved_property_summary.get("by_layer_group_and_property") or [])
+    if by_message:
+        lines.extend(
+            [
+                "##### Line-dasharray probe reductions by message",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_message,
+                    key="message",
+                    label=_MARKDOWN_MESSAGE_LABEL,
+                    before_label="Before line-dasharray probe",
+                    after_label="Literal line-dasharray",
+                ),
+            ]
+        )
+    if by_group:
+        lines.extend(
+            [
+                "##### Line-dasharray probe reductions by layer group",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_group,
+                    key="group",
+                    label=_MARKDOWN_LAYER_GROUP_LABEL,
+                    before_label="Before line-dasharray probe",
+                    after_label="Literal line-dasharray",
+                ),
+            ]
+        )
+    lines.extend(
+        [
+            "##### Remaining line-dasharray probe warnings by message",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_message") or []),
+                key="message",
+                label=_MARKDOWN_MESSAGE_LABEL,
+            ),
+            "##### Remaining line-dasharray probe warnings by layer group",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer_group") or []),
+                key="group",
+                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            ),
+            "##### Remaining line-dasharray probe warnings by layer group and message",
+            "",
+            *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
+            "##### Remaining line-dasharray probe warnings by layer",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer") or []),
+                key="layer",
+                label=_MARKDOWN_LAYER_LABEL,
+            ),
+            "##### Remaining line-dasharray probe warning layers by unresolved qfit property",
+            "",
+            *_markdown_count_table(unresolved_by_property),
+            "##### Remaining line-dasharray probe warning layers by layer group and unresolved qfit property",
+            "",
+            *_markdown_group_count_table(unresolved_by_group_property),
+        ]
+    )
+    return lines
+
+
 def _markdown_sprite_context_probe(probe: object) -> list[str]:
     if not isinstance(probe, dict):
         return []
@@ -1667,6 +1850,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     filterless_probe = report.get("without_filters_probe")
     icon_image_probe = report.get("without_icon_images_probe")
     line_opacity_probe = report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
+    line_dasharray_probe = report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY)
     sprite_context_probe = report.get(_SPRITE_CONTEXT_PROBE_KEY)
     lines = [
         "### QGIS converter warnings",
@@ -1742,6 +1926,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             *_markdown_sprite_context_probe(sprite_context_probe),
             *_markdown_icon_image_probe(icon_image_probe),
             *_markdown_line_opacity_probe(line_opacity_probe),
+            *_markdown_line_dasharray_probe(line_dasharray_probe),
         ]
     )
     return lines

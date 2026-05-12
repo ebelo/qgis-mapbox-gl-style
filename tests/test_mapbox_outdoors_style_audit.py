@@ -733,6 +733,77 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(result["layers"][6]["paint"]["line-opacity"], 0.2)
         self.assertIsInstance(style["layers"][0]["paint"]["line-opacity"], list)
 
+    def test_style_with_literal_line_dasharray_replaces_supported_expressions_without_mutating_original(self):
+        style = {
+            "layers": [
+                {
+                    "id": "path",
+                    "paint": {
+                        "line-dasharray": ["step", ["zoom"], ["literal", [3, 3]], 12, ["literal", [4, 4]]]
+                    },
+                },
+                {
+                    "id": "rail",
+                    "paint": {
+                        "line-dasharray": [
+                            "interpolate",
+                            ["linear"],
+                            ["zoom"],
+                            10,
+                            ["literal", [1, 2]],
+                            14,
+                            ["literal", [2, 4]],
+                        ]
+                    },
+                },
+                {
+                    "id": "fence",
+                    "paint": {
+                        "line-dasharray": [
+                            "case",
+                            ["==", ["get", "class"], "gate"],
+                            ["literal", [1, 1]],
+                            ["literal", [2, 2]],
+                        ]
+                    },
+                },
+                {"id": "literal", "paint": {"line-dasharray": [5, 2]}},
+                {"id": "literal-expression", "paint": {"line-dasharray": ["literal", [2, 1]]}},
+                {
+                    "id": "malformed-match",
+                    "paint": {"line-dasharray": ["match", ["get", "class"], "primary", ["literal", [9, 9]]]},
+                },
+                {
+                    "id": "case-literal-condition",
+                    "paint": {
+                        "line-dasharray": [
+                            "case",
+                            ["literal", [9, 9]],
+                            ["get", "dash"],
+                            ["get", "fallbackDash"],
+                        ]
+                    },
+                },
+                {"id": "data-only", "paint": {"line-dasharray": ["get", "dash"]}},
+            ]
+        }
+
+        result, replaced_count = mapbox_outdoors_style_audit._style_with_literal_line_dasharray(style)
+
+        self.assertEqual(replaced_count, 4)
+        self.assertEqual(result["layers"][0]["paint"]["line-dasharray"], [4, 4])
+        self.assertEqual(result["layers"][1]["paint"]["line-dasharray"], [1, 2])
+        self.assertEqual(result["layers"][2]["paint"]["line-dasharray"], [2, 2])
+        self.assertEqual(result["layers"][3]["paint"]["line-dasharray"], [5, 2])
+        self.assertEqual(result["layers"][4]["paint"]["line-dasharray"], [2, 1])
+        self.assertEqual(result["layers"][5]["paint"]["line-dasharray"], ["match", ["get", "class"], "primary", ["literal", [9, 9]]])
+        self.assertEqual(
+            result["layers"][6]["paint"]["line-dasharray"],
+            ["case", ["literal", [9, 9]], ["get", "dash"], ["get", "fallbackDash"]],
+        )
+        self.assertEqual(result["layers"][7]["paint"]["line-dasharray"], ["get", "dash"])
+        self.assertEqual(style["layers"][0]["paint"]["line-dasharray"][0], "step")
+
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
         qfit_style = {
@@ -757,6 +828,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
                 ["poi-label: Could not retrieve sprite 'park'"],
                 ["poi-label: Skipping unsupported expression"],
+                [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Could not retrieve sprite 'park'",
+                ],
                 [
                     "poi-label: Skipping unsupported expression",
                     "poi-label: Could not retrieve sprite 'park'",
@@ -818,6 +893,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["count"], 2)
         self.assertEqual(report["with_scalar_line_opacity_probe"]["warning_count_delta_from_qfit"], 0)
         self.assertEqual(report["with_scalar_line_opacity_probe"]["reduced_from_qfit"], {"by_message": [], "by_layer": []})
+        self.assertEqual(report["with_literal_line_dasharray_probe"]["line_dasharray_expression_count_replaced"], 0)
+        self.assertEqual(report["with_literal_line_dasharray_probe"]["summary"]["count"], 2)
+        self.assertEqual(report["with_literal_line_dasharray_probe"]["warning_count_delta_from_qfit"], 0)
+        self.assertEqual(
+            report["with_literal_line_dasharray_probe"]["reduced_from_qfit"],
+            {"by_message": [], "by_layer": []},
+        )
         self.assertEqual(
             report["reduced_by_qfit"],
             {
@@ -844,6 +926,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             {"layers": [{"id": "poi-label", "filter": ["==", ["get", "maki"], "park"], "layout": {}}]},
         )
         self.assertEqual(fake_converter.converted_styles[4], qfit_style)
+        self.assertEqual(fake_converter.converted_styles[5], qfit_style)
         self.assertIn("filter", qfit_style["layers"][0])
         self.assertIn("icon-image", qfit_style["layers"][0]["layout"])
         self.assertEqual(len(fake_app.created), 1)
@@ -855,7 +938,14 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
     def test_qgis_converter_warning_report_reuses_existing_qgis_app(self):
         existing_app = object()
         fake_qgis, fake_core, fake_app, _fake_converter = _fake_qgis_modules(
-            [["raw warning"], ["qfit warning"], ["filterless warning"], ["iconless warning"], ["line opacity warning"]],
+            [
+                ["raw warning"],
+                ["qfit warning"],
+                ["filterless warning"],
+                ["iconless warning"],
+                ["line opacity warning"],
+                ["line dasharray warning"],
+            ],
             existing_app=existing_app,
         )
 
@@ -870,6 +960,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["without_filters_probe"]["summary"]["warnings"], ["filterless warning"])
         self.assertEqual(report["without_icon_images_probe"]["summary"]["warnings"], ["iconless warning"])
         self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["warnings"], ["line opacity warning"])
+        self.assertEqual(report["with_literal_line_dasharray_probe"]["summary"]["warnings"], ["line dasharray warning"])
         self.assertEqual(fake_app.created, [])
 
     def test_qgis_converter_warning_report_can_include_sprite_context_probe(self):
@@ -898,6 +989,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ["filterless warning"],
                 ["iconless warning"],
                 ["line opacity warning"],
+                ["line dasharray warning"],
                 ["poi-label: Skipping unsupported expression"],
             ]
         )
@@ -934,7 +1026,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 }
             ],
         )
-        sprite_context = fake_converter.converted_contexts[5]
+        sprite_context = fake_converter.converted_contexts[6]
         self.assertEqual(sprite_context.target_unit, "millimeters")
         self.assertAlmostEqual(sprite_context.pixel_size_conversion_factor, 25.4 / 96.0)
         image, definitions = sprite_context.sprites
@@ -963,6 +1055,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ["filterless warning"],
                 ["iconless warning"],
                 ["line opacity warning"],
+                ["line dasharray warning"],
                 ["poi-label: Could not retrieve sprite 'park'"],
             ]
         )
@@ -987,7 +1080,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(probe["sprite_definition_count"], 1)
         self.assertFalse(probe["sprite_image_loaded"])
         self.assertEqual(probe["warning_count_delta_from_qfit"], 0)
-        self.assertIsNone(fake_converter.converted_contexts[5].sprites)
+        self.assertIsNone(fake_converter.converted_contexts[6].sprites)
 
     def test_build_style_audit_summarizes_sprite_context_residual_unresolved_properties(self):
         warning_report = {
@@ -1031,6 +1124,52 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     {"group": "pois/labels", "property": "filter", "count": 1},
                     {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
                     {"group": "roads/trails", "property": "paint.line-dasharray", "count": 1},
+                ],
+            },
+        )
+
+    def test_build_style_audit_summarizes_line_dasharray_probe_residual_unresolved_properties(self):
+        warning_report = {
+            "raw": {"count": 0, "warnings": []},
+            "qfit_preprocessed": {
+                "count": 2,
+                "warnings": [
+                    "road-path: Skipping unsupported expression",
+                    "poi-label: Skipping unsupported expression",
+                ],
+            },
+            "reduced_by_qfit": {},
+            "with_literal_line_dasharray_probe": {
+                "line_dasharray_expression_count_replaced": 1,
+                "summary": {
+                    "count": 1,
+                    "warnings": ["poi-label: Skipping unsupported expression"],
+                },
+                "reduced_from_qfit": {},
+            },
+        }
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_qgis_converter_warning_report",
+            return_value=warning_report,
+        ):
+            audit = build_style_audit(
+                SAMPLE_STYLE,
+                config=StyleAuditConfig(include_qgis_converter_warnings=True),
+            )
+
+        dasharray_probe = audit["qgis_converter_warnings"]["with_literal_line_dasharray_probe"]
+        self.assertEqual(
+            dasharray_probe["remaining_warning_layers_by_unresolved_property"],
+            {
+                "by_property": [
+                    {"property": "filter", "count": 1},
+                    {"property": "layout.icon-image", "count": 1},
+                ],
+                "by_layer_group_and_property": [
+                    {"group": "pois/labels", "property": "filter", "count": 1},
+                    {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
                 ],
             },
         )
@@ -1208,6 +1347,40 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     ],
                 },
             },
+            "with_literal_line_dasharray_probe": {
+                "line_dasharray_expression_count_replaced": 1,
+                "summary": {
+                    "count": 1,
+                    "by_message": [{"message": "Could not retrieve sprite 'park'", "count": 1}],
+                    "by_layer_group": [{"group": "pois/labels", "count": 1}],
+                    "by_layer_group_and_message": [
+                        {"group": "pois/labels", "message": "Could not retrieve sprite 'park'", "count": 1}
+                    ],
+                    "by_layer": [{"layer": "poi-label", "count": 1}],
+                },
+                "warning_count_delta_from_qfit": 1,
+                "reduced_from_qfit": {
+                    "by_message": [
+                        {
+                            "message": "Skipping unsupported expression",
+                            "raw_count": 2,
+                            "qfit_count": 1,
+                            "reduced_count": 1,
+                        }
+                    ],
+                    "by_layer_group": [
+                        {"group": "roads/trails", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                    ],
+                },
+                "remaining_warning_layers_by_unresolved_property": {
+                    "by_property": [
+                        {"property": "layout.icon-image", "count": 1},
+                    ],
+                    "by_layer_group_and_property": [
+                        {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                    ],
+                },
+            },
             "with_sprite_context_probe": {
                 "sprite_definition_count": 2,
                 "sprite_image_loaded": True,
@@ -1340,6 +1513,15 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("##### Line-opacity probe reductions by layer group", markdown)
         self.assertIn("##### Remaining line-opacity probe warnings by message", markdown)
         self.assertIn("##### Remaining line-opacity probe warnings by layer", markdown)
+        self.assertIn("#### Diagnostic line-dasharray literalization probe", markdown)
+        self.assertIn("Line dasharray expressions replaced in probe: 1", markdown)
+        self.assertIn("Warnings after literal line dasharray: 1", markdown)
+        self.assertIn("##### Line-dasharray probe reductions by message", markdown)
+        self.assertIn("| Message | Before line-dasharray probe | Literal line-dasharray | Reduced |", markdown)
+        self.assertIn("##### Line-dasharray probe reductions by layer group", markdown)
+        self.assertIn("##### Remaining line-dasharray probe warnings by message", markdown)
+        self.assertIn("##### Remaining line-dasharray probe warnings by layer", markdown)
+        self.assertIn("##### Remaining line-dasharray probe warning layers by unresolved qfit property", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 
