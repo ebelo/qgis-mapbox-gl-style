@@ -1,6 +1,8 @@
 import base64
 import datetime as dt
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -520,32 +522,75 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
     def test_main_all_cameras_runs_full_inspection_matrix(self):
         from qfit.validation import mapbox_outdoors_comparison
 
-        captured_camera_names = []
+        calls = []
 
-        def fake_run_comparison(config):
-            captured_camera_names.append(config.camera.name)
-            paths = mapbox_outdoors_comparison.build_comparison_paths(
-                run_dir=Path("/tmp/qfit-mapbox") / config.camera.name / "20260511T130000Z"
-            )
-            return mapbox_outdoors_comparison.ComparisonResult(
-                paths=paths,
-                browser_captured=False,
-                qgis_captured=False,
-                diff_captured=False,
-            )
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return types.SimpleNamespace(returncode=0, stdout=f"Camera: {command[2]}\n", stderr="")
 
-        with patch.dict("os.environ", {"MAPBOX_ACCESS_TOKEN": "test-mapbox-token"}, clear=True):
-            with patch("qfit.validation.mapbox_outdoors_comparison.run_comparison", side_effect=fake_run_comparison):
-                with patch("builtins.print"):
+        with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
+            with patch("builtins.print"):
+                result = mapbox_outdoors_comparison.main([
+                    "--all-cameras",
+                    "--mapbox-token",
+                    "test-mapbox-token",
+                    "--style-json",
+                    "/tmp/mapbox-outdoors-v12.json",
+                    "--output-root",
+                    "/tmp/qfit-mapbox",
+                    "--skip-browser",
+                    "--skip-diff",
+                    "--browser-timeout-ms",
+                    "5000",
+                ])
+
+        self.assertEqual(result, 0)
+        self.assertEqual([command[2] for command, _kwargs in calls], list(CAMERAS))
+        for command, kwargs in calls:
+            self.assertNotIn("test-mapbox-token", command)
+            self.assertNotIn("--mapbox-token", command)
+            self.assertNotIn("--all-cameras", command)
+            self.assertIn("--style-json", command)
+            self.assertIn("/tmp/mapbox-outdoors-v12.json", command)
+            self.assertIn("--skip-browser", command)
+            self.assertIn("--skip-diff", command)
+            self.assertEqual(kwargs["env"]["MAPBOX_ACCESS_TOKEN"], "test-mapbox-token")
+            self.assertEqual(kwargs["cwd"], mapbox_outdoors_comparison.REPO_ROOT)
+            self.assertEqual(kwargs["timeout"], 65)
+
+    def test_main_all_cameras_resolves_relative_style_json_before_spawning_children(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            style_json = Path(tmpdir) / "snapshots" / "mapbox-outdoors-v12.json"
+            expected_style_json = style_json.resolve()
+            os.chdir(tmpdir)
+            try:
+                with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
                     result = mapbox_outdoors_comparison.main([
                         "--all-cameras",
+                        "--mapbox-token",
+                        "test-mapbox-token",
+                        "--style-json",
+                        "snapshots/mapbox-outdoors-v12.json",
                         "--skip-browser",
                         "--skip-qgis",
                         "--skip-diff",
                     ])
+            finally:
+                os.chdir(original_cwd)
 
         self.assertEqual(result, 0)
-        self.assertEqual(captured_camera_names, list(CAMERAS))
+        for command, kwargs in calls:
+            self.assertIn(str(expected_style_json), command)
+            self.assertEqual(kwargs["cwd"], mapbox_outdoors_comparison.REPO_ROOT)
 
     def test_main_rejects_single_camera_with_all_cameras(self):
         from qfit.validation import mapbox_outdoors_comparison
@@ -565,39 +610,78 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
     def test_main_all_cameras_prints_finished_camera_before_later_failure(self):
         from qfit.validation import mapbox_outdoors_comparison
 
-        captured_camera_names = []
+        calls = []
 
-        def fake_run_comparison(config):
-            captured_camera_names.append(config.camera.name)
-            if len(captured_camera_names) > 1:
-                raise RuntimeError("qgis setup failed")
-            paths = mapbox_outdoors_comparison.build_comparison_paths(
-                run_dir=Path("/tmp/qfit-mapbox") / config.camera.name / "20260511T130000Z"
-            )
-            return mapbox_outdoors_comparison.ComparisonResult(
-                paths=paths,
-                browser_captured=False,
-                qgis_captured=False,
-                diff_captured=False,
-            )
+        def fake_run(command, **_kwargs):
+            calls.append(command)
+            if len(calls) == 2:
+                return types.SimpleNamespace(returncode=-11, stdout="", stderr="crashed for test-mapbox-token\n")
+            return types.SimpleNamespace(returncode=0, stdout=f"Camera: {command[2]}\n", stderr="")
 
-        with patch.dict("os.environ", {"MAPBOX_ACCESS_TOKEN": "test-mapbox-token"}, clear=True):
-            with patch("qfit.validation.mapbox_outdoors_comparison.run_comparison", side_effect=fake_run_comparison):
-                with patch("builtins.print") as print_mock:
-                    with patch("sys.stderr"):
-                        result = mapbox_outdoors_comparison.main([
-                            "--all-cameras",
-                            "--skip-browser",
-                            "--skip-qgis",
-                            "--skip-diff",
-                        ])
+        with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
+            with patch("builtins.print") as print_mock:
+                with patch("sys.stderr") as stderr_mock:
+                    result = mapbox_outdoors_comparison.main([
+                        "--all-cameras",
+                        "--mapbox-token",
+                        "test-mapbox-token",
+                        "--skip-browser",
+                        "--skip-qgis",
+                        "--skip-diff",
+                    ])
 
         self.assertEqual(result, 2)
-        self.assertEqual(captured_camera_names[:2], list(CAMERAS)[:2])
-        print_mock.assert_any_call("Camera: switzerland-alps-z5-outdoors")
-        print_mock.assert_any_call(
-            "Manifest: /tmp/qfit-mapbox/switzerland-alps-z5-outdoors/20260511T130000Z/manifest.json"
+        self.assertEqual([command[2] for command in calls], list(CAMERAS))
+        print_mock.assert_any_call("Camera: switzerland-alps-z5-outdoors\n", end="")
+        stderr_text = "".join(
+            call.args[0] for call in print_mock.call_args_list if call.kwargs.get("file") is stderr_mock
         )
+        self.assertIn("camera valais-geneva-outdoors failed with exit code -11", stderr_text)
+        self.assertIn("comparison capture failed for: valais-geneva-outdoors (exit -11)", stderr_text)
+        self.assertNotIn("test-mapbox-token", stderr_text)
+
+    def test_main_all_cameras_continues_after_timed_out_camera(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            if len(calls) == 1:
+                raise subprocess.TimeoutExpired(
+                    command,
+                    timeout=kwargs["timeout"],
+                    output="partial output for test-mapbox-token\n",
+                    stderr="partial error for test-mapbox-token\n",
+                )
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
+            with patch("builtins.print") as print_mock:
+                with patch("sys.stderr") as stderr_mock:
+                    result = mapbox_outdoors_comparison.main([
+                        "--all-cameras",
+                        "--mapbox-token",
+                        "test-mapbox-token",
+                        "--skip-browser",
+                        "--skip-qgis",
+                        "--skip-diff",
+                        "--browser-timeout-ms",
+                        "5000",
+                    ])
+
+        self.assertEqual(result, 2)
+        self.assertEqual([command[2] for command in calls], list(CAMERAS))
+        stderr_text = "".join(
+            call.args[0] for call in print_mock.call_args_list if call.kwargs.get("file") is stderr_mock
+        )
+        self.assertIn("camera switzerland-alps-z5-outdoors timed out after 65s", stderr_text)
+        self.assertIn(
+            "comparison capture failed for: switzerland-alps-z5-outdoors (timeout after 65s)",
+            stderr_text,
+        )
+        self.assertIn("partial error for <redacted>", stderr_text)
+        self.assertNotIn("test-mapbox-token", stderr_text)
 
     def test_redact_sensitive_text_removes_token_from_errors(self):
         self.assertEqual(
