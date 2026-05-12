@@ -646,14 +646,73 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(summary["counts"], {"passed": len(CAMERAS), "failed": 0, "timeout": 0})
         self.assertEqual([entry["camera"] for entry in summary["cameras"]], list(CAMERAS))
+        self.assertEqual(summary["cameras"][0]["artifact_status"], "metrics_available")
         self.assertEqual(summary["cameras"][0]["metrics"]["changed_pixel_ratio"], 0.1)
-        self.assertIn("| `switzerland-alps-z5-outdoors` | passed | 5.35 | 0.1000 |", summary_text)
+        self.assertIn(
+            "| `switzerland-alps-z5-outdoors` | passed | `metrics_available` | 5.35 | 0.1000 |",
+            summary_text,
+        )
         self.assertNotIn("test-mapbox-token", summary_json_text)
         self.assertNotIn("test-mapbox-token", summary_text)
         for call in print_mock.call_args_list:
             if call.args:
                 self.assertNotIn("test-mapbox-token", call.args[0])
         self.assertTrue(any(call.args[0].startswith("Matrix summary:") for call in print_mock.call_args_list))
+
+    def test_main_all_cameras_flags_passed_camera_without_manifest_as_missing_artifacts(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "test-mapbox-token-output"
+
+            def fake_run(command, **_kwargs):
+                return types.SimpleNamespace(returncode=0, stdout=f"Camera: {command[2]}\n", stderr="")
+
+            with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
+                result = mapbox_outdoors_comparison.main([
+                    "--all-cameras",
+                    "--mapbox-token",
+                    "test-mapbox-token",
+                    "--output-root",
+                    str(output_root),
+                    "--skip-browser",
+                    "--skip-qgis",
+                    "--skip-diff",
+                ])
+
+            summary_json = next((output_root / "all-cameras").glob("*/summary.json"), None)
+            self.assertIsNotNone(summary_json, "all-cameras summary.json should be written")
+            summary = json.loads(summary_json.read_text(encoding="utf-8"))
+            summary_text = summary_json.with_name("summary.md").read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(summary["cameras"][0]["status"], "passed")
+        self.assertEqual(summary["cameras"][0]["artifact_status"], "manifest_missing")
+        self.assertEqual(summary["cameras"][0]["metrics"], {})
+        self.assertIn("| `switzerland-alps-z5-outdoors` | passed | `manifest_missing` |", summary_text)
+        self.assertIn("The Artifacts column distinguishes subprocess success", summary_text)
+
+    def test_manifest_artifact_status_distinguishes_unreadable_and_metricless_manifests(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            invalid_manifest = tmp_path / "invalid.json"
+            invalid_manifest.write_text("{", encoding="utf-8")
+            metricless_manifest = tmp_path / "metricless.json"
+            metricless_manifest.write_text(json.dumps({"metrics": {}}), encoding="utf-8")
+
+            unreadable_status, unreadable_metrics = mapbox_outdoors_comparison._manifest_artifact_status_and_metrics(
+                invalid_manifest
+            )
+            metricless_status, metricless_metrics = mapbox_outdoors_comparison._manifest_artifact_status_and_metrics(
+                metricless_manifest
+            )
+
+        self.assertEqual(unreadable_status, "manifest_unreadable")
+        self.assertEqual(unreadable_metrics, {})
+        self.assertEqual(metricless_status, "metrics_unavailable")
+        self.assertEqual(metricless_metrics, {})
 
     def test_main_rejects_single_camera_with_all_cameras(self):
         from qfit.validation import mapbox_outdoors_comparison

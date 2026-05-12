@@ -30,6 +30,10 @@ MATRIX_SUMMARY_METRIC_KEYS = (
     "normalized_rms_channel_delta",
     "ssim_status",
 )
+MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE = "metrics_available"
+MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING = "manifest_missing"
+MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE = "manifest_unreadable"
+MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE = "metrics_unavailable"
 
 
 class ComparisonCaptureError(RuntimeError):
@@ -849,17 +853,20 @@ def _manifest_path_from_child_stdout(stdout: str) -> Path | None:
     return manifest_path
 
 
-def _metric_summary_from_manifest(manifest_path: Path | None) -> dict[str, object]:
+def _manifest_artifact_status_and_metrics(manifest_path: Path | None) -> tuple[str, dict[str, object]]:
     if manifest_path is None:
-        return {}
+        return MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING, {}
     try:
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
+        return MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE, {}
     metrics = loaded.get("metrics") if isinstance(loaded, dict) else None
     if not isinstance(metrics, dict):
-        return {}
-    return {key: metrics[key] for key in MATRIX_SUMMARY_METRIC_KEYS if key in metrics}
+        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}
+    metric_summary = {key: metrics[key] for key in MATRIX_SUMMARY_METRIC_KEYS if key in metrics}
+    if not metric_summary:
+        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}
+    return MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE, metric_summary
 
 
 def _all_camera_summary_entry(
@@ -871,15 +878,17 @@ def _all_camera_summary_entry(
     manifest_path: Path | None,
     token: str,
 ) -> dict[str, object]:
+    artifact_status, metrics = _manifest_artifact_status_and_metrics(manifest_path)
     return {
         "camera": camera.name,
         "description": camera.description,
         "zoom": camera.zoom,
         "status": status,
+        "artifact_status": artifact_status,
         "returncode": returncode,
         "timeout_seconds": timeout_seconds,
         "manifest": redact_sensitive_text(str(manifest_path), token) if manifest_path is not None else None,
-        "metrics": _metric_summary_from_manifest(manifest_path),
+        "metrics": metrics,
     }
 
 
@@ -898,16 +907,18 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
         "",
         f"Generated: `{summary['generated_at']}`",
         "",
-        "| Camera | Status | z | Changed ratio | Mean Δ | RMS Δ | SSIM | Manifest |",
-        "| --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
+        "| Camera | Status | Artifacts | z | Changed ratio | Mean Δ | RMS Δ | SSIM | Manifest |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for entry in summary["cameras"]:
         metrics = entry["metrics"] if isinstance(entry.get("metrics"), dict) else {}
         manifest = entry.get("manifest") or "—"
+        artifact_status = entry.get("artifact_status") or "unknown"
         lines.append(
             "| "
             f"`{entry['camera']}` | "
             f"{entry['status']} | "
+            f"`{artifact_status}` | "
             f"{entry['zoom']:g} | "
             f"{_format_summary_metric(metrics, 'changed_pixel_ratio')} | "
             f"{_format_summary_metric(metrics, 'normalized_mean_absolute_channel_delta')} | "
@@ -921,6 +932,7 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
             "Notes:",
             "- Mapbox tokens are intentionally excluded from this summary.",
             "- This is a manual visual QA aid, not a CI gate.",
+            "- The Artifacts column distinguishes subprocess success from manifest/metric availability.",
         ]
     )
     return "\n".join(lines) + "\n"

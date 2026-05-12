@@ -84,7 +84,7 @@ python3 validation/mapbox_outdoors_comparison.py \
 `--all-cameras` uses the same capture options as a single-camera run, so you can combine it with setup-isolation flags such as `--skip-qgis` or `--skip-browser`.
 Do not pass a positional camera name with `--all-cameras`; use one mode or the other.
 Each camera is captured in its own child Python process so a local Chromium/PyQGIS crash in one camera does not kill the whole matrix runner or expose token values on the command line. If any camera fails or times out, the runner continues with the remaining cameras and exits non-zero with the failed camera names.
-The parent run also writes token-free aggregate `summary.json` and `summary.md` files under `debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/` with per-camera status, manifest paths, and the main diff metrics.
+The parent run also writes token-free aggregate `summary.json` and `summary.md` files under `debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/` with per-camera subprocess status, artifact status, manifest paths, and the main diff metrics. Treat rows with missing manifests or unavailable metrics as operational smoke-test output, not visual parity evidence.
 
 ## Partial captures
 
