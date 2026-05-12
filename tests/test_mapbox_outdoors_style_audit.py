@@ -1143,8 +1143,14 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         }
 
         result, replaced_count = mapbox_outdoors_style_audit._style_with_scalar_line_opacity(style)
+        _details_result, replacement_rows = mapbox_outdoors_style_audit._style_with_scalar_line_opacity_details(style)
 
         self.assertEqual(replaced_count, 5)
+        self.assertEqual(len(replacement_rows), 5)
+        contour_row = next(row for row in replacement_rows if row["layer"] == "contour")
+        self.assertEqual(contour_row["group"], "terrain/landcover")
+        self.assertEqual(contour_row["operator_signature"], "get, interpolate, match, zoom")
+        self.assertEqual(contour_row["scalar_line_opacity"], 0.3)
         self.assertEqual(result["layers"][0]["paint"]["line-opacity"], 1.0)
         self.assertEqual(result["layers"][1]["paint"]["line-opacity"], 1.0)
         self.assertEqual(result["layers"][2]["paint"]["line-opacity"], 0.3)
@@ -1364,6 +1370,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             },
         )
         self.assertEqual(report["with_scalar_line_opacity_probe"]["line_opacity_expression_count_replaced"], 0)
+        self.assertEqual(report["with_scalar_line_opacity_probe"]["line_opacity_scalarization_rows"], [])
         self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["count"], 2)
         self.assertEqual(report["with_scalar_line_opacity_probe"]["warning_count_delta_from_qfit"], 0)
         self.assertEqual(report["with_scalar_line_opacity_probe"]["reduced_from_qfit"], {"by_message": [], "by_layer": []})
@@ -2705,7 +2712,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 },
             },
             "with_scalar_line_opacity_probe": {
-                "line_opacity_expression_count_replaced": 2,
+                "line_opacity_expression_count_replaced": 1,
+                "line_opacity_scalarization_rows": [
+                    {
+                        "group": "roads/trails",
+                        "layer": "road-minor",
+                        "operator_signature": "step, zoom",
+                        "scalar_line_opacity": 1.0,
+                        "line_opacity": ["step", ["zoom"], 0, 11, 1],
+                    }
+                ],
                 "summary": {
                     "count": 1,
                     "by_message": [{"message": "Could not retrieve sprite 'park'", "count": 1}],
@@ -2983,11 +2999,14 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertIn("| `pois/labels` | `layout.icon-image` | 1 |", markdown)
         self.assertIn("#### Diagnostic line-opacity scalarization probe", markdown)
-        self.assertIn("Line opacity expressions replaced in probe: 2", markdown)
+        self.assertIn("Line opacity expressions replaced in probe: 1", markdown)
         self.assertIn("Warnings after scalar line opacity: 1", markdown)
         self.assertIn("##### Line-opacity probe reductions by message", markdown)
         self.assertIn("| Message | Before line-opacity probe | Scalar line-opacity | Reduced |", markdown)
         self.assertIn("##### Line-opacity probe reductions by layer group", markdown)
+        self.assertIn("##### Scalar line-opacity replacements", markdown)
+        self.assertIn("| Layer group | Layer | Original operators | Scalar opacity | Original expression |", markdown)
+        self.assertIn("| `roads/trails` | `road-minor` | `step, zoom` | 1 |", markdown)
         self.assertIn("##### Remaining line-opacity probe warnings by message", markdown)
         self.assertIn("##### Remaining line-opacity probe warnings by layer", markdown)
         self.assertIn("#### Diagnostic line-dasharray literalization probe", markdown)

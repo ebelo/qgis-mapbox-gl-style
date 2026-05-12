@@ -29,6 +29,7 @@ _SPRITE_CONTEXT_DEFINITION_COUNT_KEY = "sprite_definition_count"
 _SPRITE_CONTEXT_IMAGE_LOADED_KEY = "sprite_image_loaded"
 _SCALAR_LINE_OPACITY_PROBE_KEY = "with_scalar_line_opacity_probe"
 _LINE_OPACITY_EXPRESSION_COUNT_KEY = "line_opacity_expression_count_replaced"
+_LINE_OPACITY_SCALARIZATION_ROWS_KEY = "line_opacity_scalarization_rows"
 _LITERAL_LINE_DASHARRAY_PROBE_KEY = "with_literal_line_dasharray_probe"
 _LINE_DASHARRAY_EXPRESSION_COUNT_KEY = "line_dasharray_expression_count_replaced"
 _SCALAR_SYMBOL_SPACING_PROBE_KEY = "with_scalar_symbol_spacing_probe"
@@ -1987,13 +1988,15 @@ def _extract_line_opacity_scalar(expr: object) -> float | None:
     return None
 
 
-def _style_with_scalar_line_opacity(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
-    """Return a copy with line-opacity expressions scalarized for converter diagnostics only."""
+def _style_with_scalar_line_opacity_details(
+    style_definition: dict[str, object],
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """Return a copy with line-opacity expressions scalarized plus diagnostic rows."""
     style_with_scalar_opacity = copy.deepcopy(style_definition)
-    replaced_count = 0
+    replacement_rows: list[dict[str, object]] = []
     layers = style_with_scalar_opacity.get("layers")
     if not isinstance(layers, list):
-        return style_with_scalar_opacity, replaced_count
+        return style_with_scalar_opacity, replacement_rows
     for layer in layers:
         if not isinstance(layer, dict):
             continue
@@ -2006,8 +2009,24 @@ def _style_with_scalar_line_opacity(style_definition: dict[str, object]) -> tupl
         scalar_opacity = _extract_line_opacity_scalar(line_opacity)
         if scalar_opacity is None:
             continue
+        replacement_rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "group": _layer_group(layer),
+                "operator_signature": _operator_signature(line_opacity),
+                "scalar_line_opacity": scalar_opacity,
+                "line_opacity": line_opacity,
+            }
+        )
         paint["line-opacity"] = scalar_opacity
-        replaced_count += 1
+    replacement_rows.sort(key=lambda row: (str(row["group"]), str(row["layer"])))
+    return style_with_scalar_opacity, replacement_rows
+
+
+def _style_with_scalar_line_opacity(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
+    """Return a copy with line-opacity expressions scalarized for converter diagnostics only."""
+    style_with_scalar_opacity, replacement_rows = _style_with_scalar_line_opacity_details(style_definition)
+    replaced_count = len(replacement_rows)
     return style_with_scalar_opacity, replaced_count
 
 
@@ -2205,7 +2224,7 @@ def _qgis_converter_warning_report(
         filterless_warnings = _collect_qgis_converter_warnings(filterless_style)
         iconless_style, icon_image_count_removed = _style_without_icon_images(qfit_preprocessed_style)
         iconless_warnings = _collect_qgis_converter_warnings(iconless_style)
-        scalar_line_opacity_style, line_opacity_expression_count_replaced = _style_with_scalar_line_opacity(
+        scalar_line_opacity_style, line_opacity_scalarization_rows = _style_with_scalar_line_opacity_details(
             qfit_preprocessed_style
         )
         scalar_line_opacity_warnings = _collect_qgis_converter_warnings(scalar_line_opacity_style)
@@ -2262,7 +2281,8 @@ def _qgis_converter_warning_report(
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, iconless_summary),
         },
         _SCALAR_LINE_OPACITY_PROBE_KEY: {
-            _LINE_OPACITY_EXPRESSION_COUNT_KEY: line_opacity_expression_count_replaced,
+            _LINE_OPACITY_EXPRESSION_COUNT_KEY: len(line_opacity_scalarization_rows),
+            _LINE_OPACITY_SCALARIZATION_ROWS_KEY: line_opacity_scalarization_rows,
             "summary": scalar_line_opacity_summary,
             "warning_count_delta_from_qfit": len(qfit_warnings) - len(scalar_line_opacity_warnings),
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, scalar_line_opacity_summary),
@@ -2767,6 +2787,50 @@ def _markdown_expression_property_probe(probe: object, *, config: _ProbeMarkdown
     return lines
 
 
+def _markdown_line_opacity_scalarization_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—"]
+    lines = [
+        "| Layer group | Layer | Original operators | Scalar opacity | Original expression |",
+        "| --- | --- | --- | ---: | --- |",
+    ]
+    for row in rows[:limit]:
+        lines.append(
+            "| `{group}` | `{layer}` | `{operators}` | {scalar:g} | <code>{expression}</code> |".format(
+                group=html.escape(str(row.get("group") or "other")),
+                layer=html.escape(str(row.get("layer") or "")),
+                operators=html.escape(str(row.get("operator_signature") or _NO_OPERATOR_SIGNATURE)),
+                scalar=float(row.get("scalar_line_opacity") or 0.0),
+                expression=html.escape(_compact_json(row.get("line_opacity"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | {len(rows) - limit} more scalarized line-opacity expressions omitted |")
+    lines.append("")
+    return lines
+
+
+def _insert_line_opacity_scalarization_details(
+    lines: list[str],
+    rows: list[dict[str, object]],
+) -> list[str]:
+    if not rows:
+        return lines
+    detail_lines = [
+        "##### Scalar line-opacity replacements",
+        "",
+        *_markdown_line_opacity_scalarization_table(rows),
+    ]
+    for index, line in enumerate(lines):
+        if line.startswith("##### Remaining line-opacity probe warnings"):
+            return [*lines[:index], *detail_lines, *lines[index:]]
+    return [*lines, *detail_lines]
+
+
 def _extend_markdown_probe_reduction_sections(
     lines: list[str],
     *,
@@ -2866,7 +2930,7 @@ def _markdown_probe_unresolved_property_sections(
 
 
 def _markdown_line_opacity_probe(probe: object) -> list[str]:
-    return _markdown_expression_property_probe(
+    lines = _markdown_expression_property_probe(
         probe,
         config=_ProbeMarkdownConfig(
             title="#### Diagnostic line-opacity scalarization probe",
@@ -2887,6 +2951,8 @@ def _markdown_line_opacity_probe(probe: object) -> list[str]:
             after_label="Scalar line-opacity",
         ),
     )
+    rows = list(probe.get(_LINE_OPACITY_SCALARIZATION_ROWS_KEY) or []) if isinstance(probe, dict) else []
+    return _insert_line_opacity_scalarization_details(lines, rows)
 
 
 def _markdown_line_dasharray_probe(probe: object) -> list[str]:
