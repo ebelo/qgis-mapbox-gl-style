@@ -660,6 +660,52 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
         self.assertIn("icon-image", style["layers"][0]["layout"])
 
+    def test_style_with_scalar_line_opacity_replaces_supported_expressions_without_mutating_original(self):
+        style = {
+            "layers": [
+                {
+                    "id": "waterway",
+                    "paint": {"line-opacity": ["interpolate", ["linear"], ["zoom"], 8, 0, 14, 1]},
+                },
+                {"id": "road", "paint": {"line-opacity": ["step", ["zoom"], 0, 11, 1]}},
+                {
+                    "id": "contour",
+                    "paint": {
+                        "line-opacity": [
+                            "interpolate",
+                            ["linear"],
+                            ["zoom"],
+                            11,
+                            ["match", ["get", "index"], [1, 2], 0.15, 0.3],
+                            13,
+                            ["match", ["get", "index"], [1, 2], 0.3, 0.5],
+                        ]
+                    },
+                },
+                {"id": "literal", "paint": {"line-opacity": 0.2}},
+                {"id": "data-only", "paint": {"line-opacity": ["get", "opacity"]}},
+                {"id": "data-step", "paint": {"line-opacity": ["step", ["get", "rank"], 0.2, 10, 0.8]}},
+                {
+                    "id": "data-interpolate",
+                    "paint": {
+                        "line-opacity": ["interpolate", ["linear"], ["get", "altitude"], 0, 0.2, 3000, 1.0]
+                    },
+                },
+            ]
+        }
+
+        result, replaced_count = mapbox_outdoors_style_audit._style_with_scalar_line_opacity(style)
+
+        self.assertEqual(replaced_count, 5)
+        self.assertEqual(result["layers"][0]["paint"]["line-opacity"], 1.0)
+        self.assertEqual(result["layers"][1]["paint"]["line-opacity"], 1.0)
+        self.assertEqual(result["layers"][2]["paint"]["line-opacity"], 0.3)
+        self.assertEqual(result["layers"][3]["paint"]["line-opacity"], 0.2)
+        self.assertEqual(result["layers"][4]["paint"]["line-opacity"], ["get", "opacity"])
+        self.assertEqual(result["layers"][5]["paint"]["line-opacity"], 0.2)
+        self.assertEqual(result["layers"][6]["paint"]["line-opacity"], 0.2)
+        self.assertIsInstance(style["layers"][0]["paint"]["line-opacity"], list)
+
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
         qfit_style = {
@@ -684,6 +730,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
                 ["poi-label: Could not retrieve sprite 'park'"],
                 ["poi-label: Skipping unsupported expression"],
+                [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Could not retrieve sprite 'park'",
+                ],
             ]
         )
 
@@ -737,6 +787,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
             },
         )
+        self.assertEqual(report["with_scalar_line_opacity_probe"]["line_opacity_expression_count_replaced"], 0)
+        self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["count"], 2)
+        self.assertEqual(report["with_scalar_line_opacity_probe"]["warning_count_delta_from_qfit"], 0)
+        self.assertEqual(report["with_scalar_line_opacity_probe"]["reduced_from_qfit"], {"by_message": [], "by_layer": []})
         self.assertEqual(
             report["reduced_by_qfit"],
             {
@@ -762,6 +816,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             fake_converter.converted_styles[3],
             {"layers": [{"id": "poi-label", "filter": ["==", ["get", "maki"], "park"], "layout": {}}]},
         )
+        self.assertEqual(fake_converter.converted_styles[4], qfit_style)
         self.assertIn("filter", qfit_style["layers"][0])
         self.assertIn("icon-image", qfit_style["layers"][0]["layout"])
         self.assertEqual(len(fake_app.created), 1)
@@ -773,7 +828,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
     def test_qgis_converter_warning_report_reuses_existing_qgis_app(self):
         existing_app = object()
         fake_qgis, fake_core, fake_app, _fake_converter = _fake_qgis_modules(
-            [["raw warning"], ["qfit warning"], ["filterless warning"], ["iconless warning"]],
+            [["raw warning"], ["qfit warning"], ["filterless warning"], ["iconless warning"], ["line opacity warning"]],
             existing_app=existing_app,
         )
 
@@ -787,6 +842,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["qfit_preprocessed"]["warnings"], ["qfit warning"])
         self.assertEqual(report["without_filters_probe"]["summary"]["warnings"], ["filterless warning"])
         self.assertEqual(report["without_icon_images_probe"]["summary"]["warnings"], ["iconless warning"])
+        self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["warnings"], ["line opacity warning"])
         self.assertEqual(fake_app.created, [])
 
     def test_markdown_summarizes_source_filter_preserved_and_unresolved_cues(self):
@@ -936,6 +992,32 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     ],
                 },
             },
+            "with_scalar_line_opacity_probe": {
+                "line_opacity_expression_count_replaced": 2,
+                "summary": {
+                    "count": 1,
+                    "by_message": [{"message": "Could not retrieve sprite 'park'", "count": 1}],
+                    "by_layer_group": [{"group": "pois/labels", "count": 1}],
+                    "by_layer_group_and_message": [
+                        {"group": "pois/labels", "message": "Could not retrieve sprite 'park'", "count": 1}
+                    ],
+                    "by_layer": [{"layer": "poi-label", "count": 1}],
+                },
+                "warning_count_delta_from_qfit": 1,
+                "reduced_from_qfit": {
+                    "by_message": [
+                        {
+                            "message": "Skipping unsupported expression",
+                            "raw_count": 2,
+                            "qfit_count": 1,
+                            "reduced_count": 1,
+                        }
+                    ],
+                    "by_layer_group": [
+                        {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                    ],
+                },
+            },
         }
         layers = {layer["id"]: layer for layer in audit["layers"]}
         layers["poi-label"]["qgis_converter_warnings"] = {
@@ -1006,6 +1088,14 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| Layer group | Before icon probe | Without icon-image | Reduced |", markdown)
         self.assertIn("##### Remaining icon probe warnings by message", markdown)
         self.assertIn("##### Remaining icon probe warnings by layer", markdown)
+        self.assertIn("#### Diagnostic line-opacity scalarization probe", markdown)
+        self.assertIn("Line opacity expressions replaced in probe: 2", markdown)
+        self.assertIn("Warnings after scalar line opacity: 1", markdown)
+        self.assertIn("##### Line-opacity probe reductions by message", markdown)
+        self.assertIn("| Message | Before line-opacity probe | Scalar line-opacity | Reduced |", markdown)
+        self.assertIn("##### Line-opacity probe reductions by layer group", markdown)
+        self.assertIn("##### Remaining line-opacity probe warnings by message", markdown)
+        self.assertIn("##### Remaining line-opacity probe warnings by layer", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 

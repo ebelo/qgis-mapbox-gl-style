@@ -21,6 +21,10 @@ _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR = "| --- | --- | ---: |"
 _MARKDOWN_LAYER_GROUP_LABEL = "Layer group"
 _MARKDOWN_MESSAGE_LABEL = "Message"
 _MARKDOWN_LAYER_LABEL = "Layer"
+_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL = "Warning count delta from qfit preprocessing"
+_LINE_OPACITY_PROBE_ZOOM = 12.0
+_SCALAR_LINE_OPACITY_PROBE_KEY = "with_scalar_line_opacity_probe"
+_LINE_OPACITY_EXPRESSION_COUNT_KEY = "line_opacity_expression_count_replaced"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -727,6 +731,12 @@ def _annotate_qgis_warning_group_summaries(
         else {}
     )
     _annotate_probe_warning_groups(icon_image_probe, qfit_summary, layer_groups)
+    line_opacity_probe = (
+        warning_report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
+        if isinstance(warning_report.get(_SCALAR_LINE_OPACITY_PROBE_KEY), dict)
+        else {}
+    )
+    _annotate_probe_warning_groups(line_opacity_probe, qfit_summary, layer_groups)
 
 
 def _annotate_layers_with_qgis_warnings(
@@ -820,6 +830,90 @@ def _style_without_icon_images(style_definition: dict[str, object]) -> tuple[dic
     return style_without_icons, removed_count
 
 
+def _clamp_opacity_value(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0.0, min(float(value), 1.0))
+
+
+def _representative_interpolate_output(expr: list[object]) -> object | None:
+    if len(expr) < 5:
+        return None
+    if expr[2] != ["zoom"]:
+        return expr[4]
+    stops: list[tuple[float, object]] = []
+    for index in range(3, len(expr) - 1, 2):
+        stop = expr[index]
+        if isinstance(stop, bool) or not isinstance(stop, (int, float)):
+            continue
+        stops.append((float(stop), expr[index + 1]))
+    if not stops:
+        return None
+    return min(stops, key=lambda stop: abs(stop[0] - _LINE_OPACITY_PROBE_ZOOM))[1]
+
+
+def _representative_step_output(expr: list[object]) -> object | None:
+    if len(expr) < 3:
+        return None
+    if expr[1] != ["zoom"]:
+        return expr[2]
+    value = expr[2]
+    for index in range(3, len(expr) - 1, 2):
+        stop = expr[index]
+        if isinstance(stop, bool) or not isinstance(stop, (int, float)):
+            continue
+        if _LINE_OPACITY_PROBE_ZOOM < float(stop):
+            break
+        value = expr[index + 1]
+    return value
+
+
+def _extract_line_opacity_scalar(expr: object) -> float | None:
+    scalar = _clamp_opacity_value(expr)
+    if scalar is not None:
+        return scalar
+    if not isinstance(expr, list) or not expr:
+        return None
+
+    op = expr[0]
+    if op == "interpolate":
+        return _extract_line_opacity_scalar(_representative_interpolate_output(expr))
+    if op == "step":
+        return _extract_line_opacity_scalar(_representative_step_output(expr))
+    if op == "match":
+        return _extract_line_opacity_scalar(expr[-1]) if len(expr) >= 4 else None
+    if op in {"case", "coalesce"}:
+        for item in reversed(expr[1:]):
+            scalar = _extract_line_opacity_scalar(item)
+            if scalar is not None:
+                return scalar
+    return None
+
+
+def _style_with_scalar_line_opacity(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
+    """Return a copy with line-opacity expressions scalarized for converter diagnostics only."""
+    style_with_scalar_opacity = copy.deepcopy(style_definition)
+    replaced_count = 0
+    layers = style_with_scalar_opacity.get("layers")
+    if not isinstance(layers, list):
+        return style_with_scalar_opacity, replaced_count
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        paint = layer.get("paint")
+        if not isinstance(paint, dict):
+            continue
+        line_opacity = paint.get("line-opacity")
+        if not isinstance(line_opacity, list):
+            continue
+        scalar_opacity = _extract_line_opacity_scalar(line_opacity)
+        if scalar_opacity is None:
+            continue
+        paint["line-opacity"] = scalar_opacity
+        replaced_count += 1
+    return style_with_scalar_opacity, replaced_count
+
+
 def _collect_qgis_converter_warnings(style_definition: dict[str, object]) -> list[str]:
     from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
 
@@ -852,6 +946,10 @@ def _qgis_converter_warning_report(
         filterless_warnings = _collect_qgis_converter_warnings(filterless_style)
         iconless_style, icon_image_count_removed = _style_without_icon_images(qfit_preprocessed_style)
         iconless_warnings = _collect_qgis_converter_warnings(iconless_style)
+        scalar_line_opacity_style, line_opacity_expression_count_replaced = _style_with_scalar_line_opacity(
+            qfit_preprocessed_style
+        )
+        scalar_line_opacity_warnings = _collect_qgis_converter_warnings(scalar_line_opacity_style)
     finally:
         if created_app:
             app.exitQgis()
@@ -859,6 +957,7 @@ def _qgis_converter_warning_report(
     qfit_summary = _qgis_warning_summary(qfit_warnings)
     filterless_summary = _qgis_warning_summary(filterless_warnings)
     iconless_summary = _qgis_warning_summary(iconless_warnings)
+    scalar_line_opacity_summary = _qgis_warning_summary(scalar_line_opacity_warnings)
     return {
         "raw": raw_summary,
         "qfit_preprocessed": qfit_summary,
@@ -875,6 +974,12 @@ def _qgis_converter_warning_report(
             "summary": iconless_summary,
             "warning_count_delta_from_qfit": len(qfit_warnings) - len(iconless_warnings),
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, iconless_summary),
+        },
+        _SCALAR_LINE_OPACITY_PROBE_KEY: {
+            _LINE_OPACITY_EXPRESSION_COUNT_KEY: line_opacity_expression_count_replaced,
+            "summary": scalar_line_opacity_summary,
+            "warning_count_delta_from_qfit": len(qfit_warnings) - len(scalar_line_opacity_warnings),
+            "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, scalar_line_opacity_summary),
         },
     }
 
@@ -1147,7 +1252,7 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
         "",
         f"Filters removed in probe: {probe.get('filter_count_removed', 0)}",
         f"Warnings after removing filters: {summary.get('count', 0)}",
-        f"Warning count delta from qfit preprocessing: {probe.get('warning_count_delta_from_qfit', 0)}",
+        f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
         "",
     ]
     by_message = list(reduced.get("by_message") or [])
@@ -1236,7 +1341,7 @@ def _markdown_icon_image_probe(probe: object) -> list[str]:
         "",
         f"Icon images removed in probe: {probe.get('icon_image_count_removed', 0)}",
         f"Warnings after removing icon images: {summary.get('count', 0)}",
-        f"Warning count delta from qfit preprocessing: {probe.get('warning_count_delta_from_qfit', 0)}",
+        f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
         "",
     ]
     by_message = list(reduced.get("by_message") or [])
@@ -1300,6 +1405,83 @@ def _markdown_icon_image_probe(probe: object) -> list[str]:
     return lines
 
 
+def _markdown_line_opacity_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    lines = [
+        "#### Diagnostic line-opacity scalarization probe",
+        "",
+        "This is not a rendering-safe qfit preprocessing mode; line opacity preserves zoom/data-driven cartographic emphasis.",
+        "Use it only to estimate how much converter warning debt is tied to Mapbox line-opacity expressions.",
+        "",
+        f"Line opacity expressions replaced in probe: {probe.get(_LINE_OPACITY_EXPRESSION_COUNT_KEY, 0)}",
+        f"Warnings after scalar line opacity: {summary.get('count', 0)}",
+        f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
+        "",
+    ]
+    by_message = list(reduced.get("by_message") or [])
+    by_group = list(reduced.get("by_layer_group") or [])
+    if by_message:
+        lines.extend(
+            [
+                "##### Line-opacity probe reductions by message",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_message,
+                    key="message",
+                    label=_MARKDOWN_MESSAGE_LABEL,
+                    before_label="Before line-opacity probe",
+                    after_label="Scalar line-opacity",
+                ),
+            ]
+        )
+    if by_group:
+        lines.extend(
+            [
+                "##### Line-opacity probe reductions by layer group",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_group,
+                    key="group",
+                    label=_MARKDOWN_LAYER_GROUP_LABEL,
+                    before_label="Before line-opacity probe",
+                    after_label="Scalar line-opacity",
+                ),
+            ]
+        )
+    lines.extend(
+        [
+            "##### Remaining line-opacity probe warnings by message",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_message") or []),
+                key="message",
+                label=_MARKDOWN_MESSAGE_LABEL,
+            ),
+            "##### Remaining line-opacity probe warnings by layer group",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer_group") or []),
+                key="group",
+                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            ),
+            "##### Remaining line-opacity probe warnings by layer group and message",
+            "",
+            *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
+            "##### Remaining line-opacity probe warnings by layer",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer") or []),
+                key="layer",
+                label=_MARKDOWN_LAYER_LABEL,
+            ),
+        ]
+    )
+    return lines
+
+
 def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     if not isinstance(report, dict):
         return []
@@ -1311,6 +1493,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     reduced_by_group = list(reduced.get("by_layer_group") or [])
     filterless_probe = report.get("without_filters_probe")
     icon_image_probe = report.get("without_icon_images_probe")
+    line_opacity_probe = report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
     lines = [
         "### QGIS converter warnings",
         "",
@@ -1383,6 +1566,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             ),
             *_markdown_filterless_probe(filterless_probe),
             *_markdown_icon_image_probe(icon_image_probe),
+            *_markdown_line_opacity_probe(line_opacity_probe),
         ]
     )
     return lines
