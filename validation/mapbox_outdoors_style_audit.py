@@ -998,7 +998,12 @@ def _qgis_property_removal_impact_report(
                         list(qfit_summary.get("by_message") or []),
                         list(stripped_summary.get("by_message") or []),
                         key="message",
-                    )
+                    ),
+                    "by_layer": _warning_reduction_summary(
+                        list(qfit_summary.get("by_layer") or []),
+                        list(stripped_summary.get("by_layer") or []),
+                        key="layer",
+                    ),
                 },
             }
         )
@@ -2035,6 +2040,50 @@ def _markdown_property_removal_impact_table(rows: list[dict[str, object]]) -> li
     return lines
 
 
+def _property_removal_impact_layer_reductions(
+    rows: list[dict[str, object]],
+    *,
+    per_property_limit: int = 5,
+    total_limit: int = 25,
+) -> list[dict[str, object]]:
+    if total_limit <= 0:
+        return []
+    layer_rows: list[dict[str, object]] = []
+    for row in rows:
+        if int(row.get("warning_count_delta_from_qfit") or 0) <= 0:
+            continue
+        reduced = row.get("reduced_from_qfit") if isinstance(row.get("reduced_from_qfit"), dict) else {}
+        by_layer = list(reduced.get("by_layer") or [])
+        for layer_reduction in by_layer[:per_property_limit]:
+            layer_rows.append({"property": row.get("property", ""), **layer_reduction})
+            if len(layer_rows) >= total_limit:
+                return layer_rows
+    return layer_rows
+
+
+def _markdown_property_removal_impact_layer_table(rows: list[dict[str, object]]) -> list[str]:
+    if not rows:
+        return []
+    lines = [
+        "##### Top warning reductions by property and layer",
+        "",
+        "| Property | Layer | Before removal | After removal | Reduced |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        lines.append(
+            "| `{property}` | `{layer}` | {raw_count} | {qfit_count} | {reduced_count} |".format(
+                property=row.get("property", ""),
+                layer=row.get("layer", ""),
+                raw_count=row.get("raw_count", 0),
+                qfit_count=row.get("qfit_count", 0),
+                reduced_count=row.get("reduced_count", 0),
+            )
+        )
+    lines.append("")
+    return lines
+
+
 def _markdown_property_removal_impact_probe(probe: object) -> list[str]:
     if not isinstance(probe, dict):
         return []
@@ -2051,6 +2100,7 @@ def _markdown_property_removal_impact_probe(probe: object) -> list[str]:
         f"Candidate properties tested: {probe.get('candidate_property_count', 0)}",
         "",
         *_markdown_property_removal_impact_table(rows),
+        *_markdown_property_removal_impact_layer_table(_property_removal_impact_layer_reductions(rows)),
     ]
 
 

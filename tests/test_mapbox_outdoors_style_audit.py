@@ -535,7 +535,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                                 "qfit_count": 0,
                                 "reduced_count": 1,
                             }
-                        ]
+                        ],
+                        "by_layer": [
+                            {"layer": "road-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                        ],
                     },
                 },
                 {
@@ -552,7 +555,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                                 "qfit_count": 0,
                                 "reduced_count": 1,
                             }
-                        ]
+                        ],
+                        "by_layer": [
+                            {"layer": "poi-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                        ],
                     },
                 },
             ],
@@ -587,6 +593,46 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(opacity_count, 1)
         self.assertIn("line-opacity", without_opacity["layers"][0]["paint"])
         self.assertNotIn("line-opacity", without_opacity["layers"][2]["paint"])
+
+    def test_property_removal_impact_layer_reductions_include_positive_deltas_only(self):
+        rows = [
+            {
+                "property": "filter",
+                "warning_count_delta_from_qfit": 2,
+                "reduced_from_qfit": {
+                    "by_layer": [
+                        {"layer": "road-label", "raw_count": 3, "qfit_count": 1, "reduced_count": 2},
+                        {"layer": "poi-label", "raw_count": 2, "qfit_count": 1, "reduced_count": 1},
+                    ]
+                },
+            },
+            {
+                "property": "layout.text-field",
+                "warning_count_delta_from_qfit": -1,
+                "reduced_from_qfit": {
+                    "by_layer": [
+                        {"layer": "hidden", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                    ]
+                },
+            },
+        ]
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._property_removal_impact_layer_reductions(
+                rows,
+                per_property_limit=2,
+                total_limit=1,
+            ),
+            [
+                {
+                    "property": "filter",
+                    "layer": "road-label",
+                    "raw_count": 3,
+                    "qfit_count": 1,
+                    "reduced_count": 2,
+                }
+            ],
+        )
 
     def test_expression_operator_names_ignore_literal_string_arrays(self):
         self.assertEqual(
@@ -1519,6 +1565,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "warning_count_after_removal": 1,
                         "warning_count_delta_from_qfit": 1,
                         "skipping_unsupported_expression_delta": 1,
+                        "reduced_from_qfit": {
+                            "by_layer": [
+                                {"layer": "poi-label", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                            ]
+                        },
                     },
                     {
                         "property": "layout.text-field",
@@ -1526,6 +1577,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "warning_count_after_removal": 5,
                         "warning_count_delta_from_qfit": -3,
                         "skipping_unsupported_expression_delta": -2,
+                        "reduced_from_qfit": {
+                            "by_layer": [
+                                {"layer": "road-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                            ]
+                        },
                     },
                 ],
             },
@@ -1774,6 +1830,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertIn("| `filter` | 3 | 1 | 1 | 1 |", markdown)
         self.assertIn("| `layout.text-field` | 1 | 5 | -3 | -2 |", markdown)
+        self.assertIn("##### Top warning reductions by property and layer", markdown)
+        self.assertIn("| Property | Layer | Before removal | After removal | Reduced |", markdown)
+        self.assertIn("| `filter` | `poi-label` | 2 | 1 | 1 |", markdown)
+        self.assertNotIn("| `layout.text-field` | `road-label` | 1 | 0 | 1 |", markdown)
         self.assertIn("#### Diagnostic filter-removal probe", markdown)
         self.assertIn("This is not a rendering-safe qfit preprocessing mode", markdown)
         self.assertIn("Filters removed in probe: 1", markdown)
