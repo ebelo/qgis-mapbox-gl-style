@@ -1004,6 +1004,31 @@ def _layer_reductions_with_property_values(
     return rows
 
 
+def _layer_groups_by_id(style_definition: dict[str, object]) -> dict[str, str]:
+    layers = style_definition.get("layers")
+    if not isinstance(layers, list):
+        return {}
+    return {
+        str(layer.get("id") or ""): _layer_group(layer)
+        for layer in layers
+        if isinstance(layer, dict) and layer.get("id")
+    }
+
+
+def _warning_summary_layer_group_reductions(
+    before_summary: dict[str, object],
+    after_summary: dict[str, object],
+    layer_groups: dict[str, str],
+) -> list[dict[str, object]]:
+    before_warnings = [str(warning) for warning in before_summary.get("warnings") or []]
+    after_warnings = [str(warning) for warning in after_summary.get("warnings") or []]
+    return _warning_reduction_summary(
+        _warning_group_count_summary(before_warnings, layer_groups),
+        _warning_group_count_summary(after_warnings, layer_groups),
+        key="group",
+    )
+
+
 def _warning_count_for_message(summary: dict[str, object], message: str) -> int:
     for item in summary.get("by_message") or []:
         if item.get("message") == message:
@@ -1020,6 +1045,7 @@ def _qgis_property_removal_impact_report(
     """Remove one expression property at a time to rank residual converter-warning causes."""
     qfit_warning_count = int(qfit_summary.get("count") or 0)
     qfit_skipping_count = _warning_count_for_message(qfit_summary, "Skipping unsupported expression")
+    layer_groups = _layer_groups_by_id(qfit_preprocessed_style)
     rows: list[dict[str, object]] = []
     for property_path in property_paths or _removable_expression_property_paths(qfit_preprocessed_style):
         stripped_style, removed_count = _style_without_property_path(qfit_preprocessed_style, property_path)
@@ -1049,6 +1075,11 @@ def _qgis_property_removal_impact_report(
                         list(qfit_summary.get("by_message") or []),
                         list(stripped_summary.get("by_message") or []),
                         key="message",
+                    ),
+                    "by_layer_group": _warning_summary_layer_group_reductions(
+                        qfit_summary,
+                        stripped_summary,
+                        layer_groups,
                     ),
                     "by_layer": by_layer,
                 },
@@ -2113,6 +2144,50 @@ def _property_removal_impact_layer_reductions(
     return layer_rows
 
 
+def _property_removal_impact_group_reductions(
+    rows: list[dict[str, object]],
+    *,
+    per_property_limit: int = 5,
+    total_limit: int = 25,
+) -> list[dict[str, object]]:
+    if total_limit <= 0:
+        return []
+    group_rows: list[dict[str, object]] = []
+    for row in rows:
+        if int(row.get("warning_count_delta_from_qfit") or 0) <= 0:
+            continue
+        reduced = row.get("reduced_from_qfit") if isinstance(row.get("reduced_from_qfit"), dict) else {}
+        by_group = list(reduced.get("by_layer_group") or [])
+        for group_reduction in by_group[:per_property_limit]:
+            group_rows.append({"property": row.get("property", ""), **group_reduction})
+            if len(group_rows) >= total_limit:
+                return group_rows
+    return group_rows
+
+
+def _markdown_property_removal_impact_group_table(rows: list[dict[str, object]]) -> list[str]:
+    if not rows:
+        return []
+    lines = [
+        "##### Top warning reductions by property and layer group",
+        "",
+        "| Property | Layer group | Before removal | After removal | Reduced |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        lines.append(
+            "| `{property}` | `{group}` | {raw_count} | {qfit_count} | {reduced_count} |".format(
+                property=row.get("property", ""),
+                group=row.get("group", ""),
+                raw_count=row.get("raw_count", 0),
+                qfit_count=row.get("qfit_count", 0),
+                reduced_count=row.get("reduced_count", 0),
+            )
+        )
+    lines.append("")
+    return lines
+
+
 def _markdown_property_removal_impact_layer_table(rows: list[dict[str, object]]) -> list[str]:
     if not rows:
         return []
@@ -2156,6 +2231,7 @@ def _markdown_property_removal_impact_probe(probe: object) -> list[str]:
         f"Candidate properties tested: {probe.get('candidate_property_count', 0)}",
         "",
         *_markdown_property_removal_impact_table(rows),
+        *_markdown_property_removal_impact_group_table(_property_removal_impact_group_reductions(rows)),
         *_markdown_property_removal_impact_layer_table(_property_removal_impact_layer_reductions(rows)),
     ]
 

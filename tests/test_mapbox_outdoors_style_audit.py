@@ -536,6 +536,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                                 "reduced_count": 1,
                             }
                         ],
+                        "by_layer_group": [
+                            {"group": "roads/trails", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                        ],
                         "by_layer": [
                             {
                                 "layer": "road-label",
@@ -561,6 +564,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                                 "qfit_count": 0,
                                 "reduced_count": 1,
                             }
+                        ],
+                        "by_layer_group": [
+                            {"group": "pois/labels", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
                         ],
                         "by_layer": [
                             {
@@ -639,6 +645,87 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 {
                     "property": "filter",
                     "layer": "road-label",
+                    "raw_count": 3,
+                    "qfit_count": 1,
+                    "reduced_count": 2,
+                }
+            ],
+        )
+
+    def test_warning_summary_layer_group_reductions_net_full_group_counts(self):
+        layer_groups = mapbox_outdoors_style_audit._layer_groups_by_id(
+            {
+                "layers": [
+                    {"id": "road-label", "type": "symbol", "source-layer": "road"},
+                    {"id": "road-minor", "type": "line", "source-layer": "road"},
+                    {"id": "poi-label", "type": "symbol", "source-layer": "poi_label"},
+                ]
+            }
+        )
+        self.assertEqual(
+            layer_groups,
+            {"road-label": "roads/trails", "road-minor": "roads/trails", "poi-label": "pois/labels"},
+        )
+        before = mapbox_outdoors_style_audit._qgis_warning_summary(
+            ["road-label: Skipping unsupported expression", "poi-label: Could not retrieve sprite 'park'"]
+        )
+        after_same_group = mapbox_outdoors_style_audit._qgis_warning_summary(
+            ["road-minor: Skipping unsupported expression", "poi-label: Could not retrieve sprite 'park'"]
+        )
+        after_reduced_group = mapbox_outdoors_style_audit._qgis_warning_summary(
+            ["poi-label: Could not retrieve sprite 'park'"]
+        )
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._warning_summary_layer_group_reductions(
+                before,
+                after_same_group,
+                layer_groups,
+            ),
+            [],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._warning_summary_layer_group_reductions(
+                before,
+                after_reduced_group,
+                layer_groups,
+            ),
+            [{"group": "roads/trails", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}],
+        )
+
+    def test_property_removal_impact_group_reductions_include_positive_deltas_only(self):
+        rows = [
+            {
+                "property": "filter",
+                "warning_count_delta_from_qfit": 2,
+                "reduced_from_qfit": {
+                    "by_layer_group": [
+                        {"group": "roads/trails", "raw_count": 3, "qfit_count": 1, "reduced_count": 2},
+                        {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1},
+                    ]
+                },
+            },
+            {
+                "property": "layout.text-field",
+                "warning_count_delta_from_qfit": -1,
+                "reduced_from_qfit": {
+                    "by_layer_group": [
+                        {"group": "other", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                    ]
+                },
+            },
+        ]
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._property_removal_impact_group_reductions(
+                rows,
+                per_property_limit=2,
+                total_limit=1,
+            ),
+            [
+                {
+                    "property": "filter",
+                    "group": "roads/trails",
                     "raw_count": 3,
                     "qfit_count": 1,
                     "reduced_count": 2,
@@ -1644,6 +1731,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "warning_count_delta_from_qfit": 1,
                         "skipping_unsupported_expression_delta": 1,
                         "reduced_from_qfit": {
+                            "by_layer_group": [
+                                {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                            ],
                             "by_layer": [
                                 {
                                     "layer": "poi-label",
@@ -1662,6 +1752,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "warning_count_delta_from_qfit": -3,
                         "skipping_unsupported_expression_delta": -2,
                         "reduced_from_qfit": {
+                            "by_layer_group": [
+                                {"group": "roads/trails", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                            ],
                             "by_layer": [
                                 {
                                     "layer": "road-label",
@@ -1920,6 +2013,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertIn("| `filter` | 3 | 1 | 1 | 1 |", markdown)
         self.assertIn("| `layout.text-field` | 1 | 5 | -3 | -2 |", markdown)
+        self.assertIn("##### Top warning reductions by property and layer group", markdown)
+        self.assertIn("| Property | Layer group | Before removal | After removal | Reduced |", markdown)
+        self.assertIn("| `filter` | `pois/labels` | 2 | 1 | 1 |", markdown)
         self.assertIn("##### Top warning reductions by property and layer", markdown)
         self.assertIn("| Property | Layer | Expression | Before removal | After removal | Reduced |", markdown)
         self.assertIn(
