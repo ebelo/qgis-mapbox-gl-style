@@ -20,9 +20,16 @@ PACKAGE_PARENT = REPO_ROOT.parent
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-comparison"
 DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
+DEFAULT_MAPBOX_STYLE_URL = f"mapbox://styles/{DEFAULT_MAPBOX_STYLE_OWNER}/{DEFAULT_MAPBOX_STYLE_ID}"
 WEB_MERCATOR_HALF_WORLD = 20037508.342789244
 WEB_MERCATOR_TILE_SIZE = 512
 ImageMetrics: TypeAlias = dict[str, object]
+MATRIX_SUMMARY_METRIC_KEYS = (
+    "changed_pixel_ratio",
+    "normalized_mean_absolute_channel_delta",
+    "normalized_rms_channel_delta",
+    "ssim_status",
+)
 
 
 class ComparisonCaptureError(RuntimeError):
@@ -832,6 +839,130 @@ def _timeout_output_text(value: bytes | str | None) -> str:
     return value
 
 
+def _manifest_path_from_child_stdout(stdout: str) -> Path | None:
+    manifest_path: Path | None = None
+    for line in stdout.splitlines():
+        if line.startswith("Manifest: "):
+            manifest_text = line.removeprefix("Manifest: ").strip()
+            if manifest_text:
+                manifest_path = Path(manifest_text)
+    return manifest_path
+
+
+def _metric_summary_from_manifest(manifest_path: Path | None) -> dict[str, object]:
+    if manifest_path is None:
+        return {}
+    try:
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    metrics = loaded.get("metrics") if isinstance(loaded, dict) else None
+    if not isinstance(metrics, dict):
+        return {}
+    return {key: metrics[key] for key in MATRIX_SUMMARY_METRIC_KEYS if key in metrics}
+
+
+def _all_camera_summary_entry(
+    *,
+    camera: MapboxComparisonCamera,
+    status: str,
+    returncode: int | None,
+    timeout_seconds: float,
+    manifest_path: Path | None,
+    token: str,
+) -> dict[str, object]:
+    return {
+        "camera": camera.name,
+        "description": camera.description,
+        "zoom": camera.zoom,
+        "status": status,
+        "returncode": returncode,
+        "timeout_seconds": timeout_seconds,
+        "manifest": redact_sensitive_text(str(manifest_path), token) if manifest_path is not None else None,
+        "metrics": _metric_summary_from_manifest(manifest_path),
+    }
+
+
+def _format_summary_metric(metrics: dict[str, object], key: str) -> str:
+    value = metrics.get(key)
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
+
+
+def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
+    lines = [
+        "# Mapbox Outdoors all-camera comparison summary",
+        "",
+        f"Generated: `{summary['generated_at']}`",
+        "",
+        "| Camera | Status | z | Changed ratio | Mean Δ | RMS Δ | SSIM | Manifest |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
+    ]
+    for entry in summary["cameras"]:
+        metrics = entry["metrics"] if isinstance(entry.get("metrics"), dict) else {}
+        manifest = entry.get("manifest") or "—"
+        lines.append(
+            "| "
+            f"`{entry['camera']}` | "
+            f"{entry['status']} | "
+            f"{entry['zoom']:g} | "
+            f"{_format_summary_metric(metrics, 'changed_pixel_ratio')} | "
+            f"{_format_summary_metric(metrics, 'normalized_mean_absolute_channel_delta')} | "
+            f"{_format_summary_metric(metrics, 'normalized_rms_channel_delta')} | "
+            f"{_format_summary_metric(metrics, 'ssim_status')} | "
+            f"`{manifest}` |"
+        )
+    lines.extend(
+        [
+            "",
+            "Notes:",
+            "- Mapbox tokens are intentionally excluded from this summary.",
+            "- This is a manual visual QA aid, not a CI gate.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _write_all_cameras_summary(
+    *,
+    args: argparse.Namespace,
+    output_root: Path,
+    entries: list[dict[str, object]],
+    token: str,
+) -> tuple[Path, Path]:
+    generated_at = _utc_timestamp()
+    run_dir = output_root / "all-cameras" / generated_at
+    _ensure_output_directory(run_dir)
+    counts = {
+        status: sum(1 for entry in entries if entry["status"] == status)
+        for status in ("passed", "failed", "timeout")
+    }
+    summary: dict[str, object] = {
+        "generated_at": generated_at,
+        "style_url": None if args.style_json is not None else DEFAULT_MAPBOX_STYLE_URL,
+        "style_json_path": (
+            redact_sensitive_text(str(args.style_json.expanduser().resolve()), token)
+            if args.style_json is not None
+            else None
+        ),
+        "output_root": redact_sensitive_text(str(output_root), token),
+        "counts": counts,
+        "cameras": entries,
+        "notes": [
+            "Mapbox tokens are intentionally excluded from this summary.",
+            "This is a manual visual QA aid, not a CI gate.",
+        ],
+    }
+    summary_json = run_dir / "summary.json"
+    summary_markdown = run_dir / "summary.md"
+    summary_json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    summary_markdown.write_text(_all_cameras_summary_markdown(summary), encoding="utf-8")
+    return summary_json, summary_markdown
+
+
 def _run_all_cameras_in_subprocesses(
     *,
     args: argparse.Namespace,
@@ -840,6 +971,7 @@ def _run_all_cameras_in_subprocesses(
     output_root: Path,
 ) -> None:
     failures: list[str] = []
+    summary_entries: list[dict[str, object]] = []
     for camera in cameras:
         timeout_seconds = _camera_subprocess_timeout_seconds(args)
         try:
@@ -858,6 +990,16 @@ def _run_all_cameras_in_subprocesses(
                 stderr=_timeout_output_text(exc.stderr),
                 token=token,
             )
+            summary_entries.append(
+                _all_camera_summary_entry(
+                    camera=camera,
+                    status="timeout",
+                    returncode=None,
+                    timeout_seconds=timeout_seconds,
+                    manifest_path=None,
+                    token=token,
+                )
+            )
             failures.append(f"{camera.name} (timeout after {timeout_seconds:g}s)")
             print(
                 f"error: camera {camera.name} timed out after {timeout_seconds:g}s; continuing.",
@@ -865,12 +1007,31 @@ def _run_all_cameras_in_subprocesses(
             )
             continue
         _write_child_output(stdout=completed.stdout, stderr=completed.stderr, token=token)
+        manifest_path = _manifest_path_from_child_stdout(completed.stdout)
+        summary_entries.append(
+            _all_camera_summary_entry(
+                camera=camera,
+                status="passed" if completed.returncode == 0 else "failed",
+                returncode=completed.returncode,
+                timeout_seconds=timeout_seconds,
+                manifest_path=manifest_path,
+                token=token,
+            )
+        )
         if completed.returncode != 0:
             failures.append(f"{camera.name} (exit {completed.returncode})")
             print(
                 f"error: camera {camera.name} failed with exit code {completed.returncode}; continuing.",
                 file=sys.stderr,
             )
+    summary_json, summary_markdown = _write_all_cameras_summary(
+        args=args,
+        output_root=output_root,
+        entries=summary_entries,
+        token=token,
+    )
+    print(f"Matrix summary: {redact_sensitive_text(str(summary_json), token)}")
+    print(f"Matrix report: {redact_sensitive_text(str(summary_markdown), token)}")
     if failures:
         raise ComparisonCaptureError(f"comparison capture failed for: {', '.join(failures)}")
 

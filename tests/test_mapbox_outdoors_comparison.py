@@ -592,6 +592,69 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             self.assertIn(str(expected_style_json), command)
             self.assertEqual(kwargs["cwd"], mapbox_outdoors_comparison.REPO_ROOT)
 
+    def test_main_all_cameras_writes_matrix_summary_with_manifest_metrics(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_root = Path(tmpdir) / "test-mapbox-token-output"
+
+            def fake_run(command, **_kwargs):
+                camera_name = command[2]
+                camera_index = list(CAMERAS).index(camera_name)
+                run_dir = output_root / camera_name / "20260512T030000Z"
+                run_dir.mkdir(parents=True)
+                manifest_path = run_dir / "manifest.json"
+                manifest_path.write_text(
+                    json.dumps(
+                        {
+                            "metrics": {
+                                "changed_pixel_ratio": 0.1 + camera_index / 10,
+                                "normalized_mean_absolute_channel_delta": 0.01 + camera_index / 100,
+                                "normalized_rms_channel_delta": 0.02 + camera_index / 100,
+                                "ssim_status": "unavailable",
+                            }
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return types.SimpleNamespace(
+                    returncode=0,
+                    stdout=f"Camera: {camera_name}\nManifest: {manifest_path}\n",
+                    stderr="",
+                )
+
+            with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
+                with patch("builtins.print") as print_mock:
+                    result = mapbox_outdoors_comparison.main([
+                        "--all-cameras",
+                        "--mapbox-token",
+                        "test-mapbox-token",
+                        "--output-root",
+                        str(output_root),
+                        "--skip-browser",
+                        "--skip-qgis",
+                        "--skip-diff",
+                    ])
+
+            summary_json = next((output_root / "all-cameras").glob("*/summary.json"), None)
+            self.assertIsNotNone(summary_json, "all-cameras summary.json should be written")
+            summary_markdown = summary_json.with_name("summary.md")
+            summary_json_text = summary_json.read_text(encoding="utf-8")
+            summary = json.loads(summary_json_text)
+            summary_text = summary_markdown.read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertEqual(summary["counts"], {"passed": len(CAMERAS), "failed": 0, "timeout": 0})
+        self.assertEqual([entry["camera"] for entry in summary["cameras"]], list(CAMERAS))
+        self.assertEqual(summary["cameras"][0]["metrics"]["changed_pixel_ratio"], 0.1)
+        self.assertIn("| `switzerland-alps-z5-outdoors` | passed | 5.35 | 0.1000 |", summary_text)
+        self.assertNotIn("test-mapbox-token", summary_json_text)
+        self.assertNotIn("test-mapbox-token", summary_text)
+        for call in print_mock.call_args_list:
+            if call.args:
+                self.assertNotIn("test-mapbox-token", call.args[0])
+        self.assertTrue(any(call.args[0].startswith("Matrix summary:") for call in print_mock.call_args_list))
+
     def test_main_rejects_single_camera_with_all_cameras(self):
         from qfit.validation import mapbox_outdoors_comparison
 
