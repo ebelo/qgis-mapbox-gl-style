@@ -633,9 +633,22 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                 run_dir = output_root / camera_name / "20260512T030000Z"
                 run_dir.mkdir(parents=True)
                 manifest_path = run_dir / "manifest.json"
+                browser_png = run_dir / "mapbox-gl-reference.png"
+                qgis_png = run_dir / "qgis-vector-render.png"
+                diff_png = run_dir / "mapbox-gl-vs-qgis-diff.png"
                 manifest_path.write_text(
                     json.dumps(
                         {
+                            "outputs": {
+                                "browser_reference": str(browser_png),
+                                "qgis_vector_render": str(qgis_png),
+                                "diff": str(diff_png),
+                            },
+                            "captured": {
+                                "browser_reference": True,
+                                "qgis_vector_render": True,
+                                "diff": True,
+                            },
                             "metrics": {
                                 "changed_pixel_ratio": 0.1 + camera_index / 10,
                                 "normalized_mean_absolute_channel_delta": 0.01 + camera_index / 100,
@@ -677,10 +690,17 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual([entry["camera"] for entry in summary["cameras"]], list(CAMERAS))
         self.assertEqual(summary["cameras"][0]["artifact_status"], "metrics_available")
         self.assertEqual(summary["cameras"][0]["metrics"]["changed_pixel_ratio"], 0.1)
+        self.assertTrue(summary["cameras"][0]["outputs"]["browser_reference"].endswith("mapbox-gl-reference.png"))
+        self.assertTrue(summary["cameras"][0]["outputs"]["qgis_vector_render"].endswith("qgis-vector-render.png"))
+        self.assertTrue(summary["cameras"][0]["outputs"]["diff"].endswith("mapbox-gl-vs-qgis-diff.png"))
         self.assertIn(
             "| `switzerland-alps-z5-outdoors` | passed | `metrics_available` | 5.35 | 0.1000 |",
             summary_text,
         )
+        self.assertIn("## Image artifacts", summary_text)
+        self.assertIn("mapbox-gl-reference.png", summary_text)
+        self.assertIn("qgis-vector-render.png", summary_text)
+        self.assertIn("mapbox-gl-vs-qgis-diff.png", summary_text)
         self.assertNotIn("test-mapbox-token", summary_json_text)
         self.assertNotIn("test-mapbox-token", summary_text)
         for call in print_mock.call_args_list:
@@ -718,7 +738,9 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(summary["cameras"][0]["status"], "passed")
         self.assertEqual(summary["cameras"][0]["artifact_status"], "manifest_missing")
         self.assertEqual(summary["cameras"][0]["metrics"], {})
+        self.assertEqual(summary["cameras"][0]["outputs"], {})
         self.assertIn("| `switzerland-alps-z5-outdoors` | passed | `manifest_missing` |", summary_text)
+        self.assertIn("| `switzerland-alps-z5-outdoors` | `—` | `—` | `—` |", summary_text)
         self.assertIn("The Artifacts column distinguishes subprocess success", summary_text)
 
     def test_manifest_artifact_status_distinguishes_unreadable_and_metricless_manifests(self):
@@ -729,7 +751,17 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             invalid_manifest = tmp_path / "invalid.json"
             invalid_manifest.write_text("{", encoding="utf-8")
             metricless_manifest = tmp_path / "metricless.json"
-            metricless_manifest.write_text(json.dumps({"metrics": {}}), encoding="utf-8")
+            diff_path = tmp_path / "mapbox-gl-vs-qgis-diff.png"
+            metricless_manifest.write_text(
+                json.dumps(
+                    {
+                        "outputs": {"diff": str(diff_path), "browser_reference": str(tmp_path / "missing.png")},
+                        "captured": {"diff": True, "browser_reference": False},
+                        "metrics": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             unreadable_status, unreadable_metrics = mapbox_outdoors_comparison._manifest_artifact_status_and_metrics(
                 invalid_manifest
@@ -737,11 +769,16 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             metricless_status, metricless_metrics = mapbox_outdoors_comparison._manifest_artifact_status_and_metrics(
                 metricless_manifest
             )
+            metricless_full = mapbox_outdoors_comparison._manifest_artifact_status_metrics_and_outputs(
+                metricless_manifest,
+                token="",
+            )
 
         self.assertEqual(unreadable_status, "manifest_unreadable")
         self.assertEqual(unreadable_metrics, {})
         self.assertEqual(metricless_status, "metrics_unavailable")
         self.assertEqual(metricless_metrics, {})
+        self.assertEqual(metricless_full[2], {"diff": str(diff_path)})
 
     def test_main_rejects_single_camera_with_all_cameras(self):
         from qfit.validation import mapbox_outdoors_comparison

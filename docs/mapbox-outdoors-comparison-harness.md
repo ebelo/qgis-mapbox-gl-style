@@ -51,7 +51,7 @@ For a complete browser + QGIS + diff run, install or run from an environment wit
   - for example, run from a QGIS Python shell, OSGeo/QGIS environment, or another shell where `import qgis` works
 - Pillow for the diff image
   - already available in the qfit development environment; if missing, install it in a virtual environment rather than using system `sudo pip`
-- `QT_QPA_PLATFORM=offscreen` when running headlessly, if your QGIS environment requires it
+- QGIS/Qt support for the `offscreen` platform when running headlessly; the harness sets `QT_QPA_PLATFORM=offscreen` by default unless you provide a different value
 - `xvfb-run` or another virtual display when your local Chromium/QGIS build cannot render headlessly without an X server
 
 Keep tokens out of shell history where practical by exporting an environment variable instead of passing `--mapbox-token` directly.
@@ -84,7 +84,7 @@ python3 validation/mapbox_outdoors_comparison.py \
 `--all-cameras` uses the same capture options as a single-camera run, so you can combine it with setup-isolation flags such as `--skip-qgis` or `--skip-browser`.
 Do not pass a positional camera name with `--all-cameras`; use one mode or the other.
 Each camera is captured in its own child Python process so a local Chromium/PyQGIS crash in one camera does not kill the whole matrix runner or expose token values on the command line. If any camera fails or times out, the runner continues with the remaining cameras and exits non-zero with the failed camera names.
-The parent run also writes token-free aggregate `summary.json` and `summary.md` files under `debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/` with per-camera subprocess status, artifact status, manifest paths, and the main diff metrics. Treat rows with missing manifests or unavailable metrics as operational smoke-test output, not visual parity evidence.
+The parent run also writes token-free aggregate `summary.json` and `summary.md` files under `debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/` with per-camera subprocess status, artifact status, manifest paths, captured image artifact paths, and the main diff metrics. Treat rows with missing manifests or unavailable metrics as operational smoke-test output, not visual parity evidence.
 
 ## Partial captures
 

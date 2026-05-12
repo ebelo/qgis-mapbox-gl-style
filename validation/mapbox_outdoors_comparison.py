@@ -32,6 +32,7 @@ MATRIX_SUMMARY_METRIC_KEYS = (
     "normalized_rms_channel_delta",
     "ssim_status",
 )
+MATRIX_SUMMARY_OUTPUT_KEYS = ("browser_reference", "qgis_vector_render", "diff")
 MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE = "metrics_available"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING = "manifest_missing"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE = "manifest_unreadable"
@@ -863,20 +864,43 @@ def _manifest_path_from_child_stdout(stdout: str) -> Path | None:
     return manifest_path
 
 
-def _manifest_artifact_status_and_metrics(manifest_path: Path | None) -> tuple[str, dict[str, object]]:
+def _manifest_visual_outputs(manifest: dict[str, object], *, token: str) -> dict[str, str]:
+    outputs = manifest.get("outputs")
+    captured = manifest.get("captured")
+    if not isinstance(outputs, dict) or not isinstance(captured, dict):
+        return {}
+    visual_outputs: dict[str, str] = {}
+    for key in MATRIX_SUMMARY_OUTPUT_KEYS:
+        output_path = outputs.get(key)
+        if captured.get(key) is True and output_path:
+            visual_outputs[key] = redact_sensitive_text(str(output_path), token)
+    return visual_outputs
+
+
+def _manifest_artifact_status_metrics_and_outputs(
+    manifest_path: Path | None,
+    *,
+    token: str,
+) -> tuple[str, dict[str, object], dict[str, str]]:
     if manifest_path is None:
-        return MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING, {}
+        return MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING, {}, {}
     try:
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE, {}
+        return MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE, {}, {}
     metrics = loaded.get("metrics") if isinstance(loaded, dict) else None
+    outputs = _manifest_visual_outputs(loaded, token=token) if isinstance(loaded, dict) else {}
     if not isinstance(metrics, dict):
-        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}
+        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs
     metric_summary = {key: metrics[key] for key in MATRIX_SUMMARY_METRIC_KEYS if key in metrics}
     if not metric_summary:
-        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}
-    return MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE, metric_summary
+        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs
+    return MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE, metric_summary, outputs
+
+
+def _manifest_artifact_status_and_metrics(manifest_path: Path | None) -> tuple[str, dict[str, object]]:
+    status, metrics, _outputs = _manifest_artifact_status_metrics_and_outputs(manifest_path, token="")
+    return status, metrics
 
 
 def _all_camera_summary_entry(
@@ -888,7 +912,7 @@ def _all_camera_summary_entry(
     manifest_path: Path | None,
     token: str,
 ) -> dict[str, object]:
-    artifact_status, metrics = _manifest_artifact_status_and_metrics(manifest_path)
+    artifact_status, metrics, outputs = _manifest_artifact_status_metrics_and_outputs(manifest_path, token=token)
     return {
         "camera": camera.name,
         "description": camera.description,
@@ -899,6 +923,7 @@ def _all_camera_summary_entry(
         "timeout_seconds": timeout_seconds,
         "manifest": redact_sensitive_text(str(manifest_path), token) if manifest_path is not None else None,
         "metrics": metrics,
+        "outputs": outputs,
     }
 
 
@@ -939,10 +964,29 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
     lines.extend(
         [
             "",
+            "## Image artifacts",
+            "",
+            "| Camera | Mapbox GL reference | QGIS vector render | Diff |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for entry in summary["cameras"]:
+        outputs = entry["outputs"] if isinstance(entry.get("outputs"), dict) else {}
+        lines.append(
+            "| "
+            f"`{entry['camera']}` | "
+            f"`{outputs.get('browser_reference') or '—'}` | "
+            f"`{outputs.get('qgis_vector_render') or '—'}` | "
+            f"`{outputs.get('diff') or '—'}` |"
+        )
+    lines.extend(
+        [
+            "",
             "Notes:",
             "- Mapbox tokens are intentionally excluded from this summary.",
             "- This is a manual visual QA aid, not a CI gate.",
             "- The Artifacts column distinguishes subprocess success from manifest/metric availability.",
+            "- Image artifact paths are listed only for outputs captured by each child camera run.",
         ]
     )
     return "\n".join(lines) + "\n"
