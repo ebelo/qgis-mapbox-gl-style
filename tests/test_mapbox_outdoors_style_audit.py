@@ -500,6 +500,105 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("filter<br>paint.line-dasharray<br>paint.line-opacity", markdown)
         self.assertNotIn("hidden-road` |", markdown)
 
+    def test_build_style_audit_reports_terrain_landcover_palette_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "landuse",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 5,
+                        "filter": ["match", ["get", "class"], ["wood", "grass"], True, False],
+                        "paint": {
+                            "fill-antialias": False,
+                            "fill-color": ["match", ["get", "class"], "wood", "#88aa66", "#ddddaa"],
+                            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 12, 0.8],
+                        },
+                    },
+                    {
+                        "id": "contour-line",
+                        "type": "line",
+                        "source-layer": "contour",
+                        "filter": ["!=", ["get", "index"], -1],
+                        "paint": {
+                            "line-color": "#b3a78a",
+                            "line-opacity": ["match", ["get", "index"], [1, 2], 0.5, 0.8],
+                            "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.4, 16, 1.2],
+                        },
+                    },
+                    {
+                        "id": "hidden-landcover",
+                        "type": "fill",
+                        "source-layer": "landcover",
+                        "layout": {"visibility": "none"},
+                        "paint": {"fill-color": "#eeeeee"},
+                    },
+                    {
+                        "id": "contour-label",
+                        "type": "symbol",
+                        "source-layer": "contour",
+                        "layout": {"text-field": ["get", "ele"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["terrain_landcover_palette_candidates"]
+        self.assertEqual([candidate["layer"] for candidate in candidates], ["landuse", "contour-line"])
+        fill_candidate, line_candidate = candidates
+        self.assertEqual(fill_candidate["type"], "fill")
+        self.assertEqual(fill_candidate["source_layer"], "landuse")
+        self.assertEqual(fill_candidate["zoom_band"], "z≥5")
+        self.assertEqual(fill_candidate["filter_operator_signature"], "get, match")
+        self.assertEqual(
+            fill_candidate["terrain_landcover_palette_control_properties"],
+            ["filter", "paint.fill-antialias", "paint.fill-color", "paint.fill-opacity"],
+        )
+        self.assertEqual(fill_candidate["qfit_simplified_control_properties"], ["paint.fill-color"])
+        self.assertEqual(fill_candidate["qgis_dependent_control_properties"], ["filter", "paint.fill-opacity"])
+        self.assertEqual(line_candidate["type"], "line")
+        self.assertEqual(line_candidate["source_layer"], "contour")
+        self.assertEqual(line_candidate["filter_operator_signature"], "!=, get")
+        self.assertEqual(
+            line_candidate["terrain_landcover_palette_control_properties"],
+            ["filter", "paint.line-color", "paint.line-opacity", "paint.line-width"],
+        )
+        self.assertEqual(line_candidate["qfit_simplified_control_properties"], ["paint.line-width"])
+        self.assertEqual(line_candidate["qgis_dependent_control_properties"], ["filter", "paint.line-opacity"])
+        self.assertEqual(
+            audit["summary"]["terrain_landcover_palette_candidates_by_source_layer"],
+            [{"source_layer": "contour", "count": 1}, {"source_layer": "landuse", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["terrain_landcover_palette_candidates_by_type"],
+            [{"type": "fill", "count": 1}, {"type": "line", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["terrain_landcover_palette_simplified_by_property"],
+            [{"property": "paint.fill-color", "count": 1}, {"property": "paint.line-width", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["terrain_landcover_palette_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 2},
+                {"property": "paint.fill-opacity", "count": 1},
+                {"property": "paint.line-opacity", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Terrain/landcover palette candidates", markdown)
+        self.assertIn("Visible terrain/landcover fill and line layers", markdown)
+        self.assertIn("#### Terrain/landcover palette candidates simplified/substituted by qfit", markdown)
+        self.assertIn("#### Terrain/landcover palette candidates QGIS-dependent controls", markdown)
+        self.assertIn("| `filter` | 2 |", markdown)
+        self.assertIn("| `landuse` | `fill` | `landuse` | z≥5 | `get, match` |", markdown)
+        self.assertIn("paint.fill-antialias<br>paint.fill-color<br>paint.fill-opacity", markdown)
+        self.assertIn("filter<br>paint.fill-opacity", markdown)
+        self.assertNotIn("hidden-landcover` |", markdown)
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {
