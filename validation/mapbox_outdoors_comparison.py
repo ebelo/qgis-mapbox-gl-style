@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, TypeAlias
@@ -21,6 +22,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-comparison"
 DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 DEFAULT_MAPBOX_STYLE_URL = f"mapbox://styles/{DEFAULT_MAPBOX_STYLE_OWNER}/{DEFAULT_MAPBOX_STYLE_ID}"
+DEFAULT_QT_QPA_PLATFORM = "offscreen"
 WEB_MERCATOR_HALF_WORLD = 20037508.342789244
 WEB_MERCATOR_TILE_SIZE = 512
 ImageMetrics: TypeAlias = dict[str, object]
@@ -454,6 +456,12 @@ def _ensure_package_parent_on_path() -> None:  # pragma: no cover - exercised on
         sys.path.insert(0, package_parent_text)
 
 
+def _ensure_headless_qt_platform(environ: MutableMapping[str, str] | None = None) -> None:
+    """Default QGIS validation captures to Qt's offscreen platform unless callers override it."""
+    target = os.environ if environ is None else environ
+    target.setdefault("QT_QPA_PLATFORM", DEFAULT_QT_QPA_PLATFORM)
+
+
 def is_valid_qgis_vector_tile_layer(*, layer: object, vector_tile_layer_type: type) -> bool:
     return isinstance(layer, vector_tile_layer_type) and bool(layer.isValid())
 
@@ -466,6 +474,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     style_definition: dict[str, object] | None = None,
 ) -> None:
     _ensure_package_parent_on_path()
+    _ensure_headless_qt_platform()
     try:
         from qgis.PyQt.QtCore import QSize  # type: ignore[import-not-found]
         from qgis.PyQt.QtGui import QColor  # type: ignore[import-not-found]
@@ -822,6 +831,7 @@ def _camera_subprocess_timeout_seconds(args: argparse.Namespace) -> float:
 
 def _single_camera_subprocess_environment(*, token: str) -> dict[str, str]:
     env = os.environ.copy()
+    _ensure_headless_qt_platform(env)
     env["MAPBOX_ACCESS_TOKEN"] = token
     return env
 

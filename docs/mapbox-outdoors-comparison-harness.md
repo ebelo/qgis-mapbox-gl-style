@@ -63,7 +63,7 @@ export MAPBOX_ACCESS_TOKEN="***"
 python3 validation/mapbox_outdoors_comparison.py valais-geneva-outdoors
 ```
 
-The command prints only artifact paths. It does not print the token, and `manifest.json` intentionally excludes token values. The QGIS capture builds a temporary vector-tile layer for rendering and does not clear the active QGIS project.
+The command prints only artifact paths. It does not print the token, and `manifest.json` intentionally excludes token values. The QGIS capture builds a temporary vector-tile layer for rendering, defaults Qt to the `offscreen` platform for headless validation unless `QT_QPA_PLATFORM` is already set, and does not clear the active QGIS project.
 
 To compare against a pinned/downloaded style snapshot instead of fetching live style metadata, pass `--style-json`. The browser reference uses the same style object and the QGIS render uses it for qfit's style preprocessing; Mapbox vector tiles, glyphs, and sprites still require a token.
 

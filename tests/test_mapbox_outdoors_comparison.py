@@ -334,7 +334,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         fake_background_service = types.ModuleType("qfit.visualization.infrastructure.background_map_service")
         fake_background_service.BackgroundMapService = FakeBackgroundMapService
 
-        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {}, clear=False), patch.dict(
             sys.modules,
             {
                 "qgis": types.ModuleType("qgis"),
@@ -356,6 +356,35 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             )
 
             self.assertEqual(output_path.read_bytes(), PNG_PLACEHOLDER)
+
+    def test_headless_qt_platform_defaults_to_offscreen_without_overriding_callers(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        empty_env = {}
+        mapbox_outdoors_comparison._ensure_headless_qt_platform(empty_env)
+
+        custom_env = {"QT_QPA_PLATFORM": "minimal"}
+        mapbox_outdoors_comparison._ensure_headless_qt_platform(custom_env)
+
+        self.assertEqual(empty_env["QT_QPA_PLATFORM"], "offscreen")
+        self.assertEqual(custom_env["QT_QPA_PLATFORM"], "minimal")
+
+    def test_all_camera_child_environment_defaults_qgis_to_offscreen(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with patch.dict(os.environ, {}, clear=True):
+            env = mapbox_outdoors_comparison._single_camera_subprocess_environment(token="test-mapbox-token")
+
+        self.assertEqual(env["MAPBOX_ACCESS_TOKEN"], "test-mapbox-token")
+        self.assertEqual(env["QT_QPA_PLATFORM"], "offscreen")
+
+    def test_all_camera_child_environment_preserves_qt_platform_override(self):
+        from qfit.validation import mapbox_outdoors_comparison
+
+        with patch.dict(os.environ, {"QT_QPA_PLATFORM": "minimal"}, clear=True):
+            env = mapbox_outdoors_comparison._single_camera_subprocess_environment(token="test-mapbox-token")
+
+        self.assertEqual(env["QT_QPA_PLATFORM"], "minimal")
 
     def test_build_image_diff_writes_enhanced_diff_and_metrics_for_same_size_images(self):
         try:
