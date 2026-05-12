@@ -150,6 +150,8 @@ python3 validation/mapbox_outdoors_style_audit.py \
 
 This optional probe does not render screenshots. It records converter warning counts, remaining warning summaries, warnings reduced by qfit preprocessing, and per-layer qfit-preprocessed warning summaries in the audit artifact so the next #949 slice can target issues QGIS itself reports, not just qfit's static style-expression audit. It also includes diagnostic filter-removal, icon-image-removal, sprite-context, line-opacity, line-dasharray, and symbol-spacing probes that report how many converter warnings would disappear if selected qfit-preprocessed properties were removed, literalized, or scalarized, plus the warnings that would still remain by message, layer group, group/message pair, layer, and non-probed qfit unresolved property where relevant. These are upper-bound signals only, not suggested rendering changes, because Mapbox filters, sprites/icons, line opacity, line dash arrays, and symbol spacing all carry feature meaning or zoom/data-driven cartographic emphasis.
 
+For a slower but broader converter-warning triage pass, add `--include-qgis-property-removal-impact`. This implies `--include-qgis-converter-warnings` and removes each remaining expression-bearing property from the qfit-preprocessed style in isolation, then ranks the warning-count delta. The resulting matrix is diagnostic only: it helps identify which residual property families are worth deeper visual investigation before promoting any rendering behavior into qfit preprocessing.
+
 Use the audit together with the screenshot harness: first identify high-signal gaps visually, then check the corresponding style layers to decide the smallest safe qfit preprocessing improvement.
 
 ## PR notes

@@ -444,6 +444,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         report_mock.assert_called_once()
         self.assertIs(report_mock.call_args.kwargs["raw_style"], SAMPLE_STYLE)
         self.assertIsInstance(report_mock.call_args.kwargs["qfit_preprocessed_style"], dict)
+        self.assertFalse(report_mock.call_args.kwargs["include_property_removal_impact"])
 
     def test_qgis_warning_summary_counts_by_message_and_layer(self):
         summary = mapbox_outdoors_style_audit._qgis_warning_summary(
@@ -471,6 +472,121 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 {"layer": "road-primary", "count": 1},
             ],
         )
+
+    def test_property_removal_impact_probe_ranks_expression_property_warning_deltas(self):
+        style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["get", "class"], "road"],
+                    "layout": {"text-field": ["get", "name"]},
+                    "paint": {"line-opacity": ["step", ["zoom"], 0.4, 12, 1.0]},
+                },
+                {
+                    "id": "poi-label",
+                    "type": "symbol",
+                    "layout": {"icon-image": ["get", "maki"]},
+                },
+            ],
+        }
+        qfit_summary = mapbox_outdoors_style_audit._qgis_warning_summary(
+            [
+                "road-label: Skipping unsupported expression",
+                "poi-label: Could not retrieve sprite 'park'",
+            ]
+        )
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._removable_expression_property_paths(style),
+            ["filter", "layout.icon-image", "layout.text-field", "paint.line-opacity"],
+        )
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_collect_qgis_converter_warnings",
+            side_effect=[
+                ["poi-label: Could not retrieve sprite 'park'"],
+                ["road-label: Skipping unsupported expression"],
+            ],
+        ):
+            report = mapbox_outdoors_style_audit._qgis_property_removal_impact_report(
+                style,
+                qfit_summary,
+                property_paths=["filter", "layout.icon-image"],
+            )
+
+        self.assertEqual(report["candidate_property_count"], 2)
+        self.assertEqual(
+            report["by_property"],
+            [
+                {
+                    "property": "filter",
+                    "property_count_removed": 1,
+                    "warning_count_after_removal": 1,
+                    "warning_count_delta_from_qfit": 1,
+                    "skipping_unsupported_expression_delta": 1,
+                    "reduced_from_qfit": {
+                        "by_message": [
+                            {
+                                "message": "Skipping unsupported expression",
+                                "raw_count": 1,
+                                "qfit_count": 0,
+                                "reduced_count": 1,
+                            }
+                        ]
+                    },
+                },
+                {
+                    "property": "layout.icon-image",
+                    "property_count_removed": 1,
+                    "warning_count_after_removal": 1,
+                    "warning_count_delta_from_qfit": 1,
+                    "skipping_unsupported_expression_delta": 0,
+                    "reduced_from_qfit": {
+                        "by_message": [
+                            {
+                                "message": "Could not retrieve sprite 'park'",
+                                "raw_count": 1,
+                                "qfit_count": 0,
+                                "reduced_count": 1,
+                            }
+                        ]
+                    },
+                },
+            ],
+        )
+
+    def test_style_without_property_path_removes_only_requested_property(self):
+        style = {
+            "version": 8,
+            "layers": [
+                {"id": "a", "filter": ["==", ["get", "class"], "road"], "paint": {"line-opacity": 0.5}},
+                {"id": "b", "layout": {"icon-image": ["get", "maki"], "text-field": ["get", "name"]}},
+                {"id": "c", "paint": {"line-opacity": ["step", ["zoom"], 0.4, 12, 1.0]}},
+            ],
+        }
+
+        without_filter, filter_count = mapbox_outdoors_style_audit._style_without_property_path(style, "filter")
+        without_icon, icon_count = mapbox_outdoors_style_audit._style_without_property_path(
+            style,
+            "layout.icon-image",
+        )
+        without_opacity, opacity_count = mapbox_outdoors_style_audit._style_without_property_path(
+            style,
+            "paint.line-opacity",
+        )
+
+        self.assertEqual(filter_count, 1)
+        self.assertNotIn("filter", without_filter["layers"][0])
+        self.assertIn("filter", style["layers"][0])
+        self.assertEqual(icon_count, 1)
+        self.assertNotIn("icon-image", without_icon["layers"][1]["layout"])
+        self.assertIn("text-field", without_icon["layers"][1]["layout"])
+        self.assertEqual(opacity_count, 1)
+        self.assertIn("line-opacity", without_opacity["layers"][0]["paint"])
+        self.assertNotIn("line-opacity", without_opacity["layers"][2]["paint"])
 
     def test_expression_operator_names_ignore_literal_string_arrays(self):
         self.assertEqual(
@@ -1394,6 +1510,25 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     {"group": "water", "raw_count": 4, "qfit_count": 0, "reduced_count": 4}
                 ],
             },
+            "property_removal_impact_probe": {
+                "candidate_property_count": 2,
+                "by_property": [
+                    {
+                        "property": "filter",
+                        "property_count_removed": 3,
+                        "warning_count_after_removal": 1,
+                        "warning_count_delta_from_qfit": 1,
+                        "skipping_unsupported_expression_delta": 1,
+                    },
+                    {
+                        "property": "layout.text-field",
+                        "property_count_removed": 1,
+                        "warning_count_after_removal": 5,
+                        "warning_count_delta_from_qfit": -3,
+                        "skipping_unsupported_expression_delta": -2,
+                    },
+                ],
+            },
             "without_filters_probe": {
                 "filter_count_removed": 1,
                 "summary": {
@@ -1631,6 +1766,14 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertIn("| `pois/labels` | `Skipping unsupported expression` | 1 |", markdown)
         self.assertIn("| `poi-label` | 2 |", markdown)
+        self.assertIn("#### Diagnostic unresolved-property removal impact probe", markdown)
+        self.assertIn("Candidate properties tested: 2", markdown)
+        self.assertIn(
+            "| Property | Removed from layers | Warnings after removal | Warning delta | Skipping-expression delta |",
+            markdown,
+        )
+        self.assertIn("| `filter` | 3 | 1 | 1 | 1 |", markdown)
+        self.assertIn("| `layout.text-field` | 1 | 5 | -3 | -2 |", markdown)
         self.assertIn("#### Diagnostic filter-removal probe", markdown)
         self.assertIn("This is not a rendering-safe qfit preprocessing mode", markdown)
         self.assertIn("Filters removed in probe: 1", markdown)
@@ -1780,6 +1923,34 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             self.assertTrue(output_path.is_relative_to(Path(tmp_dir)))
             print_mock.assert_called_once_with(output_path)
 
+    def test_main_property_removal_impact_flag_implies_qgis_warning_audit(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            style_path = Path(tmp_dir) / "style.json"
+            style_path.write_text(json.dumps(SAMPLE_STYLE), encoding="utf-8")
+            audit = {
+                "style": {"label": "mapbox/outdoors-v12"},
+                "generated_at": "2026-05-12T06:05:00+00:00",
+                "layer_count": 0,
+                "summary": {},
+                "layers": [],
+            }
+
+            with patch.object(mapbox_outdoors_style_audit, "DEFAULT_OUTPUT_ROOT", Path(tmp_dir)), patch.object(
+                mapbox_outdoors_style_audit,
+                "build_style_audit",
+                return_value=audit,
+            ) as build_audit, patch("builtins.print"):
+                result = main([
+                    "--style-json",
+                    str(style_path),
+                    "--include-qgis-property-removal-impact",
+                ])
+
+        self.assertEqual(result, 0)
+        config = build_audit.call_args.kwargs["config"]
+        self.assertTrue(config.include_qgis_converter_warnings)
+        self.assertTrue(config.include_qgis_property_removal_impact)
+
     def test_main_fetches_sprite_resources_for_live_qgis_warning_audit(self):
         style_definition = {"version": 8, "sprite": "mapbox://sprites/shared-owner/shared-style", "layers": []}
         sprite_resources = MapboxSpriteResources(definitions={"park": {"x": 0}}, image_bytes=b"png-bytes")
@@ -1823,12 +1994,20 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
 
     def test_parser_exposes_json_and_style_json_options(self):
         args = build_parser().parse_args(
-            ["--style-json", "style.json", "--format", "json", "--include-qgis-converter-warnings"]
+            [
+                "--style-json",
+                "style.json",
+                "--format",
+                "json",
+                "--include-qgis-converter-warnings",
+                "--include-qgis-property-removal-impact",
+            ]
         )
 
         self.assertEqual(args.style_json, Path("style.json"))
         self.assertEqual(args.format, "json")
         self.assertTrue(args.include_qgis_converter_warnings)
+        self.assertTrue(args.include_qgis_property_removal_impact)
 
 
 if __name__ == "__main__":

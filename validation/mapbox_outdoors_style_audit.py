@@ -33,6 +33,7 @@ _LINE_DASHARRAY_EXPRESSION_COUNT_KEY = "line_dasharray_expression_count_replaced
 _SCALAR_SYMBOL_SPACING_PROBE_KEY = "with_scalar_symbol_spacing_probe"
 _SYMBOL_SPACING_EXPRESSION_COUNT_KEY = "symbol_spacing_expression_count_replaced"
 _SYMBOL_SPACING_REPLACED_LAYERS_KEY = "symbol_spacing_replaced_layers"
+_PROPERTY_REMOVAL_IMPACT_PROBE_KEY = "property_removal_impact_probe"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -175,6 +176,7 @@ class StyleAuditConfig:
     style_id: str = DEFAULT_MAPBOX_STYLE_ID
     generated_at: dt.datetime | None = None
     include_qgis_converter_warnings: bool = False
+    include_qgis_property_removal_impact: bool = False
     sprite_resources: MapboxSpriteResources | None = None
 
 
@@ -896,6 +898,122 @@ def _style_without_icon_images(style_definition: dict[str, object]) -> tuple[dic
     return style_without_icons, removed_count
 
 
+def _is_mapbox_expression(value: object) -> bool:
+    return isinstance(value, list) and bool(_expression_operator_names(value))
+
+
+def _iter_layer_expression_property_paths(layer: dict[str, object]) -> Iterable[str]:
+    if _is_mapbox_expression(layer.get("filter")):
+        yield "filter"
+    for section_name in _SYMBOLOGY_SECTIONS:
+        section = layer.get(section_name)
+        if not isinstance(section, dict):
+            continue
+        for property_name, value in section.items():
+            if _is_mapbox_expression(value):
+                yield f"{section_name}.{property_name}"
+
+
+def _removable_expression_property_paths(style_definition: dict[str, object]) -> list[str]:
+    """Return qfit-preprocessed property paths worth removal-testing in converter diagnostics."""
+    layers = style_definition.get("layers")
+    if not isinstance(layers, list):
+        return []
+    return sorted(
+        {
+            property_path
+            for layer in layers
+            if isinstance(layer, dict)
+            for property_path in _iter_layer_expression_property_paths(layer)
+        }
+    )
+
+
+def _style_without_property_path(
+    style_definition: dict[str, object],
+    property_path: str,
+) -> tuple[dict[str, object], int]:
+    """Return a copy with one property path removed from every layer for diagnostics only."""
+    stripped_style = copy.deepcopy(style_definition)
+    removed_count = 0
+    layers = stripped_style.get("layers")
+    if not isinstance(layers, list):
+        return stripped_style, removed_count
+
+    if "." not in property_path:
+        for layer in layers:
+            if isinstance(layer, dict) and _is_mapbox_expression(layer.get(property_path)):
+                layer.pop(property_path)
+                removed_count += 1
+        return stripped_style, removed_count
+
+    section_name, property_name = property_path.split(".", 1)
+    if section_name not in _SYMBOLOGY_SECTIONS:
+        return stripped_style, removed_count
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        section = layer.get(section_name)
+        if not isinstance(section, dict) or not _is_mapbox_expression(section.get(property_name)):
+            continue
+        section.pop(property_name)
+        removed_count += 1
+    return stripped_style, removed_count
+
+
+def _warning_count_for_message(summary: dict[str, object], message: str) -> int:
+    for item in summary.get("by_message") or []:
+        if item.get("message") == message:
+            return int(item.get("count") or 0)
+    return 0
+
+
+def _qgis_property_removal_impact_report(
+    qfit_preprocessed_style: dict[str, object],
+    qfit_summary: dict[str, object],
+    *,
+    property_paths: list[str] | None = None,
+) -> dict[str, object]:
+    """Remove one expression property at a time to rank residual converter-warning causes."""
+    qfit_warning_count = int(qfit_summary.get("count") or 0)
+    qfit_skipping_count = _warning_count_for_message(qfit_summary, "Skipping unsupported expression")
+    rows: list[dict[str, object]] = []
+    for property_path in property_paths or _removable_expression_property_paths(qfit_preprocessed_style):
+        stripped_style, removed_count = _style_without_property_path(qfit_preprocessed_style, property_path)
+        if removed_count <= 0:
+            continue
+        stripped_warnings = _collect_qgis_converter_warnings(stripped_style)
+        stripped_summary = _qgis_warning_summary(stripped_warnings)
+        stripped_warning_count = len(stripped_warnings)
+        rows.append(
+            {
+                "property": property_path,
+                "property_count_removed": removed_count,
+                "warning_count_after_removal": stripped_warning_count,
+                "warning_count_delta_from_qfit": qfit_warning_count - stripped_warning_count,
+                "skipping_unsupported_expression_delta": qfit_skipping_count
+                - _warning_count_for_message(stripped_summary, "Skipping unsupported expression"),
+                "reduced_from_qfit": {
+                    "by_message": _warning_reduction_summary(
+                        list(qfit_summary.get("by_message") or []),
+                        list(stripped_summary.get("by_message") or []),
+                        key="message",
+                    )
+                },
+            }
+        )
+    return {
+        "candidate_property_count": len(rows),
+        "by_property": sorted(
+            rows,
+            key=lambda row: (
+                -int(row["warning_count_delta_from_qfit"]),
+                str(row["property"]),
+            ),
+        ),
+    }
+
+
 def _clamp_opacity_value(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -1152,6 +1270,7 @@ def _qgis_converter_warning_report(
     raw_style: dict[str, object],
     qfit_preprocessed_style: dict[str, object],
     sprite_resources: MapboxSpriteResources | None = None,
+    include_property_removal_impact: bool = False,
 ) -> dict[str, object]:
     # Converter-only audits do not render, but headless environments can still abort when Qt
     # defaults to xcb. Prefer offscreen unless the caller explicitly chose another platform.
@@ -1184,6 +1303,12 @@ def _qgis_converter_warning_report(
             qfit_preprocessed_style
         )
         scalar_symbol_spacing_warnings = _collect_qgis_converter_warnings(scalar_symbol_spacing_style)
+        property_removal_impact = None
+        if include_property_removal_impact:
+            property_removal_impact = _qgis_property_removal_impact_report(
+                qfit_preprocessed_style,
+                _qgis_warning_summary(qfit_warnings),
+            )
         sprite_image_loaded = None
         if sprite_resources is not None:
             sprite_context_warnings, sprite_image_loaded = _collect_qgis_converter_warnings_with_sprite_context(
@@ -1239,6 +1364,8 @@ def _qgis_converter_warning_report(
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, scalar_symbol_spacing_summary),
         },
     }
+    if property_removal_impact is not None:
+        report[_PROPERTY_REMOVAL_IMPACT_PROBE_KEY] = property_removal_impact
     if sprite_context_warnings is not None:
         sprite_context_summary = _qgis_warning_summary(sprite_context_warnings)
         report[_SPRITE_CONTEXT_PROBE_KEY] = {
@@ -1295,11 +1422,12 @@ def build_style_audit(
         },
         "layers": layers,
     }
-    if resolved_config.include_qgis_converter_warnings:
+    if resolved_config.include_qgis_converter_warnings or resolved_config.include_qgis_property_removal_impact:
         warning_report = _qgis_converter_warning_report(
             raw_style=style_definition,
             qfit_preprocessed_style=simplified_style,
             sprite_resources=resolved_config.sprite_resources,
+            include_property_removal_impact=resolved_config.include_qgis_property_removal_impact,
         )
         _annotate_qgis_warning_group_summaries(layers, warning_report)
         audit["qgis_converter_warnings"] = warning_report
@@ -1886,6 +2014,46 @@ def _markdown_symbol_spacing_probe(probe: object) -> list[str]:
     )
 
 
+def _markdown_property_removal_impact_table(rows: list[dict[str, object]]) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    lines = [
+        "| Property | Removed from layers | Warnings after removal | Warning delta | Skipping-expression delta |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for row in rows:
+        lines.append(
+            "| `{property}` | {removed} | {warnings} | {delta} | {skipping_delta} |".format(
+                property=row.get("property", ""),
+                removed=row.get("property_count_removed", 0),
+                warnings=row.get("warning_count_after_removal", 0),
+                delta=row.get("warning_count_delta_from_qfit", 0),
+                skipping_delta=row.get("skipping_unsupported_expression_delta", 0),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_property_removal_impact_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    rows = list(probe.get("by_property") or [])
+    return [
+        "#### Diagnostic unresolved-property removal impact probe",
+        "",
+        (
+            "This removes one remaining expression-bearing property at a time from the "
+            "qfit-preprocessed style to rank converter-warning causes. It is not a "
+            "rendering-safe qfit preprocessing mode."
+        ),
+        "",
+        f"Candidate properties tested: {probe.get('candidate_property_count', 0)}",
+        "",
+        *_markdown_property_removal_impact_table(rows),
+    ]
+
+
 def _markdown_sprite_context_probe(probe: object) -> list[str]:
     if not isinstance(probe, dict):
         return []
@@ -1991,6 +2159,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     line_opacity_probe = report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
     line_dasharray_probe = report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY)
     symbol_spacing_probe = report.get(_SCALAR_SYMBOL_SPACING_PROBE_KEY)
+    property_removal_impact_probe = report.get(_PROPERTY_REMOVAL_IMPACT_PROBE_KEY)
     sprite_context_probe = report.get(_SPRITE_CONTEXT_PROBE_KEY)
     lines = [
         "### QGIS converter warnings",
@@ -2063,6 +2232,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
                 label=_MARKDOWN_LAYER_LABEL,
             ),
             *_markdown_filterless_probe(filterless_probe),
+            *_markdown_property_removal_impact_probe(property_removal_impact_probe),
             *_markdown_sprite_context_probe(sprite_context_probe),
             *_markdown_icon_image_probe(icon_image_probe),
             *_markdown_line_opacity_probe(line_opacity_probe),
@@ -2218,6 +2388,15 @@ def build_parser() -> argparse.ArgumentParser:
             "style to summarize native conversion warnings. Requires PyQGIS."
         ),
     )
+    parser.add_argument(
+        "--include-qgis-property-removal-impact",
+        action="store_true",
+        help=(
+            "With QGIS converter warnings, also remove each remaining expression-bearing "
+            "property in isolation to rank residual warning causes. Implies "
+            "--include-qgis-converter-warnings."
+        ),
+    )
     return parser
 
 
@@ -2237,9 +2416,13 @@ def main(argv: list[str] | None = None) -> int:
         token = resolve_mapbox_token(provided_token=args.mapbox_token)
         style_definition = fetch_mapbox_style_definition(token, args.style_owner, args.style_id)
 
+    include_qgis_converter_warnings = (
+        args.include_qgis_converter_warnings or args.include_qgis_property_removal_impact
+    )
+
     sprite_resources = None
     sprite_url = style_definition.get("sprite") if isinstance(style_definition.get("sprite"), str) else None
-    if args.include_qgis_converter_warnings and token:
+    if include_qgis_converter_warnings and token:
         try:
             sprite_resources = fetch_mapbox_sprite_resources(
                 token,
@@ -2255,7 +2438,8 @@ def main(argv: list[str] | None = None) -> int:
         config=StyleAuditConfig(
             style_owner=args.style_owner,
             style_id=args.style_id,
-            include_qgis_converter_warnings=args.include_qgis_converter_warnings,
+            include_qgis_converter_warnings=include_qgis_converter_warnings,
+            include_qgis_property_removal_impact=args.include_qgis_property_removal_impact,
             sprite_resources=sprite_resources,
         ),
     )
