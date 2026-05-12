@@ -889,6 +889,18 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ["get", "match"],
         )
         self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(
+                ["match", ["get", "worldview"], ["all", "US"], True, False]
+            ),
+            ["get", "match"],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._expression_operator_names(
+                ["match", ["get", "class"], "road", ["case", ["has", "layer"], True, False], False]
+            ),
+            ["case", "get", "has", "match"],
+        )
+        self.assertEqual(
             mapbox_outdoors_style_audit._expression_operator_names(["DIN Pro Medium", "Arial Unicode MS Regular"]),
             [],
         )

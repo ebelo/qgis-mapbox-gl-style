@@ -355,7 +355,7 @@ def _expression_operator_names(value: object) -> list[str]:
         operator = candidate[0]
         if isinstance(operator, str) and operator in _MAPBOX_EXPRESSION_OPERATORS:
             operators.add(operator)
-            children = [] if operator == "literal" else candidate[1:]
+            children = _mapbox_operator_children(operator, candidate)
         else:
             children = candidate
         for child in children:
@@ -679,7 +679,7 @@ def _match_expression_children(candidate: list[object]) -> Iterable[object]:
         yield candidate[-1]
 
 
-def _filter_operator_children(operator: str, candidate: list[object]) -> Iterable[object]:
+def _mapbox_operator_children(operator: str, candidate: list[object]) -> Iterable[object]:
     if operator == "literal":
         return []
     if operator == "match":
@@ -696,7 +696,7 @@ def _filter_operator_names(value: object) -> list[str]:
         operator = candidate[0]
         if isinstance(operator, str) and operator in _MAPBOX_FILTER_OPERATORS:
             operators.add(operator)
-            children = _filter_operator_children(operator, candidate)
+            children = _mapbox_operator_children(operator, candidate)
         else:
             children = candidate
         for child in children:
