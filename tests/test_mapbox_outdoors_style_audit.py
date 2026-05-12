@@ -504,16 +504,23 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
 
     def test_filter_parse_unsupported_warning_count_handles_colon_in_layer_id(self):
+        warnings = [
+            "admin: label: Skipping unsupported expression",
+            'admin: label: Skipping unsupported expression "within"',
+            'road-label: Skipping unsupported expression part "case"',
+            "road-label: Could not retrieve sprite 'park'",
+        ]
         self.assertEqual(
-            mapbox_outdoors_style_audit._filter_parse_unsupported_warning_count(
-                [
-                    "admin: label: Skipping unsupported expression",
-                    'admin: label: Skipping unsupported expression "within"',
-                    'road-label: Skipping unsupported expression part "case"',
-                    "road-label: Could not retrieve sprite 'park'",
-                ]
-            ),
+            mapbox_outdoors_style_audit._filter_parse_unsupported_warning_count(warnings),
             3,
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._filter_parse_unsupported_message_summary(warnings),
+            [
+                {"message": "Skipping unsupported expression", "count": 1},
+                {"message": 'Skipping unsupported expression "within"', "count": 1},
+                {"message": 'Skipping unsupported expression part "case"', "count": 1},
+            ],
         )
 
     def test_property_removal_impact_probe_ranks_expression_property_warning_deltas(self):
@@ -1439,7 +1446,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 [],
                 [],
                 [],
-                ["poi-label: Skipping unsupported expression", "poi-label: Some other warning"],
+                [
+                    "poi-label: Skipping unsupported expression",
+                    'poi-label: Skipping unsupported expression part "case"',
+                    "poi-label: Some other warning",
+                ],
                 [],
             ]
         )
@@ -1457,6 +1468,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(probe["qgis_parser_unsupported_count"], 1)
         self.assertEqual(probe["unsupported_by_layer_group"], [{"group": "pois/labels", "count": 1}])
         self.assertEqual(
+            probe["unsupported_by_warning_message"],
+            [
+                {"message": "Skipping unsupported expression", "count": 1},
+                {"message": 'Skipping unsupported expression part "case"', "count": 1},
+            ],
+        )
+        self.assertEqual(
             probe["unsupported_by_layer_group_and_operator_signature"],
             [
                 {
@@ -1468,11 +1486,22 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ],
         )
         self.assertEqual(probe["unsupported_layers"][0]["layer"], "poi-label")
-        self.assertEqual(probe["unsupported_layers"][0]["unsupported_warning_count"], 1)
+        self.assertEqual(probe["unsupported_layers"][0]["unsupported_warning_count"], 2)
+        self.assertEqual(
+            probe["unsupported_layers"][0]["unsupported_warning_messages"],
+            [
+                {"message": "Skipping unsupported expression", "count": 1},
+                {"message": 'Skipping unsupported expression part "case"', "count": 1},
+            ],
+        )
         self.assertFalse(probe["unsupported_layers"][0]["supported_by_qgis_parser"])
         self.assertEqual(
             probe["unsupported_layers"][0]["warnings"],
-            ["poi-label: Skipping unsupported expression", "poi-label: Some other warning"],
+            [
+                "poi-label: Skipping unsupported expression",
+                'poi-label: Skipping unsupported expression part "case"',
+                "poi-label: Some other warning",
+            ],
         )
         self.assertEqual(
             fake_converter.converted_styles[7],
@@ -1927,6 +1956,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "qgis_parser_supported_count": 1,
                 "qgis_parser_unsupported_count": 1,
                 "unsupported_by_layer_group": [{"group": "pois/labels", "count": 1}],
+                "unsupported_by_warning_message": [{"message": "Skipping unsupported expression", "count": 1}],
                 "unsupported_by_layer_group_and_operator_signature": [
                     {
                         "group": "pois/labels",
@@ -1943,6 +1973,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "source_layer": "poi_label",
                         "operator_signature": "==, case, get",
                         "unsupported_warning_count": 1,
+                        "unsupported_warning_messages": [
+                            {"message": "Skipping unsupported expression", "count": 1}
+                        ],
                         "supported_by_qgis_parser": False,
                         "filter": ["case", ["==", ["get", "class"], "park"], True, False],
                     }
@@ -2238,6 +2271,8 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("Rejected by the QGIS parser probe: 1", markdown)
         self.assertIn("##### Unsupported filter probes by layer group", markdown)
         self.assertIn("| `pois/labels` | 1 |", markdown)
+        self.assertIn("##### Unsupported filter parser warnings by message", markdown)
+        self.assertIn("| `Skipping unsupported expression` | 1 |", markdown)
         self.assertIn("##### Unsupported filter probes by layer group and operators", markdown)
         self.assertIn("| `pois/labels` | `==, case, get` | 1 | `poi-label` |", markdown)
         self.assertIn("##### Unsupported filter probe layers", markdown)

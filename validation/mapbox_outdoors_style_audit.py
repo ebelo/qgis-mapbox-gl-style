@@ -611,6 +611,28 @@ def _filter_parse_unsupported_warning_count(warnings: list[str]) -> int:
     return sum(1 for warning in warnings if _warning_message(warning) in _FILTER_PARSE_UNSUPPORTED_MESSAGES)
 
 
+def _filter_parse_unsupported_message(warning: str) -> str:
+    for unsupported_message in _FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER:
+        marker = f": {unsupported_message}"
+        marker_index = warning.rfind(marker)
+        if marker_index >= 0:
+            return warning[marker_index + 2 :]
+        if warning == unsupported_message or warning.startswith(f"{unsupported_message} "):
+            return warning
+    return _warning_message(warning)
+
+
+def _filter_parse_unsupported_message_summary(warnings: list[str]) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for warning in warnings:
+        if _warning_message(warning) in _FILTER_PARSE_UNSUPPORTED_MESSAGES:
+            counts[_filter_parse_unsupported_message(warning)] += 1
+    return [
+        {"message": message, "count": count}
+        for message, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def _minimal_filter_probe_layer(layer: dict[str, object]) -> dict[str, object]:
     layer_type = str(layer.get("type") or "")
     probe_layer: dict[str, object] = {
@@ -705,6 +727,20 @@ def _filter_parse_signature_summary(rows: list[dict[str, object]]) -> list[dict[
     ]
 
 
+def _filter_parse_warning_message_summary(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        for summary in row.get("unsupported_warning_messages") or []:
+            if isinstance(summary, dict):
+                message = str(summary.get("message") or "")
+                if message:
+                    counts[message] += int(summary.get("count") or 0)
+    return [
+        {"message": message, "count": count}
+        for message, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def _iter_filter_probe_layers(style_definition: dict[str, object]) -> Iterable[tuple[dict[str, object], list[object]]]:
     layers = style_definition.get("layers")
     if not isinstance(layers, list):
@@ -731,6 +767,7 @@ def _filter_parse_support_row(
         "source_layer": str(layer.get("source-layer") or ""),
         "operator_signature": _operator_signature(filter_value),
         "unsupported_warning_count": unsupported_warning_count,
+        "unsupported_warning_messages": _filter_parse_unsupported_message_summary(warnings),
         "supported_by_qgis_parser": unsupported_warning_count == 0,
         "warnings": warnings,
         "filter": filter_value,
@@ -749,6 +786,7 @@ def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> di
         "qgis_parser_supported_count": supported_count,
         "qgis_parser_unsupported_count": len(unsupported_rows),
         "unsupported_by_layer_group": _count_rows_by_key(unsupported_rows, "group"),
+        "unsupported_by_warning_message": _filter_parse_warning_message_summary(unsupported_rows),
         "unsupported_by_layer_group_and_operator_signature": _filter_parse_signature_summary(unsupported_rows),
         "unsupported_layers": sorted(
             unsupported_rows,
@@ -2464,6 +2502,10 @@ def _markdown_filter_parse_unsupported_layer_table(
     return lines
 
 
+def _markdown_filter_parse_warning_message_table(rows: list[dict[str, object]]) -> list[str]:
+    return _markdown_named_count_table(rows, key="message", label=_MARKDOWN_MESSAGE_LABEL)
+
+
 def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
     if not isinstance(probe, dict):
         return []
@@ -2489,6 +2531,9 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             key="group",
             label=_MARKDOWN_LAYER_GROUP_LABEL,
         ),
+        "##### Unsupported filter parser warnings by message",
+        "",
+        *_markdown_filter_parse_warning_message_table(list(probe.get("unsupported_by_warning_message") or [])),
         "##### Unsupported filter probes by layer group and operators",
         "",
         *_markdown_filter_signature_group_table(
