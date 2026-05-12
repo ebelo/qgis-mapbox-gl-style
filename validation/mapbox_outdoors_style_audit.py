@@ -643,7 +643,7 @@ def _annotate_probe_warning_groups(
     probe: dict[str, object],
     qfit_summary: dict[str, object],
     layer_groups: dict[str, str],
-) -> dict[str, object]:
+) -> None:
     summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
     _annotate_warning_summary_groups(summary, layer_groups)
     reduced_from_qfit = probe.setdefault("reduced_from_qfit", {})
@@ -653,7 +653,6 @@ def _annotate_probe_warning_groups(
             list(summary.get("by_layer_group") or []),
             key="group",
         )
-    return summary
 
 
 def _warning_layer_unresolved_property_summaries(
@@ -699,6 +698,22 @@ def _warning_layer_unresolved_property_summaries(
     }
 
 
+def _annotate_probe_remaining_warning_unresolved_properties(
+    probe: dict[str, object],
+    layers: list[dict[str, object]],
+    *,
+    exclude_properties: set[str] | None = None,
+) -> None:
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    warnings = summary.get("warnings")
+    if isinstance(warnings, list):
+        probe["remaining_warning_layers_by_unresolved_property"] = _warning_layer_unresolved_property_summaries(
+            [str(warning) for warning in warnings],
+            layers,
+            exclude_properties=exclude_properties,
+        )
+
+
 def _annotate_qgis_warning_group_summaries(
     layers: list[dict[str, object]],
     warning_report: dict[str, object],
@@ -724,16 +739,12 @@ def _annotate_qgis_warning_group_summaries(
         if isinstance(warning_report.get("without_filters_probe"), dict)
         else {}
     )
-    filterless_summary = _annotate_probe_warning_groups(filterless_probe, qfit_summary, layer_groups)
-    filterless_warnings = filterless_summary.get("warnings")
-    if isinstance(filterless_warnings, list):
-        filterless_probe["remaining_warning_layers_by_unresolved_property"] = (
-            _warning_layer_unresolved_property_summaries(
-                [str(warning) for warning in filterless_warnings],
-                layers,
-                exclude_properties={"filter"},
-            )
-        )
+    _annotate_probe_warning_groups(filterless_probe, qfit_summary, layer_groups)
+    _annotate_probe_remaining_warning_unresolved_properties(
+        filterless_probe,
+        layers,
+        exclude_properties={"filter"},
+    )
     icon_image_probe = (
         warning_report.get("without_icon_images_probe")
         if isinstance(warning_report.get("without_icon_images_probe"), dict)
@@ -752,6 +763,7 @@ def _annotate_qgis_warning_group_summaries(
         else {}
     )
     _annotate_probe_warning_groups(sprite_context_probe, qfit_summary, layer_groups)
+    _annotate_probe_remaining_warning_unresolved_properties(sprite_context_probe, layers)
 
 
 def _annotate_layers_with_qgis_warnings(
@@ -1557,6 +1569,11 @@ def _markdown_sprite_context_probe(probe: object) -> list[str]:
         return []
     summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
     reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    unresolved_property_summary = (
+        probe.get("remaining_warning_layers_by_unresolved_property")
+        if isinstance(probe.get("remaining_warning_layers_by_unresolved_property"), dict)
+        else {}
+    )
     lines = [
         "#### Runtime sprite context probe",
         "",
@@ -1571,6 +1588,8 @@ def _markdown_sprite_context_probe(probe: object) -> list[str]:
     ]
     by_message = list(reduced.get("by_message") or [])
     by_group = list(reduced.get("by_layer_group") or [])
+    unresolved_by_property = list(unresolved_property_summary.get("by_property") or [])
+    unresolved_by_group_property = list(unresolved_property_summary.get("by_layer_group_and_property") or [])
     if by_message:
         lines.extend(
             [
@@ -1625,6 +1644,12 @@ def _markdown_sprite_context_probe(probe: object) -> list[str]:
                 key="layer",
                 label=_MARKDOWN_LAYER_LABEL,
             ),
+            "##### Remaining sprite-context warning layers by unresolved qfit property",
+            "",
+            *_markdown_count_table(unresolved_by_property),
+            "##### Remaining sprite-context warning layers by layer group and unresolved qfit property",
+            "",
+            *_markdown_group_count_table(unresolved_by_group_property),
         ]
     )
     return lines

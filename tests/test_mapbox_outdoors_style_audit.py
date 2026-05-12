@@ -989,6 +989,52 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(probe["warning_count_delta_from_qfit"], 0)
         self.assertIsNone(fake_converter.converted_contexts[5].sprites)
 
+    def test_build_style_audit_summarizes_sprite_context_residual_unresolved_properties(self):
+        warning_report = {
+            "raw": {"count": 0, "warnings": []},
+            "qfit_preprocessed": {"count": 1, "warnings": ["poi-label: Skipping unsupported expression"]},
+            "reduced_by_qfit": {},
+            "with_sprite_context_probe": {
+                "sprite_definition_count": 1,
+                "sprite_image_loaded": True,
+                "summary": {
+                    "count": 2,
+                    "warnings": [
+                        "poi-label: Skipping unsupported expression",
+                        "road-path: Skipping unsupported expression",
+                    ],
+                },
+                "reduced_from_qfit": {},
+            },
+        }
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_qgis_converter_warning_report",
+            return_value=warning_report,
+        ):
+            audit = build_style_audit(
+                SAMPLE_STYLE,
+                config=StyleAuditConfig(include_qgis_converter_warnings=True),
+            )
+
+        sprite_probe = audit["qgis_converter_warnings"]["with_sprite_context_probe"]
+        self.assertEqual(
+            sprite_probe["remaining_warning_layers_by_unresolved_property"],
+            {
+                "by_property": [
+                    {"property": "filter", "count": 1},
+                    {"property": "layout.icon-image", "count": 1},
+                    {"property": "paint.line-dasharray", "count": 1},
+                ],
+                "by_layer_group_and_property": [
+                    {"group": "pois/labels", "property": "filter", "count": 1},
+                    {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                    {"group": "roads/trails", "property": "paint.line-dasharray", "count": 1},
+                ],
+            },
+        )
+
     def test_markdown_summarizes_source_filter_preserved_and_unresolved_cues(self):
         audit = build_style_audit(SAMPLE_STYLE)
         markdown = build_audit_markdown(audit)
@@ -1188,6 +1234,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
                     ],
                 },
+                "remaining_warning_layers_by_unresolved_property": {
+                    "by_property": [
+                        {"property": "filter", "count": 1},
+                        {"property": "layout.icon-image", "count": 1},
+                    ],
+                    "by_layer_group_and_property": [
+                        {"group": "pois/labels", "property": "filter", "count": 1},
+                        {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                    ],
+                },
             },
         }
         layers = {layer["id"]: layer for layer in audit["layers"]}
@@ -1269,6 +1325,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("##### Sprite context reductions by layer group", markdown)
         self.assertIn("##### Remaining sprite-context warnings by message", markdown)
         self.assertIn("##### Remaining sprite-context warnings by layer", markdown)
+        self.assertIn("##### Remaining sprite-context warning layers by unresolved qfit property", markdown)
+        self.assertIn("| `filter` | 1 |", markdown)
+        self.assertIn(
+            "##### Remaining sprite-context warning layers by layer group and unresolved qfit property",
+            markdown,
+        )
+        self.assertIn("| `pois/labels` | `layout.icon-image` | 1 |", markdown)
         self.assertIn("#### Diagnostic line-opacity scalarization probe", markdown)
         self.assertIn("Line opacity expressions replaced in probe: 2", markdown)
         self.assertIn("Warnings after scalar line opacity: 1", markdown)
