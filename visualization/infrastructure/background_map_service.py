@@ -13,11 +13,13 @@ from ...mapbox_config import (
     BACKGROUND_LAYER_PREFIX,
     TILE_MODE_RASTER,
     TILE_MODE_VECTOR,
+    MapboxSpriteResources,
     build_background_layer_name,
     build_vector_tile_layer_uri,
     build_xyz_layer_uri,
     extract_mapbox_vector_source_ids,
     fetch_mapbox_style_definition,
+    fetch_mapbox_sprite_resources,
     resolve_background_style,
     simplify_mapbox_style_expressions,
     snap_web_mercator_bounds_to_native_zoom,
@@ -60,6 +62,16 @@ class BackgroundMapService:
             try:
                 style_definition = fetch_mapbox_style_definition(access_token, resolved_owner, resolved_style_id)
                 simplified_style = simplify_mapbox_style_expressions(style_definition)
+                sprite_resources = None
+                try:
+                    sprite_resources = fetch_mapbox_sprite_resources(
+                        access_token,
+                        resolved_owner,
+                        resolved_style_id,
+                        sprite_url=style_definition.get("sprite"),
+                    )
+                except (RuntimeError, KeyError, ValueError, OSError):
+                    logger.debug("Mapbox sprite sheet unavailable for vector style conversion", exc_info=True)
                 tileset_ids = extract_mapbox_vector_source_ids(style_definition)
                 uri = build_vector_tile_layer_uri(
                     access_token,
@@ -72,7 +84,7 @@ class BackgroundMapService:
                 if not layer.isValid():
                     layer = None
                 else:
-                    self._apply_mapbox_gl_style(layer, simplified_style)
+                    self._apply_mapbox_gl_style(layer, simplified_style, sprite_resources=sprite_resources)
             except (RuntimeError, KeyError, ValueError, OSError):
                 logger.warning("Vector tile layer creation failed, falling back to raster", exc_info=True)
                 layer = None
@@ -184,7 +196,30 @@ class BackgroundMapService:
         except (RuntimeError, AttributeError):
             logger.debug("Mapbox GL style application skipped", exc_info=True)
 
-    def _apply_mapbox_gl_style(self, layer: QgsVectorTileLayer, style_definition: dict) -> None:
+    def _apply_sprite_resources_to_context(self, ctx: object, sprite_resources: MapboxSpriteResources | None) -> None:
+        if sprite_resources is None:
+            return
+        try:
+            from qgis.PyQt.QtGui import QImage  # noqa: PLC0415
+
+            sprite_image = QImage()
+            if not sprite_image.loadFromData(sprite_resources.image_bytes):
+                logger.debug("Mapbox sprite sheet image could not be decoded for vector style conversion")
+                return
+            argb_format = getattr(QImage, "Format_ARGB32", None)
+            if argb_format is not None:
+                sprite_image = sprite_image.convertToFormat(argb_format)
+            ctx.setSprites(sprite_image, sprite_resources.definitions)
+        except (RuntimeError, ImportError, AttributeError, TypeError):
+            logger.debug("Mapbox sprite sheet skipped for vector style conversion", exc_info=True)
+
+    def _apply_mapbox_gl_style(
+        self,
+        layer: QgsVectorTileLayer,
+        style_definition: dict,
+        *,
+        sprite_resources: MapboxSpriteResources | None = None,
+    ) -> None:
         try:
             from qgis.core import (  # noqa: PLC0415
                 QgsMapBoxGlStyleConversionContext,
@@ -195,6 +230,7 @@ class BackgroundMapService:
             ctx = QgsMapBoxGlStyleConversionContext()
             ctx.setTargetUnit(Qgis.RenderUnit.Millimeters)
             ctx.setPixelSizeConversionFactor(25.4 / 96.0)
+            self._apply_sprite_resources_to_context(ctx, sprite_resources)
             converter = QgsMapBoxGlStyleConverter()
             result = converter.convert(style_definition, ctx)
             if result == QgsMapBoxGlStyleConverter.Success:

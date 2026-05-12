@@ -1,12 +1,51 @@
 from __future__ import annotations
 
 import json
-from urllib.parse import quote, unquote
+from dataclasses import dataclass
+from urllib.parse import parse_qsl, quote, urlencode, unquote, urlparse, urlunparse
 from urllib.request import urlopen
 
 
 class MapboxConfigError(ValueError):
     """Raised when the configured Mapbox background settings are incomplete."""
+
+
+@dataclass(frozen=True)
+class MapboxSpriteResources:
+    """Mapbox sprite sheet resources for QGIS Mapbox GL style conversion."""
+
+    definitions: dict[str, object]
+    image_bytes: bytes
+
+
+def _is_mapbox_hostname(hostname: str | None) -> bool:
+    if not hostname:
+        return False
+    return hostname.lower().split(".")[-2:] == ["mapbox", "com"]
+
+
+def _format_mapbox_sprite_url(
+    token: str,
+    owner: str,
+    style_id: str,
+    sprite_path_segments: tuple[str, ...],
+    *,
+    file_type: str,
+    retina: bool,
+) -> str:
+    retina_suffix = "@2x" if retina else ""
+    extra_sprite_path = "".join(f"/{quote(segment, safe='')}" for segment in sprite_path_segments)
+    return (
+        "https://api.mapbox.com/styles/v1/{owner}/{style_id}{extra}/sprite{retina}.{file_type}"
+        "?access_token={token}"
+    ).format(
+        owner=quote(owner, safe=""),
+        style_id=quote(style_id, safe=""),
+        extra=extra_sprite_path,
+        retina=retina_suffix,
+        file_type=file_type,
+        token=quote(token, safe=""),
+    )
 
 
 BACKGROUND_LAYER_PREFIX = "qfit background"
@@ -694,6 +733,102 @@ def build_mapbox_style_json_url(
         style_id=quote(resolved_style_id, safe=""),
         token=quote(token, safe=""),
     )
+
+
+def build_mapbox_sprite_url(
+    access_token: str,
+    style_owner: str,
+    style_id: str,
+    *,
+    file_type: str,
+    retina: bool = False,
+) -> str:
+    """Return a Mapbox sprite JSON or PNG URL for a style."""
+    token, owner, resolved_style_id = _validated_mapbox_style_parts(access_token, style_owner, style_id)
+    if file_type not in {"json", "png"}:
+        raise MapboxConfigError("Mapbox sprite file_type must be 'json' or 'png'.")
+    return _format_mapbox_sprite_url(
+        token,
+        owner,
+        resolved_style_id,
+        (),
+        file_type=file_type,
+        retina=retina,
+    )
+
+
+def build_mapbox_sprite_file_url(
+    access_token: str,
+    sprite_url: str,
+    *,
+    file_type: str,
+    retina: bool = False,
+) -> str:
+    """Return a concrete sprite JSON or PNG URL from a style JSON sprite base URL."""
+    token = access_token.strip()
+    sprite_base_url = sprite_url.strip()
+    if not token:
+        raise MapboxConfigError("Enter a Mapbox access token to load the selected background map.")
+    if not sprite_base_url:
+        raise MapboxConfigError("Mapbox style JSON does not define a sprite URL.")
+    if file_type not in {"json", "png"}:
+        raise MapboxConfigError("Mapbox sprite file_type must be 'json' or 'png'.")
+
+    if sprite_base_url.startswith("mapbox://sprites/"):
+        sprite_path = sprite_base_url.removeprefix("mapbox://sprites/")
+        path_segments = tuple(unquote(segment) for segment in sprite_path.split("/"))
+        if len(path_segments) < 2 or not path_segments[0] or not path_segments[1] or any(
+            not segment for segment in path_segments[2:]
+        ):
+            raise MapboxConfigError("Mapbox sprite URL must include an owner and style ID.")
+        return _format_mapbox_sprite_url(
+            token,
+            path_segments[0],
+            path_segments[1],
+            path_segments[2:],
+            file_type=file_type,
+            retina=retina,
+        )
+
+    parsed = urlparse(sprite_base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise MapboxConfigError("Mapbox sprite URL must be a mapbox://, http://, or https:// URL.")
+
+    retina_suffix = "@2x" if retina else ""
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    if _is_mapbox_hostname(parsed.hostname) and not any(key == "access_token" for key, _ in query):
+        query.append(("access_token", token))
+    return urlunparse(
+        parsed._replace(
+            path=f"{parsed.path}{retina_suffix}.{file_type}",
+            query=urlencode(query),
+        )
+    )
+
+
+def fetch_mapbox_sprite_resources(
+    access_token: str,
+    style_owner: str,
+    style_id: str,
+    *,
+    sprite_url: str | None = None,
+    retina: bool = False,
+) -> MapboxSpriteResources:
+    """Fetch Mapbox sprite definitions and image bytes for a style."""
+    url_builder = build_mapbox_sprite_url
+    url_args = (access_token, style_owner, style_id)
+    if sprite_url:
+        url_builder = build_mapbox_sprite_file_url
+        url_args = (access_token, sprite_url)
+    definitions_url = url_builder(*url_args, file_type="json", retina=retina)
+    image_url = url_builder(*url_args, file_type="png", retina=retina)
+    with urlopen(definitions_url, timeout=20) as response:  # noqa: S310
+        definitions = json.loads(response.read().decode("utf-8"))
+    if not isinstance(definitions, dict):
+        raise MapboxConfigError("Mapbox sprite definitions response must be a JSON object.")
+    with urlopen(image_url, timeout=20) as response:  # noqa: S310
+        image_bytes = response.read()
+    return MapboxSpriteResources(definitions=definitions, image_bytes=image_bytes)
 
 
 def build_vector_tile_layer_uri(

@@ -301,8 +301,9 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                 return FakeRenderedImage()
 
         class FakeBackgroundMapService:
-            def _apply_mapbox_gl_style(self, layer, style_definition):
+            def _apply_mapbox_gl_style(self, layer, style_definition, *, sprite_resources=None):
                 layer.applied_style = style_definition
+                layer.sprite_resources = sprite_resources
 
         fake_core = types.ModuleType("qgis.core")
         fake_core.QgsApplication = FakeQgsApplication
@@ -326,6 +327,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         fake_mapbox_config.simplify_mapbox_style_expressions = lambda style: style
         fake_mapbox_config.extract_mapbox_vector_source_ids = lambda _style: ["mapbox.mapbox-streets-v8"]
         fake_mapbox_config.build_vector_tile_layer_uri = lambda *_args, **_kwargs: "vector://style"
+        fake_mapbox_config.fetch_mapbox_sprite_resources = lambda *_args, **_kwargs: "sprite-resources"
 
         fake_background_service = types.ModuleType("qfit.visualization.infrastructure.background_map_service")
         fake_background_service.BackgroundMapService = FakeBackgroundMapService

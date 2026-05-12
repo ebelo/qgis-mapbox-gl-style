@@ -473,6 +473,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
         build_vector_tile_layer_uri,
         extract_mapbox_vector_source_ids,
         fetch_mapbox_style_definition,
+        fetch_mapbox_sprite_resources,
         simplify_mapbox_style_expressions,
     )
     from qfit.visualization.infrastructure.background_map_service import BackgroundMapService
@@ -490,6 +491,16 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
             else fetch_mapbox_style_definition(token, camera.style_owner, camera.style_id)
         )
         simplified_style = simplify_mapbox_style_expressions(resolved_style_definition)
+        sprite_resources = None
+        try:
+            sprite_resources = fetch_mapbox_sprite_resources(
+                token,
+                camera.style_owner,
+                camera.style_id,
+                sprite_url=resolved_style_definition.get("sprite"),
+            )
+        except (RuntimeError, KeyError, ValueError, OSError):
+            pass
         tileset_ids = extract_mapbox_vector_source_ids(resolved_style_definition)
         layer_uri = build_vector_tile_layer_uri(
             token,
@@ -501,7 +512,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
         layer = QgsVectorTileLayer(layer_uri, f"qfit comparison {camera.style_owner}/{camera.style_id}")
         if not is_valid_qgis_vector_tile_layer(layer=layer, vector_tile_layer_type=QgsVectorTileLayer):
             raise RuntimeError("QGIS did not create a valid Mapbox vector tile layer.")
-        BackgroundMapService()._apply_mapbox_gl_style(layer, simplified_style)
+        BackgroundMapService()._apply_mapbox_gl_style(layer, simplified_style, sprite_resources=sprite_resources)
 
         destination_crs = QgsCoordinateReferenceSystem("EPSG:3857")
         settings = QgsMapSettings()
