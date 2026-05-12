@@ -289,6 +289,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
             },
             "warning_count_delta": 1,
+            "without_filters_probe": {
+                "summary": {
+                    "count": 1,
+                    "warnings": ["poi-label: Skipping unsupported expression"],
+                },
+                "reduced_from_qfit": {},
+            },
         }
         with patch.object(
             mapbox_outdoors_style_audit,
@@ -335,6 +342,21 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(
             audit["qgis_converter_warnings"]["reduced_by_qfit"]["by_layer_group"],
             [{"group": "roads/trails", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}],
+        )
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["without_filters_probe"]["summary"]["by_layer_group"],
+            [{"group": "pois/labels", "count": 1}],
+        )
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["without_filters_probe"][
+                "remaining_warning_layers_by_unresolved_property"
+            ],
+            {
+                "by_property": [{"property": "layout.icon-image", "count": 1}],
+                "by_layer_group_and_property": [
+                    {"group": "pois/labels", "property": "layout.icon-image", "count": 1}
+                ],
+            },
         )
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(
@@ -484,6 +506,56 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 },
                 {"group": "roads/trails", "message": "Skipping unsupported expression", "count": 1},
             ],
+        )
+
+    def test_warning_layer_unresolved_property_summaries_skip_filters_for_probe(self):
+        layers = [
+            {
+                "id": "road-primary",
+                "group": "roads/trails",
+                "qfit_unresolved": [
+                    {"property": "filter"},
+                    {"property": "paint.line-opacity"},
+                ],
+            },
+            {
+                "id": "poi-label",
+                "group": "pois/labels",
+                "qfit_unresolved": [
+                    {"property": "filter"},
+                    {"property": "layout.icon-image"},
+                    {"property": "layout.text-font"},
+                ],
+            },
+            {
+                "id": "building",
+                "group": "boundaries/buildings",
+                "qfit_unresolved": [{"property": "fill-opacity"}],
+            },
+        ]
+
+        self.assertEqual(
+            mapbox_outdoors_style_audit._warning_layer_unresolved_property_summaries(
+                [
+                    "road-primary: Skipping unsupported expression",
+                    "poi-label: Could not retrieve sprite 'marker'",
+                    "Could not find sprite sheet",
+                ],
+                layers,
+                exclude_properties={"filter"},
+            ),
+            {
+                "by_property": [
+                    {"property": "layout.icon-image", "count": 1},
+                    {"property": "layout.text-font", "count": 1},
+                    {"property": "paint.line-opacity", "count": 1},
+                ],
+                "by_layer_group_and_property": [
+                    {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                    {"group": "pois/labels", "property": "layout.text-font", "count": 1},
+                    {"group": "roads/trails", "property": "paint.line-opacity", "count": 1},
+                ],
+            },
         )
 
     def test_filter_expression_signature_group_summary_keeps_examples(self):
@@ -726,6 +798,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
                     ],
                 },
+                "remaining_warning_layers_by_unresolved_property": {
+                    "by_property": [
+                        {"property": "layout.icon-image", "count": 1},
+                        {"property": "layout.text-font", "count": 1},
+                    ],
+                    "by_layer_group_and_property": [
+                        {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                        {"group": "pois/labels", "property": "layout.text-font", "count": 1},
+                    ],
+                },
             },
         }
         layers = {layer["id"]: layer for layer in audit["layers"]}
@@ -783,6 +865,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertIn("##### Remaining probe warnings by layer", markdown)
         self.assertIn("| `poi-label` | 1 |", markdown)
+        self.assertIn("##### Remaining probe warning layers by unresolved qfit property", markdown)
+        self.assertIn("| `layout.icon-image` | 1 |", markdown)
+        self.assertIn("##### Remaining probe warning layers by layer group and unresolved qfit property", markdown)
+        self.assertIn("| `pois/labels` | `layout.text-font` | 1 |", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 

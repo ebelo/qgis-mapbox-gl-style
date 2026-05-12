@@ -619,6 +619,49 @@ def _annotate_warning_summary_groups(
     )
 
 
+def _warning_layer_unresolved_property_summaries(
+    warnings: list[str],
+    layers: list[dict[str, object]],
+    *,
+    exclude_properties: set[str] | None = None,
+) -> dict[str, list[dict[str, object]]]:
+    excluded = exclude_properties or set()
+    warning_layer_ids = {
+        layer
+        for warning in warnings
+        for layer, separator, _message in [warning.partition(": ")]
+        if separator and layer
+    }
+    property_counts: Counter[str] = Counter()
+    group_property_counts: Counter[tuple[str, str]] = Counter()
+    for layer in layers:
+        layer_id = str(layer.get("id") or "")
+        if layer_id not in warning_layer_ids:
+            continue
+        group = str(layer.get("group") or "other")
+        for property_name in _iter_property_names(layer, "qfit_unresolved"):
+            if property_name in excluded:
+                continue
+            property_counts[property_name] += 1
+            group_property_counts[(group, property_name)] += 1
+    return {
+        "by_property": [
+            {"property": property_name, "count": count}
+            for property_name, count in sorted(
+                property_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )
+        ],
+        "by_layer_group_and_property": [
+            {"group": group, "property": property_name, "count": count}
+            for (group, property_name), count in sorted(
+                group_property_counts.items(),
+                key=lambda item: (-item[1], item[0][0], item[0][1]),
+            )
+        ],
+    }
+
+
 def _annotate_qgis_warning_group_summaries(
     layers: list[dict[str, object]],
     warning_report: dict[str, object],
@@ -650,6 +693,15 @@ def _annotate_qgis_warning_group_summaries(
         else {}
     )
     _annotate_warning_summary_groups(filterless_summary, layer_groups)
+    filterless_warnings = filterless_summary.get("warnings")
+    if isinstance(filterless_warnings, list):
+        filterless_probe["remaining_warning_layers_by_unresolved_property"] = (
+            _warning_layer_unresolved_property_summaries(
+                [str(warning) for warning in filterless_warnings],
+                layers,
+                exclude_properties={"filter"},
+            )
+        )
     reduced_from_qfit = filterless_probe.setdefault("reduced_from_qfit", {})
     if isinstance(reduced_from_qfit, dict):
         reduced_from_qfit["by_layer_group"] = _warning_reduction_summary(
@@ -1037,6 +1089,11 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
         return []
     summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
     reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    unresolved_property_summary = (
+        probe.get("remaining_warning_layers_by_unresolved_property")
+        if isinstance(probe.get("remaining_warning_layers_by_unresolved_property"), dict)
+        else {}
+    )
     lines = [
         "#### Diagnostic filter-removal probe",
         "",
@@ -1054,6 +1111,8 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
     remaining_by_group = list(summary.get("by_layer_group") or [])
     remaining_by_group_message = list(summary.get("by_layer_group_and_message") or [])
     remaining_by_layer = list(summary.get("by_layer") or [])
+    unresolved_by_property = list(unresolved_property_summary.get("by_property") or [])
+    unresolved_by_group_property = list(unresolved_property_summary.get("by_layer_group_and_property") or [])
     if by_message:
         lines.extend(
             [
@@ -1108,6 +1167,12 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
                 key="layer",
                 label=_MARKDOWN_LAYER_LABEL,
             ),
+            "##### Remaining probe warning layers by unresolved qfit property",
+            "",
+            *_markdown_count_table(unresolved_by_property),
+            "##### Remaining probe warning layers by layer group and unresolved qfit property",
+            "",
+            *_markdown_group_count_table(unresolved_by_group_property),
         ]
     )
     return lines
