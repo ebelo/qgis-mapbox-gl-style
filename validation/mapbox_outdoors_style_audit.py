@@ -1029,6 +1029,9 @@ def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> di
     zoom_normalized_supported_part_rows = [
         row for row in zoom_normalized_part_rows if not _filter_parse_row_is_unsupported(row)
     ]
+    zoom_normalized_unsupported_part_rows = [
+        row for row in zoom_normalized_part_rows if _filter_parse_row_is_unsupported(row)
+    ]
     supported_count = len(rows) - len(unsupported_rows)
     return {
         "filter_expression_count": len(rows),
@@ -1050,9 +1053,21 @@ def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> di
         "unsupported_parts_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
             unsupported_part_rows
         ),
+        "zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
+            zoom_normalized_unsupported_part_rows
+        ),
         "zoom_normalized_supported_parts": sorted(
             zoom_normalized_supported_part_rows,
             key=lambda row: (
+                str(row.get("group") or ""),
+                str(row.get("layer") or ""),
+                int(row.get("part_index") or 0),
+            ),
+        ),
+        "zoom_normalized_unsupported_parts": sorted(
+            zoom_normalized_unsupported_part_rows,
+            key=lambda row: (
+                -int(row.get("unsupported_warning_count") or 0),
                 str(row.get("group") or ""),
                 str(row.get("layer") or ""),
                 int(row.get("part_index") or 0),
@@ -2838,6 +2853,41 @@ def _markdown_filter_parse_zoom_normalized_part_table(
     return lines
 
 
+def _markdown_filter_parse_zoom_normalized_unsupported_part_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    shown_rows = rows[:limit]
+    lines = [
+        "| Layer | Part | Original operators | Normalized operators | Unsupported warnings | Messages | Normalized filter part |",
+        "| --- | ---: | --- | --- | ---: | --- | --- |",
+    ]
+    for row in shown_rows:
+        lines.append(
+            "| `{layer}` | {part} | `{original}` | `{normalized}` | {warnings} | {messages} | {filter_value} |".format(
+                layer=row.get("layer", ""),
+                part=row.get("part_index", 0),
+                original=row.get("original_operator_signature", ""),
+                normalized=row.get("operator_signature", ""),
+                warnings=row.get("unsupported_warning_count", 0),
+                messages=_markdown_code_cell(
+                    ", ".join(
+                        str(message_row.get("message") or "")
+                        for message_row in row.get("unsupported_warning_messages", []) or []
+                    )
+                ),
+                filter_value=_markdown_code_cell(_compact_json(row.get("filter"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | … | … | {len(rows) - limit} more rejected parts omitted |")
+    lines.append("")
+    return lines
+
+
 def _markdown_filter_parse_warning_message_table(rows: list[dict[str, object]]) -> list[str]:
     return _markdown_named_count_table(rows, key="message", label=_MARKDOWN_MESSAGE_LABEL)
 
@@ -2848,6 +2898,7 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
     unsupported_rows = list(probe.get("unsupported_layers") or [])
     unsupported_parts = list(probe.get("unsupported_parts") or [])
     zoom_normalized_supported_parts = list(probe.get("zoom_normalized_supported_parts") or [])
+    zoom_normalized_unsupported_parts = list(probe.get("zoom_normalized_unsupported_parts") or [])
     return [
         "#### Diagnostic filter parser support probe",
         "",
@@ -2872,6 +2923,10 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             "Accepted after zoom-normalization: "
             f"{probe.get('qgis_parser_supported_zoom_normalized_part_count', 0)}"
         ),
+        (
+            "Still rejected after zoom-normalization: "
+            f"{probe.get('qgis_parser_unsupported_zoom_normalized_part_count', 0)}"
+        ),
         "",
         "##### Unsupported filter probes by layer group",
         "",
@@ -2895,6 +2950,12 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             list(probe.get("unsupported_parts_by_layer_group_and_operator_signature") or []),
             count_label="Unsupported parts",
         ),
+        "##### Zoom-normalized direct parts still rejected by layer group and operators",
+        "",
+        *_markdown_filter_signature_group_table(
+            list(probe.get("zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature") or []),
+            count_label="Still rejected parts",
+        ),
         "##### Direct filter parts accepted after zoom-normalization",
         "",
         (
@@ -2903,6 +2964,14 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
         ),
         "",
         *_markdown_filter_parse_zoom_normalized_part_table(zoom_normalized_supported_parts),
+        "##### Direct filter parts still rejected after zoom-normalization",
+        "",
+        (
+            "These rows distinguish remaining parser gaps from parts that only needed the fixed "
+            f"z{_EXPRESSION_PROBE_ZOOM:g} diagnostic zoom substituted."
+        ),
+        "",
+        *_markdown_filter_parse_zoom_normalized_unsupported_part_table(zoom_normalized_unsupported_parts),
         "##### Unsupported direct filter parts",
         "",
         *_markdown_filter_parse_unsupported_part_table(unsupported_parts),

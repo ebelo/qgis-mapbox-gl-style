@@ -1619,6 +1619,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["zoom_normalized_changed_direct_part_count"], 1)
         self.assertEqual(report["qgis_parser_supported_zoom_normalized_part_count"], 1)
         self.assertEqual(report["qgis_parser_unsupported_zoom_normalized_part_count"], 0)
+        self.assertEqual(report["zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature"], [])
         self.assertEqual(
             report["unsupported_parts_by_layer_group_and_operator_signature"],
             [
@@ -1636,6 +1637,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["unsupported_parts"][0]["part_index"], 2)
         self.assertEqual(report["unsupported_parts"][0]["operator_signature"], "step, zoom")
         self.assertEqual(len(report["zoom_normalized_supported_parts"]), 1)
+        self.assertEqual(report["zoom_normalized_unsupported_parts"], [])
         self.assertTrue(report["zoom_normalized_supported_parts"][0]["filter"])
         self.assertEqual(report["zoom_normalized_supported_parts"][0]["original_operator_signature"], "step, zoom")
         self.assertEqual(report["zoom_normalized_supported_parts"][0]["operator_signature"], "(none)")
@@ -1644,6 +1646,64 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ["step", ["zoom"], False, 12, True],
         )
         self.assertTrue(collect_warnings.call_args_list[3].args[0]["layers"][0]["filter"])
+
+    def test_filter_parse_support_report_lists_zoom_normalized_rejections(self):
+        style = {
+            "version": 8,
+            "sources": {"composite": {"type": "vector"}},
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "line",
+                    "source": "composite",
+                    "source-layer": "road",
+                    "filter": [
+                        "all",
+                        [
+                            "match",
+                            ["get", "class"],
+                            "path",
+                            ["step", ["zoom"], True, 12, False],
+                            False,
+                        ],
+                    ],
+                }
+            ],
+        }
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_collect_qgis_converter_warnings",
+            side_effect=[
+                ["road-label: Skipping unsupported expression"],
+                ["road-label: Skipping unsupported expression"],
+                ["road-label: Skipping unsupported expression"],
+            ],
+        ):
+            report = mapbox_outdoors_style_audit._qgis_filter_parse_support_report(style)
+
+        self.assertEqual(report["qgis_parser_supported_zoom_normalized_part_count"], 0)
+        self.assertEqual(report["qgis_parser_unsupported_zoom_normalized_part_count"], 1)
+        self.assertEqual(
+            report["zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature"],
+            [
+                {
+                    "group": "roads/trails",
+                    "operator_signature": "get, match",
+                    "count": 1,
+                    "example_layers": ["road-label"],
+                }
+            ],
+        )
+        self.assertEqual(len(report["zoom_normalized_unsupported_parts"]), 1)
+        row = report["zoom_normalized_unsupported_parts"][0]
+        self.assertEqual(row["layer"], "road-label")
+        self.assertEqual(row["part_index"], 1)
+        self.assertEqual(row["original_operator_signature"], "get, match, step, zoom")
+        self.assertEqual(row["operator_signature"], "get, match")
+        self.assertTrue(row["changed_by_zoom_normalization"])
+        self.assertEqual(row["unsupported_warning_count"], 1)
+        self.assertEqual(row["filter"], ["match", ["get", "class"], "path", False, False])
 
     def test_diagnostic_filter_value_at_zoom_evaluates_zoom_driven_steps(self):
         self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_value_at_zoom(["zoom"]), 12.0)
@@ -1657,6 +1717,33 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             mapbox_outdoors_style_audit._diagnostic_filter_value_at_zoom(["<", ["-", 16, ["zoom"]], 5]),
             ["<", 4.0, 5],
         )
+
+    def test_markdown_filter_parse_zoom_normalized_unsupported_part_table_lists_messages(self):
+        markdown = "\n".join(
+            mapbox_outdoors_style_audit._markdown_filter_parse_zoom_normalized_unsupported_part_table(
+                [
+                    {
+                        "layer": "road-label",
+                        "part_index": 1,
+                        "original_operator_signature": "get, match, step, zoom",
+                        "operator_signature": "get, match",
+                        "unsupported_warning_count": 2,
+                        "unsupported_warning_messages": [
+                            {"message": "Skipping unsupported expression", "count": 2}
+                        ],
+                        "filter": ["match", ["get", "class"], "path", False, False],
+                    }
+                ]
+            )
+        )
+
+        self.assertIn(
+            "| Layer | Part | Original operators | Normalized operators | Unsupported warnings | Messages | Normalized filter part |",
+            markdown,
+        )
+        self.assertIn("| `road-label` | 1 | `get, match, step, zoom` | `get, match` | 2 |", markdown)
+        self.assertIn("<code>Skipping unsupported expression</code>", markdown)
+        self.assertIn('<code>["match",["get","class"],"path",false,false]</code>', markdown)
 
     def test_diagnostic_filter_value_at_zoom_handles_arithmetic_and_interpolation_edges(self):
         self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_value_at_zoom(["+", 1, ["zoom"], 3]), 16.0)
@@ -2568,6 +2655,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("Unsupported direct parts re-tested after zoom-normalizing at z12: 1", markdown)
         self.assertIn("Changed by zoom-normalization: 1", markdown)
         self.assertIn("Accepted after zoom-normalization: 1", markdown)
+        self.assertIn("Still rejected after zoom-normalization: 0", markdown)
         self.assertIn("##### Unsupported filter probes by layer group", markdown)
         self.assertIn("| `pois/labels` | 1 |", markdown)
         self.assertIn("##### Unsupported filter parser warnings by message", markdown)
@@ -2576,9 +2664,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| `pois/labels` | `==, case, get` | 1 | `poi-label` |", markdown)
         self.assertIn("##### Unsupported direct filter parts by layer group and operators", markdown)
         self.assertIn("| `pois/labels` | `step, zoom` | 1 | `poi-label` |", markdown)
+        self.assertIn("##### Zoom-normalized direct parts still rejected by layer group and operators", markdown)
         self.assertIn("##### Direct filter parts accepted after zoom-normalization", markdown)
         self.assertIn("This diagnostic evaluates zoom-driven `step`/`interpolate` filter fragments at z12", markdown)
         self.assertIn("| `poi-label` | 2 | `step, zoom` | `(none)` | <code>true</code> |", markdown)
+        self.assertIn("##### Direct filter parts still rejected after zoom-normalization", markdown)
+        self.assertIn("These rows distinguish remaining parser gaps", markdown)
         self.assertIn("##### Unsupported direct filter parts", markdown)
         self.assertIn("| `poi-label` | `all` | 2 | `step, zoom` | 1 |", markdown)
         self.assertIn('<code>["step",["zoom"],false,12,true]</code>', markdown)
