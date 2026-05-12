@@ -253,6 +253,29 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(hidden_changes["layout.visibility"]["to"], '"none"')
         self.assertEqual(hidden_layer["qfit_unresolved"], [])
 
+    def test_build_style_audit_treats_qgis_font_fallback_as_resolved(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "poi-label",
+                        "type": "symbol",
+                        "source-layer": "poi_label",
+                        "layout": {"text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"]},
+                    }
+                ],
+            }
+        )
+
+        layer = audit["layers"][0]
+        self.assertIn("layout.text-font", {change["property"] for change in layer["qfit_simplifies"]})
+        self.assertNotIn("layout.text-font", {item["property"] for item in layer["qfit_unresolved"]})
+        self.assertEqual(
+            audit["summary"]["qfit_simplifies_by_property"],
+            [{"property": "layout.text-font", "count": 1}],
+        )
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {

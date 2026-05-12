@@ -26,6 +26,7 @@ if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
 
 from qfit.mapbox_config import (  # noqa: E402
+    QGIS_TEXT_FONT_FALLBACK,
     fetch_mapbox_style_definition,
     simplify_mapbox_style_expressions,
 )
@@ -302,6 +303,10 @@ def _is_literal_number_array(value: object) -> bool:
     return isinstance(value, list) and len(value) > 0 and all(isinstance(item, (int, float)) for item in value)
 
 
+def _is_qgis_text_font_fallback(value: object) -> bool:
+    return value == [QGIS_TEXT_FONT_FALLBACK]
+
+
 def _is_hidden_by_qfit(simplified_layer: dict[str, object] | None) -> bool:
     if simplified_layer is None:
         return False
@@ -355,6 +360,8 @@ def _unresolved_cues(layer: dict[str, object], simplified_layer: dict[str, objec
             )
         )
     for section, prop, value in _iter_symbology(comparison_layer):
+        if section == "layout" and prop == "text-font" and _is_qgis_text_font_fallback(value):
+            continue
         reason = _UNSUPPORTED_CUES.get((section, prop))
         if reason is not None:
             unresolved.append(

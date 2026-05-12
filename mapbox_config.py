@@ -17,6 +17,7 @@ DEFAULT_MAPBOX_TILE_PIXEL_RATIO = 2
 WEB_MERCATOR_WORLD_WIDTH_M = 40075016.685578488
 DEFAULT_MAPBOX_MIN_ZOOM = 0
 DEFAULT_MAPBOX_MAX_ZOOM = 22
+QGIS_TEXT_FONT_FALLBACK = "Noto Sans"
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -369,6 +370,10 @@ def _is_simple_text_field_reference(expr: object) -> bool:
     return isinstance(expr, list) and len(expr) == 2 and expr[0] == "get" and isinstance(expr[1], str)
 
 
+def _is_text_font_stack(expr: object) -> bool:
+    return isinstance(expr, list) and len(expr) > 0 and all(isinstance(item, str) for item in expr)
+
+
 def _first_text_field_reference_child(
     children: list[object],
     *,
@@ -509,7 +514,9 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literal fallback colors so QGIS' converter does not render them as black.
 
     Also simplifies ``text-field`` coalesce expressions to their first simple
-    ``['get', field]`` reference so QGIS can resolve the label field name.
+    ``['get', field]`` reference so QGIS can resolve the label field name, and
+    collapses Mapbox font stacks to a QGIS-safe local fallback to avoid warning
+    spam from proprietary Mapbox font family names.
 
     Only color properties whose values are Mapbox expressions (lists) are
     simplified.  Literal strings (``hsl(...)``, ``#rrggbb``) are kept as-is.
@@ -601,6 +608,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         props[prop] = max(0.1, min(width_mm, _MAX_LINE_WIDTH_MM))
                 elif prop == "text-field":
                     props[prop] = _simplify_text_field(val)
+                elif prop == "text-font" and _is_text_font_stack(val):
+                    props[prop] = [QGIS_TEXT_FONT_FALLBACK]
                 elif prop == "text-size":
                     override = _TEXT_SIZE_OVERRIDES.get(layer_id)
                     if override is not None:

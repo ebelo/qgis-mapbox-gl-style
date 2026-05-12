@@ -6,6 +6,7 @@ from mapbox_config import (  # noqa: E402
     DEFAULT_MAPBOX_RETINA,
     DEFAULT_MAPBOX_TILE_PIXEL_RATIO,
     DEFAULT_MAPBOX_TILE_SIZE,
+    QGIS_TEXT_FONT_FALLBACK,
     TILE_MODE_RASTER,
     TILE_MODE_VECTOR,
     TILE_MODES,
@@ -403,6 +404,40 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = simplify_mapbox_style_expressions(style)
 
         self.assertEqual(result["layers"][0]["layout"]["line-join"], expression)
+
+    def test_mapbox_font_stack_uses_qgis_safe_fallback(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+                        "text-field": ["get", "name"],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-font"], [QGIS_TEXT_FONT_FALLBACK])
+        self.assertEqual(
+            style["layers"][0]["layout"]["text-font"],
+            ["DIN Pro Medium", "Arial Unicode MS Regular"],
+        )
+
+    def test_mapbox_text_font_expression_is_left_unchanged(self):
+        expression = [
+            "step",
+            ["zoom"],
+            ["literal", [QGIS_TEXT_FONT_FALLBACK]],
+            12,
+            ["literal", ["DIN Pro Medium"]],
+        ]
+        style = {"layers": [{"layout": {"text-font": expression}}]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-font"], expression)
 
     def test_format_text_field_expression_uses_primary_label_field(self):
         style = {
