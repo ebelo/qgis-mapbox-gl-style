@@ -319,6 +319,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 },
                 "reduced_from_qfit": {},
             },
+            "without_icon_images_probe": {
+                "summary": {
+                    "count": 1,
+                    "warnings": ["poi-label: Could not retrieve sprite 'park'"],
+                },
+                "reduced_from_qfit": {},
+            },
         }
         with patch.object(
             mapbox_outdoors_style_audit,
@@ -380,6 +387,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     {"group": "pois/labels", "property": "layout.icon-image", "count": 1}
                 ],
             },
+        )
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["without_icon_images_probe"]["summary"]["by_layer_group"],
+            [{"group": "pois/labels", "count": 1}],
+        )
+        self.assertEqual(
+            audit["qgis_converter_warnings"]["without_icon_images_probe"]["reduced_from_qfit"][
+                "by_layer_group"
+            ],
+            [{"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}],
         )
         layers = {layer["id"]: layer for layer in audit["layers"]}
         self.assertEqual(
@@ -627,17 +644,46 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ],
         )
 
+    def test_style_without_icon_images_removes_layout_icons_without_mutating_original(self):
+        style = {
+            "layers": [
+                {"id": "poi-label", "layout": {"icon-image": ["get", "maki"], "text-field": ["get", "name"]}},
+                {"id": "road-label", "layout": {"text-field": ["get", "name"]}},
+                {"id": "background", "paint": {"background-color": "#ffffff"}},
+            ]
+        }
+
+        result, removed_count = mapbox_outdoors_style_audit._style_without_icon_images(style)
+
+        self.assertEqual(removed_count, 1)
+        self.assertNotIn("icon-image", result["layers"][0]["layout"])
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+        self.assertIn("icon-image", style["layers"][0]["layout"])
+
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
-        qfit_style = {"layers": [{"id": "poi-label", "filter": ["==", ["get", "maki"], "park"]}]}
+        qfit_style = {
+            "layers": [
+                {
+                    "id": "poi-label",
+                    "filter": ["==", ["get", "maki"], "park"],
+                    "layout": {"icon-image": ["get", "maki"]},
+                }
+            ]
+        }
         fake_qgis, fake_core, fake_app, fake_converter = _fake_qgis_modules(
             [
                 [
                     "road-primary: Skipping unsupported expression",
                     "poi-label: Skipping unsupported expression",
+                    "poi-label: Could not retrieve sprite 'park'",
                 ],
+                [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Could not retrieve sprite 'park'",
+                ],
+                ["poi-label: Could not retrieve sprite 'park'"],
                 ["poi-label: Skipping unsupported expression"],
-                [],
             ]
         )
 
@@ -650,11 +696,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 qfit_preprocessed_style=qfit_style,
             )
 
-        self.assertEqual(report["raw"]["count"], 2)
-        self.assertEqual(report["qfit_preprocessed"]["count"], 1)
+        self.assertEqual(report["raw"]["count"], 3)
+        self.assertEqual(report["qfit_preprocessed"]["count"], 2)
         self.assertEqual(report["warning_count_delta"], 1)
         self.assertEqual(report["without_filters_probe"]["filter_count_removed"], 1)
-        self.assertEqual(report["without_filters_probe"]["summary"]["count"], 0)
+        self.assertEqual(report["without_filters_probe"]["summary"]["count"], 1)
         self.assertEqual(report["without_filters_probe"]["warning_count_delta_from_qfit"], 1)
         self.assertEqual(
             report["without_filters_probe"]["reduced_from_qfit"],
@@ -668,7 +714,26 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     }
                 ],
                 "by_layer": [
-                    {"layer": "poi-label", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}
+                    {"layer": "poi-label", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                ],
+            },
+        )
+        self.assertEqual(report["without_icon_images_probe"]["icon_image_count_removed"], 1)
+        self.assertEqual(report["without_icon_images_probe"]["summary"]["count"], 1)
+        self.assertEqual(report["without_icon_images_probe"]["warning_count_delta_from_qfit"], 1)
+        self.assertEqual(
+            report["without_icon_images_probe"]["reduced_from_qfit"],
+            {
+                "by_message": [
+                    {
+                        "message": "Could not retrieve sprite 'park'",
+                        "raw_count": 1,
+                        "qfit_count": 0,
+                        "reduced_count": 1,
+                    }
+                ],
+                "by_layer": [
+                    {"layer": "poi-label", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
                 ],
             },
         )
@@ -689,8 +754,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             },
         )
         self.assertEqual(fake_converter.converted_styles[:2], [raw_style, qfit_style])
-        self.assertEqual(fake_converter.converted_styles[2], {"layers": [{"id": "poi-label"}]})
+        self.assertEqual(
+            fake_converter.converted_styles[2],
+            {"layers": [{"id": "poi-label", "layout": {"icon-image": ["get", "maki"]}}]},
+        )
+        self.assertEqual(
+            fake_converter.converted_styles[3],
+            {"layers": [{"id": "poi-label", "filter": ["==", ["get", "maki"], "park"], "layout": {}}]},
+        )
         self.assertIn("filter", qfit_style["layers"][0])
+        self.assertIn("icon-image", qfit_style["layers"][0]["layout"])
         self.assertEqual(len(fake_app.created), 1)
         self.assertEqual(fake_app.created[0].args, [])
         self.assertFalse(fake_app.created[0].gui_enabled)
@@ -700,7 +773,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
     def test_qgis_converter_warning_report_reuses_existing_qgis_app(self):
         existing_app = object()
         fake_qgis, fake_core, fake_app, _fake_converter = _fake_qgis_modules(
-            [["raw warning"], ["qfit warning"], ["filterless warning"]],
+            [["raw warning"], ["qfit warning"], ["filterless warning"], ["iconless warning"]],
             existing_app=existing_app,
         )
 
@@ -713,6 +786,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["raw"]["warnings"], ["raw warning"])
         self.assertEqual(report["qfit_preprocessed"]["warnings"], ["qfit warning"])
         self.assertEqual(report["without_filters_probe"]["summary"]["warnings"], ["filterless warning"])
+        self.assertEqual(report["without_icon_images_probe"]["summary"]["warnings"], ["iconless warning"])
         self.assertEqual(fake_app.created, [])
 
     def test_markdown_summarizes_source_filter_preserved_and_unresolved_cues(self):
@@ -832,6 +906,36 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     ],
                 },
             },
+            "without_icon_images_probe": {
+                "icon_image_count_removed": 1,
+                "summary": {
+                    "count": 1,
+                    "by_message": [{"message": "Skipping unsupported expression", "count": 1}],
+                    "by_layer_group": [{"group": "pois/labels", "count": 1}],
+                    "by_layer_group_and_message": [
+                        {
+                            "group": "pois/labels",
+                            "message": "Skipping unsupported expression",
+                            "count": 1,
+                        }
+                    ],
+                    "by_layer": [{"layer": "poi-label", "count": 1}],
+                },
+                "warning_count_delta_from_qfit": 1,
+                "reduced_from_qfit": {
+                    "by_message": [
+                        {
+                            "message": "Referenced font DIN Pro Medium is not available on system",
+                            "raw_count": 1,
+                            "qfit_count": 0,
+                            "reduced_count": 1,
+                        }
+                    ],
+                    "by_layer_group": [
+                        {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                    ],
+                },
+            },
         }
         layers = {layer["id"]: layer for layer in audit["layers"]}
         layers["poi-label"]["qgis_converter_warnings"] = {
@@ -892,6 +996,16 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
         self.assertIn("##### Remaining probe warning layers by layer group and unresolved qfit property", markdown)
         self.assertIn("| `pois/labels` | `layout.text-font` | 1 |", markdown)
+        self.assertIn("#### Diagnostic icon-image removal probe", markdown)
+        self.assertIn("Icon images removed in probe: 1", markdown)
+        self.assertIn("Warnings after removing icon images: 1", markdown)
+        self.assertIn("##### Icon probe reductions by message", markdown)
+        self.assertIn("| Message | Before icon probe | Without icon-image | Reduced |", markdown)
+        self.assertIn("| `Referenced font DIN Pro Medium is not available on system` | 1 | 0 | 1 |", markdown)
+        self.assertIn("##### Icon probe reductions by layer group", markdown)
+        self.assertIn("| Layer group | Before icon probe | Without icon-image | Reduced |", markdown)
+        self.assertIn("##### Remaining icon probe warnings by message", markdown)
+        self.assertIn("##### Remaining icon probe warnings by layer", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 

@@ -626,6 +626,23 @@ def _annotate_warning_summary_groups(
     )
 
 
+def _annotate_probe_warning_groups(
+    probe: dict[str, object],
+    qfit_summary: dict[str, object],
+    layer_groups: dict[str, str],
+) -> dict[str, object]:
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    _annotate_warning_summary_groups(summary, layer_groups)
+    reduced_from_qfit = probe.setdefault("reduced_from_qfit", {})
+    if isinstance(reduced_from_qfit, dict):
+        reduced_from_qfit["by_layer_group"] = _warning_reduction_summary(
+            list(qfit_summary.get("by_layer_group") or []),
+            list(summary.get("by_layer_group") or []),
+            key="group",
+        )
+    return summary
+
+
 def _warning_layer_unresolved_property_summaries(
     warnings: list[str],
     layers: list[dict[str, object]],
@@ -694,12 +711,7 @@ def _annotate_qgis_warning_group_summaries(
         if isinstance(warning_report.get("without_filters_probe"), dict)
         else {}
     )
-    filterless_summary = (
-        filterless_probe.get("summary")
-        if isinstance(filterless_probe.get("summary"), dict)
-        else {}
-    )
-    _annotate_warning_summary_groups(filterless_summary, layer_groups)
+    filterless_summary = _annotate_probe_warning_groups(filterless_probe, qfit_summary, layer_groups)
     filterless_warnings = filterless_summary.get("warnings")
     if isinstance(filterless_warnings, list):
         filterless_probe["remaining_warning_layers_by_unresolved_property"] = (
@@ -709,13 +721,12 @@ def _annotate_qgis_warning_group_summaries(
                 exclude_properties={"filter"},
             )
         )
-    reduced_from_qfit = filterless_probe.setdefault("reduced_from_qfit", {})
-    if isinstance(reduced_from_qfit, dict):
-        reduced_from_qfit["by_layer_group"] = _warning_reduction_summary(
-            list(qfit_summary.get("by_layer_group") or []),
-            list(filterless_summary.get("by_layer_group") or []),
-            key="group",
-        )
+    icon_image_probe = (
+        warning_report.get("without_icon_images_probe")
+        if isinstance(warning_report.get("without_icon_images_probe"), dict)
+        else {}
+    )
+    _annotate_probe_warning_groups(icon_image_probe, qfit_summary, layer_groups)
 
 
 def _annotate_layers_with_qgis_warnings(
@@ -791,6 +802,24 @@ def _style_without_filters(style_definition: dict[str, object]) -> tuple[dict[st
     return style_without_filters, removed_count
 
 
+def _style_without_icon_images(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
+    """Return a copy of a style with symbol icons removed for converter diagnostics only."""
+    style_without_icons = copy.deepcopy(style_definition)
+    removed_count = 0
+    layers = style_without_icons.get("layers")
+    if not isinstance(layers, list):
+        return style_without_icons, removed_count
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        layout = layer.get("layout")
+        if not isinstance(layout, dict) or "icon-image" not in layout:
+            continue
+        layout.pop("icon-image")
+        removed_count += 1
+    return style_without_icons, removed_count
+
+
 def _collect_qgis_converter_warnings(style_definition: dict[str, object]) -> list[str]:
     from qgis.core import QgsMapBoxGlStyleConverter  # noqa: PLC0415
 
@@ -821,12 +850,15 @@ def _qgis_converter_warning_report(
         qfit_warnings = _collect_qgis_converter_warnings(qfit_preprocessed_style)
         filterless_style, filter_count_removed = _style_without_filters(qfit_preprocessed_style)
         filterless_warnings = _collect_qgis_converter_warnings(filterless_style)
+        iconless_style, icon_image_count_removed = _style_without_icon_images(qfit_preprocessed_style)
+        iconless_warnings = _collect_qgis_converter_warnings(iconless_style)
     finally:
         if created_app:
             app.exitQgis()
     raw_summary = _qgis_warning_summary(raw_warnings)
     qfit_summary = _qgis_warning_summary(qfit_warnings)
     filterless_summary = _qgis_warning_summary(filterless_warnings)
+    iconless_summary = _qgis_warning_summary(iconless_warnings)
     return {
         "raw": raw_summary,
         "qfit_preprocessed": qfit_summary,
@@ -837,6 +869,12 @@ def _qgis_converter_warning_report(
             "summary": filterless_summary,
             "warning_count_delta_from_qfit": len(qfit_warnings) - len(filterless_warnings),
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, filterless_summary),
+        },
+        "without_icon_images_probe": {
+            "icon_image_count_removed": icon_image_count_removed,
+            "summary": iconless_summary,
+            "warning_count_delta_from_qfit": len(qfit_warnings) - len(iconless_warnings),
+            "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, iconless_summary),
         },
     }
 
@@ -1185,6 +1223,83 @@ def _markdown_filterless_probe(probe: object) -> list[str]:
     return lines
 
 
+def _markdown_icon_image_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
+    reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
+    lines = [
+        "#### Diagnostic icon-image removal probe",
+        "",
+        "This is not a rendering-safe qfit preprocessing mode; icons and sprites carry feature meaning.",
+        "Use it only to estimate how much converter warning debt is tied to Mapbox sprite/icon handling.",
+        "",
+        f"Icon images removed in probe: {probe.get('icon_image_count_removed', 0)}",
+        f"Warnings after removing icon images: {summary.get('count', 0)}",
+        f"Warning count delta from qfit preprocessing: {probe.get('warning_count_delta_from_qfit', 0)}",
+        "",
+    ]
+    by_message = list(reduced.get("by_message") or [])
+    by_group = list(reduced.get("by_layer_group") or [])
+    if by_message:
+        lines.extend(
+            [
+                "##### Icon probe reductions by message",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_message,
+                    key="message",
+                    label=_MARKDOWN_MESSAGE_LABEL,
+                    before_label="Before icon probe",
+                    after_label="Without icon-image",
+                ),
+            ]
+        )
+    if by_group:
+        lines.extend(
+            [
+                "##### Icon probe reductions by layer group",
+                "",
+                *_markdown_warning_reduction_table(
+                    by_group,
+                    key="group",
+                    label=_MARKDOWN_LAYER_GROUP_LABEL,
+                    before_label="Before icon probe",
+                    after_label="Without icon-image",
+                ),
+            ]
+        )
+    lines.extend(
+        [
+            "##### Remaining icon probe warnings by message",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_message") or []),
+                key="message",
+                label=_MARKDOWN_MESSAGE_LABEL,
+            ),
+            "##### Remaining icon probe warnings by layer group",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer_group") or []),
+                key="group",
+                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            ),
+            "##### Remaining icon probe warnings by layer group and message",
+            "",
+            *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
+            "##### Remaining icon probe warnings by layer",
+            "",
+            *_markdown_named_count_table(
+                list(summary.get("by_layer") or []),
+                key="layer",
+                label=_MARKDOWN_LAYER_LABEL,
+            ),
+        ]
+    )
+    return lines
+
+
 def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     if not isinstance(report, dict):
         return []
@@ -1195,6 +1310,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     reduced_by_layer = list(reduced.get("by_layer") or [])
     reduced_by_group = list(reduced.get("by_layer_group") or [])
     filterless_probe = report.get("without_filters_probe")
+    icon_image_probe = report.get("without_icon_images_probe")
     lines = [
         "### QGIS converter warnings",
         "",
@@ -1266,6 +1382,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
                 label=_MARKDOWN_LAYER_LABEL,
             ),
             *_markdown_filterless_probe(filterless_probe),
+            *_markdown_icon_image_probe(icon_image_probe),
         ]
     )
     return lines
