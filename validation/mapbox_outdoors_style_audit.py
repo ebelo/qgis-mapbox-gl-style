@@ -821,6 +821,24 @@ def _diagnostic_simple_case_predicate_value(value: object) -> object:
     return _ABSENT
 
 
+def _diagnostic_is_numeric_zero(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0
+
+
+def _diagnostic_additive_identity_value(value: list[object], *, root: bool) -> object:
+    if len(value) != 3:
+        return _ABSENT
+    left, right = value[1], value[2]
+    if value[0] == "+":
+        if _diagnostic_is_numeric_zero(left):
+            return _diagnostic_filter_parser_friendly_value(right, root=root)
+        if _diagnostic_is_numeric_zero(right):
+            return _diagnostic_filter_parser_friendly_value(left, root=root)
+    if value[0] == "-" and _diagnostic_is_numeric_zero(right):
+        return _diagnostic_filter_parser_friendly_value(left, root=root)
+    return _ABSENT
+
+
 def _diagnostic_filter_parser_friendly_value(value: object, *, root: bool = True) -> object:
     if isinstance(value, bool):
         if root:
@@ -837,14 +855,10 @@ def _diagnostic_filter_parser_friendly_value(value: object, *, root: bool = True
     case_predicate = _diagnostic_simple_case_predicate_value(value)
     if case_predicate is not _ABSENT:
         return case_predicate
-    if (
-        operator == "-"
-        and len(value) == 3
-        and isinstance(value[2], (int, float))
-        and not isinstance(value[2], bool)
-        and value[2] == 0
-    ):
-        return _diagnostic_filter_parser_friendly_value(value[1], root=root)
+    if operator in {"+", "-"}:
+        additive_identity = _diagnostic_additive_identity_value(value, root=root)
+        if additive_identity is not _ABSENT:
+            return additive_identity
     return [operator, *[_diagnostic_filter_parser_friendly_value(item, root=False) for item in value[1:]]]
 
 

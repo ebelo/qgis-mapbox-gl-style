@@ -1775,6 +1775,49 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ["match", ["get", "type"], ["steps", "sidewalk"], False, True],
         )
 
+    def test_filter_parse_support_report_probes_additive_zero_simplification(self):
+        style = {
+            "version": 8,
+            "sources": {"composite": {"type": "vector"}},
+            "layers": [
+                {
+                    "id": "poi-label",
+                    "type": "symbol",
+                    "source": "composite",
+                    "source-layer": "poi_label",
+                    "filter": [
+                        "<=",
+                        ["get", "filterrank"],
+                        ["+", 0, ["match", ["get", "class"], "historic", 3, 2]],
+                    ],
+                }
+            ],
+        }
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_collect_qgis_converter_warnings",
+            side_effect=[
+                ["poi-label: Skipping unsupported expression"],
+                [],
+            ],
+        ) as collect_warnings:
+            report = mapbox_outdoors_style_audit._qgis_filter_parse_support_report(style)
+
+        self.assertEqual(report["parser_friendly_filter_count"], 1)
+        self.assertEqual(report["parser_friendly_changed_filter_count"], 1)
+        self.assertEqual(report["qgis_parser_supported_parser_friendly_filter_count"], 1)
+        self.assertEqual(report["qgis_parser_unsupported_parser_friendly_filter_count"], 0)
+        self.assertEqual(report["direct_filter_part_count"], 0)
+        self.assertEqual(
+            report["parser_friendly_supported_filters"][0]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 3, 2]],
+        )
+        self.assertEqual(
+            collect_warnings.call_args_list[1].args[0]["layers"][0]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 3, 2]],
+        )
+
     def test_diagnostic_filter_value_at_zoom_evaluates_zoom_driven_steps(self):
         self.assertEqual(mapbox_outdoors_style_audit._diagnostic_filter_value_at_zoom(["zoom"]), 12.0)
         self.assertEqual(
@@ -1946,8 +1989,24 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ["<=", ["to-number", ["get", "sizerank"]], 14],
         )
         self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
+                ["<=", ["get", "filterrank"], ["+", 0, ["match", ["get", "class"], "historic", 3, 2]]]
+            ),
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 3, 2]],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
+                ["<=", ["+", ["get", "filterrank"], 0.0], 14]
+            ),
+            ["<=", ["get", "filterrank"], 14],
+        )
+        self.assertEqual(
             mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(["-", ["get", "sizerank"], False]),
             ["-", ["get", "sizerank"], False],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(["+", ["get", "sizerank"], False]),
+            ["+", ["get", "sizerank"], False],
         )
         self.assertEqual(
             mapbox_outdoors_style_audit._diagnostic_filter_parser_friendly_value(
