@@ -303,6 +303,86 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [{"property": "layout.text-font", "count": 1}],
         )
 
+    def test_build_style_audit_reports_visible_label_density_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "road-label",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "minzoom": 10,
+                        "filter": ["all", ["==", ["get", "class"], "primary"], ["has", "name"]],
+                        "layout": {
+                            "text-field": ["get", "name"],
+                            "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 14, 14],
+                            "symbol-sort-key": ["get", "rank"],
+                            "symbol-spacing": ["step", ["zoom"], 150, 14, 250],
+                        },
+                    },
+                    {
+                        "id": "settlement-major-label",
+                        "type": "symbol",
+                        "source-layer": "place_label",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                    {
+                        "id": "settlement-subdivision-label",
+                        "type": "symbol",
+                        "source-layer": "place_label",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                    {
+                        "id": "hidden-label",
+                        "type": "symbol",
+                        "source-layer": "place_label",
+                        "layout": {"text-field": ["get", "name"], "visibility": "none"},
+                    },
+                    {
+                        "id": "poi-icon-only",
+                        "type": "symbol",
+                        "source-layer": "poi_label",
+                        "layout": {"icon-image": ["get", "maki"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["label_density_candidates"]
+        self.assertEqual([candidate["layer"] for candidate in candidates], ["road-label", "settlement-major-label"])
+        road_candidate, settlement_candidate = candidates
+        self.assertEqual(road_candidate["group"], "roads/trails")
+        self.assertEqual(road_candidate["source_layer"], "road")
+        self.assertEqual(road_candidate["zoom_band"], "z≥10")
+        self.assertEqual(road_candidate["filter_operator_signature"], "==, all, get, has")
+        self.assertEqual(
+            road_candidate["label_control_properties"],
+            ["filter", "layout.symbol-sort-key", "layout.symbol-spacing", "layout.text-field", "layout.text-size"],
+        )
+        self.assertEqual(
+            road_candidate["qgis_dependent_control_properties"],
+            ["filter", "layout.symbol-sort-key", "layout.symbol-spacing"],
+        )
+        self.assertEqual(settlement_candidate["filter_operator_signature"], "get, match")
+        self.assertEqual(settlement_candidate["label_control_properties"], ["filter", "layout.text-field"])
+        self.assertEqual(settlement_candidate["qgis_dependent_control_properties"], ["filter"])
+        settlement_layer = next(layer for layer in audit["layers"] if layer["id"] == "settlement-major-label")
+        self.assertIsNone(settlement_layer["filter"])
+        self.assertIsNotNone(settlement_layer["qgis_filter"])
+        self.assertEqual(
+            audit["summary"]["label_density_candidates_by_layer_group"],
+            [{"group": "roads/trails", "count": 1}, {"group": "settlements/places", "count": 1}],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Label density candidates", markdown)
+        self.assertIn("Visible symbol layers with text labels", markdown)
+        self.assertIn("| `roads/trails` | `road-label` | `road` | z≥10 | `==, all, get, has` |", markdown)
+        self.assertIn("| `settlements/places` | `settlement-major-label` | `place_label` | all zooms | `get, match` |", markdown)
+        self.assertNotIn("settlement-subdivision-label` |", markdown)
+        self.assertNotIn("hidden-label` |", markdown)
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {

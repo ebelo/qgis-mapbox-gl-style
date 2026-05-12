@@ -46,6 +46,26 @@ _FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER = (
 _FILTER_PARSE_UNSUPPORTED_MESSAGES = frozenset(_FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER)
 _FILTER_PARSE_PART_PARENT_OPERATORS = frozenset({"all", "any", "none"})
 _NO_OPERATOR_SIGNATURE = "(none)"
+_ALL_ZOOMS_BAND = "all zooms"
+_LABEL_DENSITY_CONTROL_PROPERTIES = (
+    "layout.icon-allow-overlap",
+    "layout.icon-ignore-placement",
+    "layout.icon-optional",
+    "layout.symbol-sort-key",
+    "layout.symbol-spacing",
+    "layout.text-allow-overlap",
+    "layout.text-anchor",
+    "layout.text-field",
+    "layout.text-ignore-placement",
+    "layout.text-justify",
+    "layout.text-max-angle",
+    "layout.text-offset",
+    "layout.text-optional",
+    "layout.text-padding",
+    "layout.text-radial-offset",
+    "layout.text-size",
+    "layout.text-variable-anchor",
+)
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -239,7 +259,7 @@ def _zoom_band(layer: dict[str, object]) -> str:
     minzoom = layer.get("minzoom")
     maxzoom = layer.get("maxzoom")
     if minzoom is None and maxzoom is None:
-        return "all zooms"
+        return _ALL_ZOOMS_BAND
     if minzoom is None:
         return f"z<{maxzoom:g}" if isinstance(maxzoom, (int, float)) else f"z<{maxzoom}"
     if maxzoom is None:
@@ -429,6 +449,7 @@ def build_layer_audit(
         "source_layer": str(layer.get("source-layer") or ""),
         "zoom_band": _zoom_band(layer),
         "filter": layer.get("filter"),
+        "qgis_filter": (simplified_layer or layer).get("filter"),
         "paint": _section_properties(layer, "paint"),
         "layout": _section_properties(layer, "layout"),
         "qfit_preserves": _preserved_properties(original_layer=layer, simplified_layer=simplified_layer),
@@ -561,6 +582,83 @@ def _filter_expression_signature_group_summary(layers: list[dict[str, object]]) 
             key=lambda item: (-item[1], item[0][0], ", ".join(item[0][1])),
         )
     ]
+
+
+def _is_qfit_hidden_layer(layer: dict[str, object]) -> bool:
+    changes = layer.get("qfit_simplifies")
+    if not isinstance(changes, list):
+        return False
+    return any(
+        isinstance(change, dict)
+        and change.get("property") == "layout.visibility"
+        and change.get("to") == '"none"'
+        for change in changes
+    )
+
+
+def _is_source_hidden_layer(layer: dict[str, object]) -> bool:
+    layout = layer.get("layout")
+    return isinstance(layout, dict) and layout.get("visibility") == "none"
+
+
+def _is_label_density_candidate_layer(layer: dict[str, object]) -> bool:
+    layout = layer.get("layout")
+    return (
+        str(layer.get("type") or "") == "symbol"
+        and isinstance(layout, dict)
+        and "text-field" in layout
+        and not _is_source_hidden_layer(layer)
+        and not _is_qfit_hidden_layer(layer)
+    )
+
+
+def _qgis_filter_value(layer: dict[str, object]) -> object:
+    return layer.get("qgis_filter") if "qgis_filter" in layer else layer.get("filter")
+
+
+def _label_density_control_properties(layer: dict[str, object]) -> list[str]:
+    controls: list[str] = []
+    if _qgis_filter_value(layer) is not None:
+        controls.append("filter")
+    layout = layer.get("layout") if isinstance(layer.get("layout"), dict) else {}
+    for property_name in _LABEL_DENSITY_CONTROL_PROPERTIES:
+        if not property_name.startswith("layout."):
+            continue
+        _section, layout_property = property_name.split(".", 1)
+        if layout_property in layout:
+            controls.append(property_name)
+    return controls
+
+
+def _label_density_unresolved_controls(layer: dict[str, object]) -> list[str]:
+    controls = set(_label_density_control_properties(layer))
+    unresolved = layer.get("qfit_unresolved")
+    if not isinstance(unresolved, list):
+        return []
+    return sorted(
+        str(item.get("property"))
+        for item in unresolved
+        if isinstance(item, dict) and item.get("property") in controls
+    )
+
+
+def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_label_density_candidate_layer(layer):
+            continue
+        rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "group": str(layer.get("group") or "other"),
+                "source_layer": str(layer.get("source_layer") or ""),
+                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                "label_control_properties": _label_density_control_properties(layer),
+                "qgis_dependent_control_properties": _label_density_unresolved_controls(layer),
+            }
+        )
+    return sorted(rows, key=lambda row: (str(row["group"]), str(row["layer"])))
 
 
 def _warning_count_summary(warnings: list[str], *, by_layer: bool) -> list[dict[str, object]]:
@@ -2335,6 +2433,7 @@ def build_style_audit(
         for layer in style_definition.get("layers", [])
         if isinstance(layer, dict)
     ]
+    label_density_candidates = _label_density_candidate_rows(layers)
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
     audit = {
         "style": {
@@ -2358,6 +2457,8 @@ def build_style_audit(
             "qfit_unresolved_filter_expression_signatures_by_layer_group": (
                 _filter_expression_signature_group_summary(layers)
             ),
+            "label_density_candidates_by_layer_group": _count_rows_by_key(label_density_candidates, "group"),
+            "label_density_candidates": label_density_candidates,
         },
         "layers": layers,
     }
@@ -2512,6 +2613,29 @@ def _markdown_filter_signature_group_table(
                 operators=item.get("operator_signature", ""),
                 count=item.get("count", 0),
                 examples=examples or "—",
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_label_density_candidate_table(rows: list[dict[str, object]], *, empty: str = "—") -> list[str]:
+    if not rows:
+        return [empty, ""]
+    lines = [
+        "| Layer group | Layer | Source layer | Zoom | Filter operators | Label controls | QGIS-dependent controls |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            "| `{group}` | `{layer}` | `{source_layer}` | {zoom} | `{filter_operators}` | {controls} | {unresolved} |".format(
+                group=row.get("group", ""),
+                layer=row.get("layer", ""),
+                source_layer=row.get("source_layer", ""),
+                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
+                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                controls=_markdown_list(list(row.get("label_control_properties") or [])),
+                unresolved=_markdown_list(list(row.get("qgis_dependent_control_properties") or [])),
             )
         )
     lines.append("")
@@ -3827,6 +3951,19 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_filter_signature_group_table(
             list(summary.get("qfit_unresolved_filter_expression_signatures_by_layer_group") or [])
         ),
+        "### Label density candidates",
+        "",
+        (
+            "Visible symbol layers with text labels. Use this diagnostic with live screenshots before changing "
+            "label thinning, rank, or collision-related preprocessing."
+        ),
+        "",
+        *_markdown_named_count_table(
+            list(summary.get("label_density_candidates_by_layer_group") or []),
+            key="group",
+            label=_MARKDOWN_LAYER_GROUP_LABEL,
+        ),
+        *_markdown_label_density_candidate_table(list(summary.get("label_density_candidates") or [])),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
 
@@ -3845,7 +3982,7 @@ def _markdown_layer_row(layer_obj: dict[str, object]) -> str:
         layer=layer_label,
         group=layer_obj.get("group", "other"),
         source_filter=_markdown_source_filter(layer_obj),
-        zoom=layer_obj.get("zoom_band", "all zooms"),
+        zoom=layer_obj.get("zoom_band", _ALL_ZOOMS_BAND),
         preserved=_markdown_list(list(layer_obj.get("qfit_preserves") or [])),
         simplified=_markdown_change_list(list(layer_obj.get("qfit_simplifies") or [])),
         unresolved=_markdown_layer_unresolved(layer_obj),
