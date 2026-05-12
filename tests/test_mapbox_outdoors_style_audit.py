@@ -383,6 +383,115 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertNotIn("settlement-subdivision-label` |", markdown)
         self.assertNotIn("hidden-label` |", markdown)
 
+    def test_build_style_audit_reports_road_trail_hierarchy_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "road-primary",
+                        "type": "line",
+                        "source-layer": "road",
+                        "minzoom": 5,
+                        "filter": ["==", ["get", "class"], "primary"],
+                        "layout": {"line-cap": "round", "line-join": "round"},
+                        "paint": {
+                            "line-color": ["match", ["get", "class"], "primary", "#fff", "#ccc"],
+                            "line-dasharray": ["step", ["zoom"], ["literal", [1, 2]], 12, ["literal", [2, 2]]],
+                            "line-opacity": ["step", ["zoom"], 0, 10, 1],
+                            "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1, 12, 5],
+                        },
+                    },
+                    {
+                        "id": "road-pedestrian-polygon-fill",
+                        "type": "fill",
+                        "source-layer": "road",
+                        "paint": {
+                            "fill-color": ["match", ["get", "class"], "pedestrian", "#eee", "#fff"],
+                            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0, 16, 1],
+                        },
+                    },
+                    {
+                        "id": "hidden-road",
+                        "type": "line",
+                        "source-layer": "road",
+                        "layout": {"visibility": "none"},
+                        "paint": {"line-color": "#ccc"},
+                    },
+                    {
+                        "id": "poi-label",
+                        "type": "symbol",
+                        "source-layer": "poi_label",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["road_trail_hierarchy_candidates"]
+        self.assertEqual([candidate["layer"] for candidate in candidates], ["road-pedestrian-polygon-fill", "road-primary"])
+        fill_candidate, road_candidate = candidates
+        self.assertEqual(fill_candidate["type"], "fill")
+        self.assertEqual(fill_candidate["source_layer"], "road")
+        self.assertEqual(fill_candidate["filter_operator_signature"], "(none)")
+        self.assertEqual(fill_candidate["road_trail_control_properties"], ["paint.fill-color", "paint.fill-opacity"])
+        self.assertEqual(fill_candidate["qfit_simplified_control_properties"], ["paint.fill-color"])
+        self.assertEqual(fill_candidate["qgis_dependent_control_properties"], ["paint.fill-opacity"])
+        self.assertEqual(road_candidate["zoom_band"], "z≥5")
+        self.assertEqual(road_candidate["filter_operator_signature"], "==, get")
+        self.assertEqual(
+            road_candidate["road_trail_control_properties"],
+            [
+                "filter",
+                "layout.line-cap",
+                "layout.line-join",
+                "paint.line-color",
+                "paint.line-dasharray",
+                "paint.line-opacity",
+                "paint.line-width",
+            ],
+        )
+        self.assertEqual(
+            road_candidate["qfit_simplified_control_properties"],
+            ["paint.line-color", "paint.line-width"],
+        )
+        self.assertEqual(
+            road_candidate["qgis_dependent_control_properties"],
+            ["filter", "paint.line-dasharray", "paint.line-opacity"],
+        )
+        self.assertEqual(audit["summary"]["road_trail_hierarchy_candidates_by_source_layer"], [{"source_layer": "road", "count": 2}])
+        self.assertEqual(
+            audit["summary"]["road_trail_hierarchy_candidates_by_type"],
+            [{"type": "fill", "count": 1}, {"type": "line", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["road_trail_hierarchy_simplified_by_property"],
+            [
+                {"property": "paint.fill-color", "count": 1},
+                {"property": "paint.line-color", "count": 1},
+                {"property": "paint.line-width", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["road_trail_hierarchy_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 1},
+                {"property": "paint.fill-opacity", "count": 1},
+                {"property": "paint.line-dasharray", "count": 1},
+                {"property": "paint.line-opacity", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Road/trail hierarchy candidates", markdown)
+        self.assertIn("Visible road/trail line and fill layers", markdown)
+        self.assertIn("#### Road/trail hierarchy candidates QGIS-dependent controls", markdown)
+        self.assertIn("| `paint.line-width` | 1 |", markdown)
+        self.assertIn("| `road-primary` | `line` | `road` | z≥5 | `==, get` |", markdown)
+        self.assertIn("paint.line-color<br>paint.line-width", markdown)
+        self.assertIn("filter<br>paint.line-dasharray<br>paint.line-opacity", markdown)
+        self.assertNotIn("hidden-road` |", markdown)
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {

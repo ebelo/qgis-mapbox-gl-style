@@ -35,6 +35,14 @@ _LINE_DASHARRAY_EXPRESSION_COUNT_KEY = "line_dasharray_expression_count_replaced
 _SCALAR_SYMBOL_SPACING_PROBE_KEY = "with_scalar_symbol_spacing_probe"
 _SYMBOL_SPACING_EXPRESSION_COUNT_KEY = "symbol_spacing_expression_count_replaced"
 _SYMBOL_SPACING_REPLACED_LAYERS_KEY = "symbol_spacing_replaced_layers"
+_ROAD_TRAIL_HIERARCHY_CANDIDATES_KEY = "road_trail_hierarchy_candidates"
+_ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_SOURCE_LAYER_KEY = "road_trail_hierarchy_candidates_by_source_layer"
+_ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_TYPE_KEY = "road_trail_hierarchy_candidates_by_type"
+_ROAD_TRAIL_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY = "road_trail_hierarchy_simplified_by_property"
+_ROAD_TRAIL_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY = "road_trail_hierarchy_qgis_dependent_by_property"
+_ROAD_TRAIL_CONTROL_PROPERTIES_KEY = "road_trail_control_properties"
+_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY = "qfit_simplified_control_properties"
+_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY = "qgis_dependent_control_properties"
 _PROPERTY_REMOVAL_IMPACT_PROBE_KEY = "property_removal_impact_probe"
 _FILTER_PARSE_SUPPORT_PROBE_KEY = "filter_expression_parse_support_probe"
 _FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE = "Skipping unsupported expression"
@@ -65,6 +73,27 @@ _LABEL_DENSITY_CONTROL_PROPERTIES = (
     "layout.text-radial-offset",
     "layout.text-size",
     "layout.text-variable-anchor",
+)
+_ROAD_TRAIL_HIERARCHY_LAYER_TYPES = frozenset({"fill", "line"})
+_ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES = (
+    "layout.line-cap",
+    "layout.line-join",
+    "layout.line-miter-limit",
+    "layout.line-round-limit",
+    "layout.line-sort-key",
+    "paint.fill-color",
+    "paint.fill-opacity",
+    "paint.fill-outline-color",
+    "paint.fill-pattern",
+    "paint.line-blur",
+    "paint.line-color",
+    "paint.line-dasharray",
+    "paint.line-gap-width",
+    "paint.line-offset",
+    "paint.line-opacity",
+    "paint.line-pattern",
+    "paint.line-translate",
+    "paint.line-width",
 )
 
 if str(PACKAGE_PARENT) not in sys.path:
@@ -616,18 +645,31 @@ def _qgis_filter_value(layer: dict[str, object]) -> object:
     return layer.get("qgis_filter") if "qgis_filter" in layer else layer.get("filter")
 
 
-def _label_density_control_properties(layer: dict[str, object]) -> list[str]:
+def _control_properties(
+    layer: dict[str, object],
+    property_names: tuple[str, ...],
+    *,
+    include_filter: bool,
+) -> list[str]:
     controls: list[str] = []
-    if _qgis_filter_value(layer) is not None:
+    if include_filter and _qgis_filter_value(layer) is not None:
         controls.append("filter")
-    layout = layer.get("layout") if isinstance(layer.get("layout"), dict) else {}
-    for property_name in _LABEL_DENSITY_CONTROL_PROPERTIES:
-        if not property_name.startswith("layout."):
+    sections = {
+        section: layer.get(section) if isinstance(layer.get(section), dict) else {}
+        for section in _SYMBOLOGY_SECTIONS
+    }
+    for property_name in property_names:
+        if "." not in property_name:
             continue
-        _section, layout_property = property_name.split(".", 1)
-        if layout_property in layout:
+        section, section_property = property_name.split(".", 1)
+        section_values = sections.get(section)
+        if isinstance(section_values, dict) and section_property in section_values:
             controls.append(property_name)
     return controls
+
+
+def _label_density_control_properties(layer: dict[str, object]) -> list[str]:
+    return _control_properties(layer, _LABEL_DENSITY_CONTROL_PROPERTIES, include_filter=True)
 
 
 def _label_density_unresolved_controls(layer: dict[str, object]) -> list[str]:
@@ -640,6 +682,65 @@ def _label_density_unresolved_controls(layer: dict[str, object]) -> list[str]:
         for item in unresolved
         if isinstance(item, dict) and item.get("property") in controls
     )
+
+
+def _is_road_trail_hierarchy_candidate_layer(layer: dict[str, object]) -> bool:
+    return (
+        str(layer.get("group") or "") == "roads/trails"
+        and str(layer.get("type") or "") in _ROAD_TRAIL_HIERARCHY_LAYER_TYPES
+        and not _is_source_hidden_layer(layer)
+        and not _is_qfit_hidden_layer(layer)
+    )
+
+
+def _road_trail_hierarchy_control_properties(layer: dict[str, object]) -> list[str]:
+    return _control_properties(layer, _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES, include_filter=True)
+
+
+def _qfit_simplified_control_properties(layer: dict[str, object], controls: set[str]) -> list[str]:
+    simplified = layer.get("qfit_simplifies")
+    if not isinstance(simplified, list):
+        return []
+    return sorted(
+        str(item.get("property"))
+        for item in simplified
+        if isinstance(item, dict) and item.get("property") in controls
+    )
+
+
+def _qgis_dependent_control_properties(layer: dict[str, object], controls: set[str]) -> list[str]:
+    unresolved = layer.get("qfit_unresolved")
+    if not isinstance(unresolved, list):
+        return []
+    return sorted(
+        str(item.get("property"))
+        for item in unresolved
+        if isinstance(item, dict) and item.get("property") in controls
+    )
+
+
+def _road_trail_hierarchy_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_road_trail_hierarchy_candidate_layer(layer):
+            continue
+        controls = _road_trail_hierarchy_control_properties(layer)
+        if not controls:
+            continue
+        control_set = set(controls)
+        rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "type": str(layer.get("type") or ""),
+                "source_layer": str(layer.get("source_layer") or ""),
+                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                _ROAD_TRAIL_CONTROL_PROPERTIES_KEY: controls,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
+            }
+        )
+    return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
 
 
 def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -655,7 +756,7 @@ def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[
                 "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
                 "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
                 "label_control_properties": _label_density_control_properties(layer),
-                "qgis_dependent_control_properties": _label_density_unresolved_controls(layer),
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _label_density_unresolved_controls(layer),
             }
         )
     return sorted(rows, key=lambda row: (str(row["group"]), str(row["layer"])))
@@ -1018,6 +1119,20 @@ def _count_rows_by_key(rows: list[dict[str, object]], key: str) -> list[dict[str
     counts = Counter(str(row.get(key) or "") for row in rows)
     return [
         {key: name, "count": count}
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        if name
+    ]
+
+
+def _count_row_values(rows: list[dict[str, object]], key: str) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        values = row.get(key)
+        if not isinstance(values, list):
+            continue
+        counts.update(str(value) for value in values if value)
+    return [
+        {"property": name, "count": count}
         for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
         if name
     ]
@@ -2434,6 +2549,7 @@ def build_style_audit(
         if isinstance(layer, dict)
     ]
     label_density_candidates = _label_density_candidate_rows(layers)
+    road_trail_hierarchy_candidates = _road_trail_hierarchy_candidate_rows(layers)
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
     audit = {
         "style": {
@@ -2459,6 +2575,23 @@ def build_style_audit(
             ),
             "label_density_candidates_by_layer_group": _count_rows_by_key(label_density_candidates, "group"),
             "label_density_candidates": label_density_candidates,
+            _ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
+                road_trail_hierarchy_candidates,
+                "source_layer",
+            ),
+            _ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_TYPE_KEY: _count_rows_by_key(
+                road_trail_hierarchy_candidates,
+                "type",
+            ),
+            _ROAD_TRAIL_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY: _count_row_values(
+                road_trail_hierarchy_candidates,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY,
+            ),
+            _ROAD_TRAIL_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                road_trail_hierarchy_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
+            _ROAD_TRAIL_HIERARCHY_CANDIDATES_KEY: road_trail_hierarchy_candidates,
         },
         "layers": layers,
     }
@@ -2635,7 +2768,41 @@ def _markdown_label_density_candidate_table(rows: list[dict[str, object]], *, em
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
                 filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get("label_control_properties") or [])),
-                unresolved=_markdown_list(list(row.get("qgis_dependent_control_properties") or [])),
+                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_road_trail_hierarchy_candidate_table(
+    rows: list[dict[str, object]],
+    *,
+    empty: str = "—",
+) -> list[str]:
+    if not rows:
+        return [empty, ""]
+    lines = [
+        (
+            "| Layer | Type | Source layer | Zoom | Filter operators | Road/trail controls | "
+            "Simplified/substituted by qfit | QGIS-dependent controls |"
+        ),
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            (
+                "| `{layer}` | `{layer_type}` | `{source_layer}` | {zoom} | `{filter_operators}` | "
+                "{controls} | {simplified} | {unresolved} |"
+            ).format(
+                layer=row.get("layer", ""),
+                layer_type=row.get("type", ""),
+                source_layer=row.get("source_layer", ""),
+                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
+                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                controls=_markdown_list(list(row.get(_ROAD_TRAIL_CONTROL_PROPERTIES_KEY) or [])),
+                simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
+                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
             )
         )
     lines.append("")
@@ -3964,6 +4131,32 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
             label=_MARKDOWN_LAYER_GROUP_LABEL,
         ),
         *_markdown_label_density_candidate_table(list(summary.get("label_density_candidates") or [])),
+        "### Road/trail hierarchy candidates",
+        "",
+        (
+            "Visible road/trail line and fill layers. Use this diagnostic with live screenshots before changing "
+            "road, path, casing, dash, opacity, or class-hierarchy preprocessing."
+        ),
+        "",
+        *_markdown_named_count_table(
+            list(summary.get(_ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_SOURCE_LAYER_KEY) or []),
+            key="source_layer",
+            label="Source layer",
+        ),
+        *_markdown_named_count_table(
+            list(summary.get(_ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_TYPE_KEY) or []),
+            key="type",
+            label="Layer type",
+        ),
+        "#### Road/trail hierarchy candidates simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(list(summary.get(_ROAD_TRAIL_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY) or [])),
+        "#### Road/trail hierarchy candidates QGIS-dependent controls",
+        "",
+        *_markdown_count_table(list(summary.get(_ROAD_TRAIL_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY) or [])),
+        *_markdown_road_trail_hierarchy_candidate_table(
+            list(summary.get(_ROAD_TRAIL_HIERARCHY_CANDIDATES_KEY) or [])
+        ),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
 
