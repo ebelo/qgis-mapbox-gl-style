@@ -445,6 +445,36 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIs(report_mock.call_args.kwargs["raw_style"], SAMPLE_STYLE)
         self.assertIsInstance(report_mock.call_args.kwargs["qfit_preprocessed_style"], dict)
         self.assertFalse(report_mock.call_args.kwargs["include_property_removal_impact"])
+        self.assertFalse(report_mock.call_args.kwargs["include_filter_parse_support"])
+
+    def test_build_style_audit_filter_parse_support_flag_implies_converter_warning_report(self):
+        warning_report = {
+            "raw": {"count": 0, "warnings": []},
+            "qfit_preprocessed": {"count": 0, "warnings": []},
+            "warning_count_delta": 0,
+            "reduced_by_qfit": {},
+            "filter_expression_parse_support_probe": {
+                "filter_expression_count": 1,
+                "qgis_parser_supported_count": 0,
+                "qgis_parser_unsupported_count": 1,
+                "unsupported_by_layer_group": [{"group": "pois/labels", "count": 1}],
+                "unsupported_by_layer_group_and_operator_signature": [],
+                "unsupported_layers": [],
+            },
+        }
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_qgis_converter_warning_report",
+            return_value=warning_report,
+        ) as report_mock:
+            audit = build_style_audit(
+                SAMPLE_STYLE,
+                config=StyleAuditConfig(include_qgis_filter_parse_support=True),
+            )
+
+        self.assertIs(audit["qgis_converter_warnings"], warning_report)
+        self.assertFalse(report_mock.call_args.kwargs["include_property_removal_impact"])
+        self.assertTrue(report_mock.call_args.kwargs["include_filter_parse_support"])
 
     def test_qgis_warning_summary_counts_by_message_and_layer(self):
         summary = mapbox_outdoors_style_audit._qgis_warning_summary(
@@ -471,6 +501,19 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 {"layer": "poi-label", "count": 2},
                 {"layer": "road-primary", "count": 1},
             ],
+        )
+
+    def test_filter_parse_unsupported_warning_count_handles_colon_in_layer_id(self):
+        self.assertEqual(
+            mapbox_outdoors_style_audit._filter_parse_unsupported_warning_count(
+                [
+                    "admin: label: Skipping unsupported expression",
+                    'admin: label: Skipping unsupported expression "within"',
+                    'road-label: Skipping unsupported expression part "case"',
+                    "road-label: Could not retrieve sprite 'park'",
+                ]
+            ),
+            3,
         )
 
     def test_property_removal_impact_probe_ranks_expression_property_warning_deltas(self):
@@ -1354,6 +1397,117 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["with_scalar_symbol_spacing_probe"]["summary"]["warnings"], ["symbol spacing warning"])
         self.assertEqual(fake_app.created, [])
 
+    def test_qgis_converter_warning_report_can_include_filter_parse_support_probe(self):
+        raw_style = {"version": 8, "sources": {"composite": {"type": "vector"}}, "layers": []}
+        qfit_style = {
+            "version": 8,
+            "sources": {"composite": {"type": "vector"}},
+            "layers": [
+                {
+                    "id": "road-primary",
+                    "type": "line",
+                    "source": "composite",
+                    "source-layer": "road",
+                    "filter": ["all", [">", ["get", "len"], 0], ["==", ["geometry-type"], "LineString"]],
+                    "paint": {"line-color": "#ffffff", "line-width": 1},
+                },
+                {
+                    "id": "poi-label",
+                    "type": "symbol",
+                    "source": "composite",
+                    "source-layer": "poi_label",
+                    "filter": ["case", ["==", ["get", "class"], "park"], True, False],
+                    "layout": {"icon-image": ["get", "maki"]},
+                },
+                {
+                    "id": "legacy-filter",
+                    "type": "line",
+                    "source": "composite",
+                    "source-layer": "road",
+                    "filter": ["none", ["!has", "reflen"], ["!in", "class", "path"]],
+                    "paint": {"line-color": "#ffffff", "line-width": 1},
+                },
+            ],
+        }
+        fake_qgis, fake_core, _fake_app, fake_converter = _fake_qgis_modules(
+            [
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                [],
+                ["poi-label: Skipping unsupported expression", "poi-label: Some other warning"],
+                [],
+            ]
+        )
+
+        with patch.dict(sys.modules, {"qgis": fake_qgis, "qgis.core": fake_core}):
+            report = mapbox_outdoors_style_audit._qgis_converter_warning_report(
+                raw_style=raw_style,
+                qfit_preprocessed_style=qfit_style,
+                include_filter_parse_support=True,
+            )
+
+        probe = report["filter_expression_parse_support_probe"]
+        self.assertEqual(probe["filter_expression_count"], 3)
+        self.assertEqual(probe["qgis_parser_supported_count"], 2)
+        self.assertEqual(probe["qgis_parser_unsupported_count"], 1)
+        self.assertEqual(probe["unsupported_by_layer_group"], [{"group": "pois/labels", "count": 1}])
+        self.assertEqual(
+            probe["unsupported_by_layer_group_and_operator_signature"],
+            [
+                {
+                    "group": "pois/labels",
+                    "operator_signature": "==, case, get",
+                    "count": 1,
+                    "example_layers": ["poi-label"],
+                }
+            ],
+        )
+        self.assertEqual(probe["unsupported_layers"][0]["layer"], "poi-label")
+        self.assertEqual(probe["unsupported_layers"][0]["unsupported_warning_count"], 1)
+        self.assertFalse(probe["unsupported_layers"][0]["supported_by_qgis_parser"])
+        self.assertEqual(
+            probe["unsupported_layers"][0]["warnings"],
+            ["poi-label: Skipping unsupported expression", "poi-label: Some other warning"],
+        )
+        self.assertEqual(
+            fake_converter.converted_styles[7],
+            {
+                "version": 8,
+                "sources": {"composite": {"type": "vector"}},
+                "layers": [
+                    {
+                        "id": "road-primary",
+                        "type": "line",
+                        "filter": [
+                            "all",
+                            [">", ["get", "len"], 0],
+                            ["==", ["geometry-type"], "LineString"],
+                        ],
+                        "source": "composite",
+                        "source-layer": "road",
+                        "paint": {"line-color": "#000000", "line-width": 1},
+                    }
+                ],
+            },
+        )
+        self.assertEqual(fake_converter.converted_styles[8]["layers"][0]["layout"]["text-field"], "filter-probe")
+        self.assertNotIn("icon-image", fake_converter.converted_styles[8]["layers"][0]["layout"])
+        self.assertEqual(
+            fake_converter.converted_styles[9]["layers"][0]["filter"],
+            ["none", ["!has", "reflen"], ["!in", "class", "path"]],
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._operator_signature(
+                fake_converter.converted_styles[9]["layers"][0]["filter"]
+            ),
+            "!has, !in, none",
+        )
+
     def test_qgis_converter_warning_report_can_include_sprite_context_probe(self):
         class FakeQImage:
             Format_ARGB32 = "argb32"
@@ -1768,6 +1922,32 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     },
                 ],
             },
+            "filter_expression_parse_support_probe": {
+                "filter_expression_count": 2,
+                "qgis_parser_supported_count": 1,
+                "qgis_parser_unsupported_count": 1,
+                "unsupported_by_layer_group": [{"group": "pois/labels", "count": 1}],
+                "unsupported_by_layer_group_and_operator_signature": [
+                    {
+                        "group": "pois/labels",
+                        "operator_signature": "==, case, get",
+                        "count": 1,
+                        "example_layers": ["poi-label"],
+                    }
+                ],
+                "unsupported_layers": [
+                    {
+                        "layer": "poi-label",
+                        "group": "pois/labels",
+                        "type": "symbol",
+                        "source_layer": "poi_label",
+                        "operator_signature": "==, case, get",
+                        "unsupported_warning_count": 1,
+                        "supported_by_qgis_parser": False,
+                        "filter": ["case", ["==", ["get", "class"], "park"], True, False],
+                    }
+                ],
+            },
             "without_filters_probe": {
                 "filter_count_removed": 1,
                 "summary": {
@@ -2052,6 +2232,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
         self.assertIn("##### Remaining probe warning layers by layer group and unresolved qfit property", markdown)
         self.assertIn("| `pois/labels` | `layout.text-font` | 1 |", markdown)
+        self.assertIn("#### Diagnostic filter parser support probe", markdown)
+        self.assertIn("Filter expressions tested: 2", markdown)
+        self.assertIn("Accepted by the QGIS parser probe: 1", markdown)
+        self.assertIn("Rejected by the QGIS parser probe: 1", markdown)
+        self.assertIn("##### Unsupported filter probes by layer group", markdown)
+        self.assertIn("| `pois/labels` | 1 |", markdown)
+        self.assertIn("##### Unsupported filter probes by layer group and operators", markdown)
+        self.assertIn("| `pois/labels` | `==, case, get` | 1 | `poi-label` |", markdown)
+        self.assertIn("##### Unsupported filter probe layers", markdown)
+        self.assertIn("| `poi-label` | `pois/labels` | `symbol / poi_label` | `==, case, get` | 1 |", markdown)
+        self.assertIn('<code>["case",["==",["get","class"],"park"],true,false]</code>', markdown)
         self.assertIn("#### Diagnostic icon-image removal probe", markdown)
         self.assertIn("Icon images removed in probe: 1", markdown)
         self.assertIn("Warnings after removing icon images: 1", markdown)
@@ -2203,6 +2394,34 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertTrue(config.include_qgis_converter_warnings)
         self.assertTrue(config.include_qgis_property_removal_impact)
 
+    def test_main_filter_parse_support_flag_implies_qgis_warning_audit(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            style_path = Path(tmp_dir) / "style.json"
+            style_path.write_text(json.dumps(SAMPLE_STYLE), encoding="utf-8")
+            audit = {
+                "style": {"label": "mapbox/outdoors-v12"},
+                "generated_at": "2026-05-12T10:05:00+00:00",
+                "layer_count": 0,
+                "summary": {},
+                "layers": [],
+            }
+
+            with patch.object(mapbox_outdoors_style_audit, "DEFAULT_OUTPUT_ROOT", Path(tmp_dir)), patch.object(
+                mapbox_outdoors_style_audit,
+                "build_style_audit",
+                return_value=audit,
+            ) as build_audit, patch("builtins.print"):
+                result = main([
+                    "--style-json",
+                    str(style_path),
+                    "--include-qgis-filter-parse-support",
+                ])
+
+        self.assertEqual(result, 0)
+        config = build_audit.call_args.kwargs["config"]
+        self.assertTrue(config.include_qgis_converter_warnings)
+        self.assertTrue(config.include_qgis_filter_parse_support)
+
     def test_main_fetches_sprite_resources_for_live_qgis_warning_audit(self):
         style_definition = {"version": 8, "sprite": "mapbox://sprites/shared-owner/shared-style", "layers": []}
         sprite_resources = MapboxSpriteResources(definitions={"park": {"x": 0}}, image_bytes=b"png-bytes")
@@ -2253,6 +2472,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "json",
                 "--include-qgis-converter-warnings",
                 "--include-qgis-property-removal-impact",
+                "--include-qgis-filter-parse-support",
             ]
         )
 
@@ -2260,6 +2480,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(args.format, "json")
         self.assertTrue(args.include_qgis_converter_warnings)
         self.assertTrue(args.include_qgis_property_removal_impact)
+        self.assertTrue(args.include_qgis_filter_parse_support)
 
 
 if __name__ == "__main__":

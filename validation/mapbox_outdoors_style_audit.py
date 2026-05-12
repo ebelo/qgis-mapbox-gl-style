@@ -35,6 +35,15 @@ _SCALAR_SYMBOL_SPACING_PROBE_KEY = "with_scalar_symbol_spacing_probe"
 _SYMBOL_SPACING_EXPRESSION_COUNT_KEY = "symbol_spacing_expression_count_replaced"
 _SYMBOL_SPACING_REPLACED_LAYERS_KEY = "symbol_spacing_replaced_layers"
 _PROPERTY_REMOVAL_IMPACT_PROBE_KEY = "property_removal_impact_probe"
+_FILTER_PARSE_SUPPORT_PROBE_KEY = "filter_expression_parse_support_probe"
+_FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE = "Skipping unsupported expression"
+_FILTER_PARSE_UNSUPPORTED_EXPRESSION_PART_MESSAGE = f"{_FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE} part"
+_FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER = (
+    _FILTER_PARSE_UNSUPPORTED_EXPRESSION_PART_MESSAGE,
+    _FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE,
+)
+_FILTER_PARSE_UNSUPPORTED_MESSAGES = frozenset(_FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER)
+_NO_OPERATOR_SIGNATURE = "(none)"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -169,6 +178,8 @@ _MAPBOX_EXPRESSION_OPERATORS = frozenset(
         "zoom",
     }
 )
+_LEGACY_MAPBOX_FILTER_OPERATORS = frozenset({"!has", "!in", "none"})
+_MAPBOX_FILTER_OPERATORS = _MAPBOX_EXPRESSION_OPERATORS | _LEGACY_MAPBOX_FILTER_OPERATORS
 
 
 @dataclass(frozen=True)
@@ -178,6 +189,7 @@ class StyleAuditConfig:
     generated_at: dt.datetime | None = None
     include_qgis_converter_warnings: bool = False
     include_qgis_property_removal_impact: bool = False
+    include_qgis_filter_parse_support: bool = False
     sprite_resources: MapboxSpriteResources | None = None
 
 
@@ -538,7 +550,7 @@ def _filter_expression_signature_group_summary(layers: list[dict[str, object]]) 
         {
             "group": group,
             "operators": list(operators),
-            "operator_signature": ", ".join(operators) or "(none)",
+            "operator_signature": ", ".join(operators) or _NO_OPERATOR_SIGNATURE,
             "count": count,
             "example_layers": example_layers[(group, operators)],
         }
@@ -574,6 +586,178 @@ def _qgis_warning_summary(warnings: list[str]) -> dict[str, object]:
         "by_message": _warning_count_summary(warnings, by_layer=False),
         "by_layer": _warning_count_summary(warnings, by_layer=True),
         "warnings": warnings,
+    }
+
+
+def _warning_message_matches(warning: str, message: str) -> bool:
+    message_after_layer = f": {message}"
+    return (
+        warning == message
+        or warning.startswith(f"{message} ")
+        or warning.endswith(message_after_layer)
+        or f"{message_after_layer} " in warning
+    )
+
+
+def _warning_message(warning: str) -> str:
+    for unsupported_message in _FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER:
+        if _warning_message_matches(warning, unsupported_message):
+            return unsupported_message
+    _layer, separator, message = warning.rpartition(": ")
+    return message if separator else warning
+
+
+def _filter_parse_unsupported_warning_count(warnings: list[str]) -> int:
+    return sum(1 for warning in warnings if _warning_message(warning) in _FILTER_PARSE_UNSUPPORTED_MESSAGES)
+
+
+def _minimal_filter_probe_layer(layer: dict[str, object]) -> dict[str, object]:
+    layer_type = str(layer.get("type") or "")
+    probe_layer: dict[str, object] = {
+        "id": str(layer.get("id") or "filter-probe"),
+        "type": layer_type,
+        "filter": layer.get("filter"),
+    }
+    for key in ("source", "source-layer", "minzoom", "maxzoom"):
+        if key in layer:
+            probe_layer[key] = layer[key]
+
+    if layer_type == "fill":
+        probe_layer["paint"] = {"fill-color": "#000000"}
+    elif layer_type == "line":
+        probe_layer["paint"] = {"line-color": "#000000", "line-width": 1}
+    elif layer_type == "circle":
+        probe_layer["paint"] = {"circle-color": "#000000", "circle-radius": 1}
+    elif layer_type == "symbol":
+        probe_layer["layout"] = {"text-field": "filter-probe", "text-size": 12}
+        probe_layer["paint"] = {"text-color": "#000000"}
+    else:
+        # raster, fill-extrusion, heatmap, background, sky: no standard same-type
+        # paint stub is available. The probe only treats unsupported-expression
+        # messages as filter parser failures, so unrelated converter warnings from
+        # uncommon layer types do not inflate unsupported filter counts.
+        pass
+    return probe_layer
+
+
+def _filter_probe_style(style_definition: dict[str, object], layer: dict[str, object]) -> dict[str, object]:
+    return {
+        "version": style_definition.get("version", 8),
+        "sources": copy.deepcopy(style_definition.get("sources", {})),
+        "layers": [_minimal_filter_probe_layer(layer)],
+    }
+
+
+def _filter_operator_names(value: object) -> list[str]:
+    operators: set[str] = set()
+
+    def visit(candidate: object) -> None:
+        if not isinstance(candidate, list) or not candidate:
+            return
+        operator = candidate[0]
+        if isinstance(operator, str) and operator in _MAPBOX_FILTER_OPERATORS:
+            operators.add(operator)
+            children = [] if operator == "literal" else candidate[1:]
+        else:
+            children = candidate
+        for child in children:
+            visit(child)
+
+    visit(value)
+    return sorted(operators)
+
+
+def _operator_signature(value: object) -> str:
+    return ", ".join(_filter_operator_names(value)) or _NO_OPERATOR_SIGNATURE
+
+
+def _count_rows_by_key(rows: list[dict[str, object]], key: str) -> list[dict[str, object]]:
+    counts = Counter(str(row.get(key) or "") for row in rows)
+    return [
+        {key: name, "count": count}
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        if name
+    ]
+
+
+def _filter_parse_signature_summary(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    counts: Counter[tuple[str, str]] = Counter()
+    examples: dict[tuple[str, str], list[str]] = {}
+    for row in rows:
+        key = (str(row.get("group") or "other"), str(row.get("operator_signature") or _NO_OPERATOR_SIGNATURE))
+        counts[key] += 1
+        layer_id = str(row.get("layer") or "")
+        if layer_id:
+            examples.setdefault(key, [])
+            if len(examples[key]) < 5:
+                examples[key].append(layer_id)
+    return [
+        {
+            "group": group,
+            "operator_signature": signature,
+            "count": count,
+            "example_layers": examples.get((group, signature), []),
+        }
+        for (group, signature), count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )
+    ]
+
+
+def _iter_filter_probe_layers(style_definition: dict[str, object]) -> Iterable[tuple[dict[str, object], list[object]]]:
+    layers = style_definition.get("layers")
+    if not isinstance(layers, list):
+        return
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        filter_value = layer.get("filter")
+        if isinstance(filter_value, list):
+            yield layer, filter_value
+
+
+def _filter_parse_support_row(
+    style_definition: dict[str, object],
+    layer: dict[str, object],
+    filter_value: list[object],
+) -> dict[str, object]:
+    warnings = _collect_qgis_converter_warnings(_filter_probe_style(style_definition, layer))
+    unsupported_warning_count = _filter_parse_unsupported_warning_count(warnings)
+    return {
+        "layer": str(layer.get("id") or ""),
+        "group": _layer_group(layer),
+        "type": str(layer.get("type") or ""),
+        "source_layer": str(layer.get("source-layer") or ""),
+        "operator_signature": _operator_signature(filter_value),
+        "unsupported_warning_count": unsupported_warning_count,
+        "supported_by_qgis_parser": unsupported_warning_count == 0,
+        "warnings": warnings,
+        "filter": filter_value,
+    }
+
+
+def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> dict[str, object]:
+    rows = [
+        _filter_parse_support_row(style_definition, layer, filter_value)
+        for layer, filter_value in _iter_filter_probe_layers(style_definition)
+    ]
+    unsupported_rows = [row for row in rows if int(row.get("unsupported_warning_count") or 0) > 0]
+    supported_count = len(rows) - len(unsupported_rows)
+    return {
+        "filter_expression_count": len(rows),
+        "qgis_parser_supported_count": supported_count,
+        "qgis_parser_unsupported_count": len(unsupported_rows),
+        "unsupported_by_layer_group": _count_rows_by_key(unsupported_rows, "group"),
+        "unsupported_by_layer_group_and_operator_signature": _filter_parse_signature_summary(unsupported_rows),
+        "unsupported_layers": sorted(
+            unsupported_rows,
+            key=lambda row: (
+                -int(row.get("unsupported_warning_count") or 0),
+                str(row.get("group") or ""),
+                str(row.get("layer") or ""),
+            ),
+        ),
     }
 
 
@@ -1044,7 +1228,7 @@ def _qgis_property_removal_impact_report(
 ) -> dict[str, object]:
     """Remove one expression property at a time to rank residual converter-warning causes."""
     qfit_warning_count = int(qfit_summary.get("count") or 0)
-    qfit_skipping_count = _warning_count_for_message(qfit_summary, "Skipping unsupported expression")
+    qfit_skipping_count = _warning_count_for_message(qfit_summary, _FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE)
     layer_groups = _layer_groups_by_id(qfit_preprocessed_style)
     rows: list[dict[str, object]] = []
     for property_path in property_paths or _removable_expression_property_paths(qfit_preprocessed_style):
@@ -1069,7 +1253,7 @@ def _qgis_property_removal_impact_report(
                 "warning_count_after_removal": stripped_warning_count,
                 "warning_count_delta_from_qfit": qfit_warning_count - stripped_warning_count,
                 "skipping_unsupported_expression_delta": qfit_skipping_count
-                - _warning_count_for_message(stripped_summary, "Skipping unsupported expression"),
+                - _warning_count_for_message(stripped_summary, _FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE),
                 "reduced_from_qfit": {
                     "by_message": _warning_reduction_summary(
                         list(qfit_summary.get("by_message") or []),
@@ -1354,6 +1538,7 @@ def _qgis_converter_warning_report(
     qfit_preprocessed_style: dict[str, object],
     sprite_resources: MapboxSpriteResources | None = None,
     include_property_removal_impact: bool = False,
+    include_filter_parse_support: bool = False,
 ) -> dict[str, object]:
     # Converter-only audits do not render, but headless environments can still abort when Qt
     # defaults to xcb. Prefer offscreen unless the caller explicitly chose another platform.
@@ -1392,6 +1577,9 @@ def _qgis_converter_warning_report(
                 qfit_preprocessed_style,
                 _qgis_warning_summary(qfit_warnings),
             )
+        filter_parse_support = None
+        if include_filter_parse_support:
+            filter_parse_support = _qgis_filter_parse_support_report(qfit_preprocessed_style)
         sprite_image_loaded = None
         if sprite_resources is not None:
             sprite_context_warnings, sprite_image_loaded = _collect_qgis_converter_warnings_with_sprite_context(
@@ -1449,6 +1637,8 @@ def _qgis_converter_warning_report(
     }
     if property_removal_impact is not None:
         report[_PROPERTY_REMOVAL_IMPACT_PROBE_KEY] = property_removal_impact
+    if filter_parse_support is not None:
+        report[_FILTER_PARSE_SUPPORT_PROBE_KEY] = filter_parse_support
     if sprite_context_warnings is not None:
         sprite_context_summary = _qgis_warning_summary(sprite_context_warnings)
         report[_SPRITE_CONTEXT_PROBE_KEY] = {
@@ -1505,12 +1695,17 @@ def build_style_audit(
         },
         "layers": layers,
     }
-    if resolved_config.include_qgis_converter_warnings or resolved_config.include_qgis_property_removal_impact:
+    if (
+        resolved_config.include_qgis_converter_warnings
+        or resolved_config.include_qgis_property_removal_impact
+        or resolved_config.include_qgis_filter_parse_support
+    ):
         warning_report = _qgis_converter_warning_report(
             raw_style=style_definition,
             qfit_preprocessed_style=simplified_style,
             sprite_resources=resolved_config.sprite_resources,
             include_property_removal_impact=resolved_config.include_qgis_property_removal_impact,
+            include_filter_parse_support=resolved_config.include_qgis_filter_parse_support,
         )
         _annotate_qgis_warning_group_summaries(layers, warning_report)
         audit["qgis_converter_warnings"] = warning_report
@@ -1633,12 +1828,13 @@ def _markdown_group_expression_operator_table(
 def _markdown_filter_signature_group_table(
     items: list[dict[str, object]],
     *,
+    count_label: str = "# Layers",
     empty: str = "—",
 ) -> list[str]:
     if not items:
         return [empty, ""]
     lines = [
-        "| Layer group | Operators | # Layers | Example layers |",
+        f"| Layer group | Operators | {count_label} | Example layers |",
         "| --- | --- | ---: | --- |",
     ]
     for item in items:
@@ -2236,6 +2432,75 @@ def _markdown_property_removal_impact_probe(probe: object) -> list[str]:
     ]
 
 
+def _markdown_filter_parse_unsupported_layer_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    shown_rows = rows[:limit]
+    lines = [
+        "| Layer | Group | Type/source-layer | Operators | Unsupported warnings | Filter |",
+        "| --- | --- | --- | --- | ---: | --- |",
+    ]
+    for row in shown_rows:
+        layer_type = str(row.get("type") or "")
+        source_layer = str(row.get("source_layer") or "")
+        type_source = f"{layer_type} / {source_layer}" if source_layer else layer_type
+        lines.append(
+            "| `{layer}` | `{group}` | `{type_source}` | `{operators}` | {warnings} | {filter_value} |".format(
+                layer=row.get("layer", ""),
+                group=row.get("group", ""),
+                type_source=type_source,
+                operators=row.get("operator_signature", ""),
+                warnings=row.get("unsupported_warning_count", 0),
+                filter_value=_markdown_code_cell(_compact_json(row.get("filter"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | … | {len(rows) - limit} more unsupported filter layers omitted |")
+    lines.append("")
+    return lines
+
+
+def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    unsupported_rows = list(probe.get("unsupported_layers") or [])
+    return [
+        "#### Diagnostic filter parser support probe",
+        "",
+        (
+            "This isolates each remaining qfit-preprocessed filter in a minimal same-type "
+            "QGIS converter style to distinguish filters the QGIS parser accepts from "
+            "filters that directly trigger unsupported-expression warnings. It is not a "
+            "rendering-safe qfit preprocessing mode."
+        ),
+        "",
+        f"Filter expressions tested: {probe.get('filter_expression_count', 0)}",
+        f"Accepted by the QGIS parser probe: {probe.get('qgis_parser_supported_count', 0)}",
+        f"Rejected by the QGIS parser probe: {probe.get('qgis_parser_unsupported_count', 0)}",
+        "",
+        "##### Unsupported filter probes by layer group",
+        "",
+        *_markdown_named_count_table(
+            list(probe.get("unsupported_by_layer_group") or []),
+            key="group",
+            label=_MARKDOWN_LAYER_GROUP_LABEL,
+        ),
+        "##### Unsupported filter probes by layer group and operators",
+        "",
+        *_markdown_filter_signature_group_table(
+            list(probe.get("unsupported_by_layer_group_and_operator_signature") or []),
+            count_label="Unsupported filters",
+        ),
+        "##### Unsupported filter probe layers",
+        "",
+        *_markdown_filter_parse_unsupported_layer_table(unsupported_rows),
+    ]
+
+
 def _markdown_sprite_context_probe(probe: object) -> list[str]:
     if not isinstance(probe, dict):
         return []
@@ -2342,6 +2607,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     line_dasharray_probe = report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY)
     symbol_spacing_probe = report.get(_SCALAR_SYMBOL_SPACING_PROBE_KEY)
     property_removal_impact_probe = report.get(_PROPERTY_REMOVAL_IMPACT_PROBE_KEY)
+    filter_parse_support_probe = report.get(_FILTER_PARSE_SUPPORT_PROBE_KEY)
     sprite_context_probe = report.get(_SPRITE_CONTEXT_PROBE_KEY)
     lines = [
         "### QGIS converter warnings",
@@ -2414,6 +2680,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
                 label=_MARKDOWN_LAYER_LABEL,
             ),
             *_markdown_filterless_probe(filterless_probe),
+            *_markdown_filter_parse_support_probe(filter_parse_support_probe),
             *_markdown_property_removal_impact_probe(property_removal_impact_probe),
             *_markdown_sprite_context_probe(sprite_context_probe),
             *_markdown_icon_image_probe(icon_image_probe),
@@ -2579,6 +2846,15 @@ def build_parser() -> argparse.ArgumentParser:
             "--include-qgis-converter-warnings."
         ),
     )
+    parser.add_argument(
+        "--include-qgis-filter-parse-support",
+        action="store_true",
+        help=(
+            "With QGIS converter warnings, also isolate each remaining qfit-preprocessed "
+            "filter expression in a minimal same-type style to identify filters the QGIS "
+            "parser itself rejects. Implies --include-qgis-converter-warnings."
+        ),
+    )
     return parser
 
 
@@ -2599,7 +2875,9 @@ def main(argv: list[str] | None = None) -> int:
         style_definition = fetch_mapbox_style_definition(token, args.style_owner, args.style_id)
 
     include_qgis_converter_warnings = (
-        args.include_qgis_converter_warnings or args.include_qgis_property_removal_impact
+        args.include_qgis_converter_warnings
+        or args.include_qgis_property_removal_impact
+        or args.include_qgis_filter_parse_support
     )
 
     sprite_resources = None
@@ -2622,6 +2900,7 @@ def main(argv: list[str] | None = None) -> int:
             style_id=args.style_id,
             include_qgis_converter_warnings=include_qgis_converter_warnings,
             include_qgis_property_removal_impact=args.include_qgis_property_removal_impact,
+            include_qgis_filter_parse_support=args.include_qgis_filter_parse_support,
             sprite_resources=sprite_resources,
         ),
     )
