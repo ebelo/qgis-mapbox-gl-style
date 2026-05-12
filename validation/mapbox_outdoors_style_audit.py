@@ -43,6 +43,7 @@ _FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER = (
     _FILTER_PARSE_UNSUPPORTED_EXPRESSION_MESSAGE,
 )
 _FILTER_PARSE_UNSUPPORTED_MESSAGES = frozenset(_FILTER_PARSE_UNSUPPORTED_MESSAGE_ORDER)
+_FILTER_PARSE_PART_PARENT_OPERATORS = frozenset({"all", "any", "none"})
 _NO_OPERATOR_SIGNATURE = "(none)"
 
 if str(PACKAGE_PARENT) not in sys.path:
@@ -633,12 +634,12 @@ def _filter_parse_unsupported_message_summary(warnings: list[str]) -> list[dict[
     ]
 
 
-def _minimal_filter_probe_layer(layer: dict[str, object]) -> dict[str, object]:
+def _minimal_filter_probe_layer(layer: dict[str, object], filter_value: object = _ABSENT) -> dict[str, object]:
     layer_type = str(layer.get("type") or "")
     probe_layer: dict[str, object] = {
         "id": str(layer.get("id") or "filter-probe"),
         "type": layer_type,
-        "filter": layer.get("filter"),
+        "filter": filter_value if filter_value is not _ABSENT else layer.get("filter"),
     }
     for key in ("source", "source-layer", "minzoom", "maxzoom"):
         if key in layer:
@@ -668,6 +669,30 @@ def _filter_probe_style(style_definition: dict[str, object], layer: dict[str, ob
         "sources": copy.deepcopy(style_definition.get("sources", {})),
         "layers": [_minimal_filter_probe_layer(layer)],
     }
+
+
+def _filter_part_probe_style(
+    style_definition: dict[str, object],
+    layer: dict[str, object],
+    filter_part: list[object],
+) -> dict[str, object]:
+    probe_layer = _minimal_filter_probe_layer(layer, copy.deepcopy(filter_part))
+    return {
+        "version": style_definition.get("version", 8),
+        "sources": copy.deepcopy(style_definition.get("sources", {})),
+        "layers": [probe_layer],
+    }
+
+
+def _iter_direct_filter_parts(filter_value: list[object]) -> Iterable[tuple[int, str, list[object]]]:
+    if not filter_value:
+        return
+    parent_operator = filter_value[0]
+    if not isinstance(parent_operator, str) or parent_operator not in _FILTER_PARSE_PART_PARENT_OPERATORS:
+        return
+    for index, filter_part in enumerate(filter_value[1:], start=1):
+        if isinstance(filter_part, list):
+            yield index, parent_operator, filter_part
 
 
 def _match_expression_children(candidate: list[object]) -> Iterable[object]:
@@ -791,20 +816,82 @@ def _filter_parse_support_row(
     }
 
 
-def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> dict[str, object]:
-    rows = [
-        _filter_parse_support_row(style_definition, layer, filter_value)
-        for layer, filter_value in _iter_filter_probe_layers(style_definition)
+def _filter_parse_part_support_row(
+    style_definition: dict[str, object],
+    layer: dict[str, object],
+    filter_part: list[object],
+    *,
+    parent_operator: str,
+    part_index: int,
+) -> dict[str, object]:
+    warnings = _collect_qgis_converter_warnings(_filter_part_probe_style(style_definition, layer, filter_part))
+    unsupported_warning_count = _filter_parse_unsupported_warning_count(warnings)
+    return {
+        "layer": str(layer.get("id") or ""),
+        "group": _layer_group(layer),
+        "type": str(layer.get("type") or ""),
+        "source_layer": str(layer.get("source-layer") or ""),
+        "parent_operator": parent_operator,
+        "part_index": part_index,
+        "operator_signature": _operator_signature(filter_part),
+        "unsupported_warning_count": unsupported_warning_count,
+        "unsupported_warning_messages": _filter_parse_unsupported_message_summary(warnings),
+        "supported_by_qgis_parser": unsupported_warning_count == 0,
+        "warnings": warnings,
+        "filter": filter_part,
+    }
+
+
+def _filter_parse_part_support_rows(
+    style_definition: dict[str, object],
+    layer: dict[str, object],
+    filter_value: list[object],
+) -> list[dict[str, object]]:
+    return [
+        _filter_parse_part_support_row(
+            style_definition,
+            layer,
+            filter_part,
+            parent_operator=parent_operator,
+            part_index=part_index,
+        )
+        for part_index, parent_operator, filter_part in _iter_direct_filter_parts(filter_value)
     ]
+
+
+def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> dict[str, object]:
+    rows: list[dict[str, object]] = []
+    part_rows: list[dict[str, object]] = []
+    for layer, filter_value in _iter_filter_probe_layers(style_definition):
+        row = _filter_parse_support_row(style_definition, layer, filter_value)
+        rows.append(row)
+        if int(row.get("unsupported_warning_count") or 0) > 0:
+            part_rows.extend(_filter_parse_part_support_rows(style_definition, layer, filter_value))
     unsupported_rows = [row for row in rows if int(row.get("unsupported_warning_count") or 0) > 0]
+    unsupported_part_rows = [row for row in part_rows if int(row.get("unsupported_warning_count") or 0) > 0]
     supported_count = len(rows) - len(unsupported_rows)
     return {
         "filter_expression_count": len(rows),
         "qgis_parser_supported_count": supported_count,
         "qgis_parser_unsupported_count": len(unsupported_rows),
+        "direct_filter_part_count": len(part_rows),
+        "qgis_parser_supported_part_count": len(part_rows) - len(unsupported_part_rows),
+        "qgis_parser_unsupported_part_count": len(unsupported_part_rows),
         "unsupported_by_layer_group": _count_rows_by_key(unsupported_rows, "group"),
         "unsupported_by_warning_message": _filter_parse_warning_message_summary(unsupported_rows),
         "unsupported_by_layer_group_and_operator_signature": _filter_parse_signature_summary(unsupported_rows),
+        "unsupported_parts_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
+            unsupported_part_rows
+        ),
+        "unsupported_parts": sorted(
+            unsupported_part_rows,
+            key=lambda row: (
+                -int(row.get("unsupported_warning_count") or 0),
+                str(row.get("group") or ""),
+                str(row.get("layer") or ""),
+                int(row.get("part_index") or 0),
+            ),
+        ),
         "unsupported_layers": sorted(
             unsupported_rows,
             key=lambda row: (
@@ -2519,6 +2606,35 @@ def _markdown_filter_parse_unsupported_layer_table(
     return lines
 
 
+def _markdown_filter_parse_unsupported_part_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    shown_rows = rows[:limit]
+    lines = [
+        "| Layer | Parent | Part | Operators | Unsupported warnings | Filter part |",
+        "| --- | --- | ---: | --- | ---: | --- |",
+    ]
+    for row in shown_rows:
+        lines.append(
+            "| `{layer}` | `{parent}` | {part} | `{operators}` | {warnings} | {filter_value} |".format(
+                layer=row.get("layer", ""),
+                parent=row.get("parent_operator", ""),
+                part=row.get("part_index", 0),
+                operators=row.get("operator_signature", ""),
+                warnings=row.get("unsupported_warning_count", 0),
+                filter_value=_markdown_code_cell(_compact_json(row.get("filter"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | … | {len(rows) - limit} more unsupported filter parts omitted |")
+    lines.append("")
+    return lines
+
+
 def _markdown_filter_parse_warning_message_table(rows: list[dict[str, object]]) -> list[str]:
     return _markdown_named_count_table(rows, key="message", label=_MARKDOWN_MESSAGE_LABEL)
 
@@ -2527,6 +2643,7 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
     if not isinstance(probe, dict):
         return []
     unsupported_rows = list(probe.get("unsupported_layers") or [])
+    unsupported_parts = list(probe.get("unsupported_parts") or [])
     return [
         "#### Diagnostic filter parser support probe",
         "",
@@ -2540,6 +2657,8 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
         f"Filter expressions tested: {probe.get('filter_expression_count', 0)}",
         f"Accepted by the QGIS parser probe: {probe.get('qgis_parser_supported_count', 0)}",
         f"Rejected by the QGIS parser probe: {probe.get('qgis_parser_unsupported_count', 0)}",
+        f"Direct parts tested from rejected boolean filters: {probe.get('direct_filter_part_count', 0)}",
+        f"Rejected direct parts: {probe.get('qgis_parser_unsupported_part_count', 0)}",
         "",
         "##### Unsupported filter probes by layer group",
         "",
@@ -2557,6 +2676,15 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             list(probe.get("unsupported_by_layer_group_and_operator_signature") or []),
             count_label="Unsupported filters",
         ),
+        "##### Unsupported direct filter parts by layer group and operators",
+        "",
+        *_markdown_filter_signature_group_table(
+            list(probe.get("unsupported_parts_by_layer_group_and_operator_signature") or []),
+            count_label="Unsupported parts",
+        ),
+        "##### Unsupported direct filter parts",
+        "",
+        *_markdown_filter_parse_unsupported_part_table(unsupported_parts),
         "##### Unsupported filter probe layers",
         "",
         *_markdown_filter_parse_unsupported_layer_table(unsupported_rows),

@@ -1581,6 +1581,97 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             "!has, !in, none",
         )
 
+    def test_filter_parse_support_report_summarizes_unsupported_direct_filter_parts(self):
+        style = {
+            "version": 8,
+            "sources": {"composite": {"type": "vector"}},
+            "layers": [
+                {
+                    "id": "poi-label",
+                    "type": "symbol",
+                    "source": "composite",
+                    "source-layer": "poi_label",
+                    "filter": [
+                        "all",
+                        ["==", ["get", "class"], "park"],
+                        ["step", ["zoom"], False, 12, True],
+                    ],
+                }
+            ],
+        }
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_collect_qgis_converter_warnings",
+            side_effect=[
+                ["poi-label: Skipping unsupported expression"],
+                [],
+                ["poi-label: Skipping unsupported expression"],
+            ],
+        ) as collect_warnings:
+            report = mapbox_outdoors_style_audit._qgis_filter_parse_support_report(style)
+
+        self.assertEqual(report["direct_filter_part_count"], 2)
+        self.assertEqual(report["qgis_parser_supported_part_count"], 1)
+        self.assertEqual(report["qgis_parser_unsupported_part_count"], 1)
+        self.assertEqual(
+            report["unsupported_parts_by_layer_group_and_operator_signature"],
+            [
+                {
+                    "group": "pois/labels",
+                    "operator_signature": "step, zoom",
+                    "count": 1,
+                    "example_layers": ["poi-label"],
+                }
+            ],
+        )
+        self.assertEqual(len(report["unsupported_parts"]), 1)
+        self.assertEqual(report["unsupported_parts"][0]["layer"], "poi-label")
+        self.assertEqual(report["unsupported_parts"][0]["parent_operator"], "all")
+        self.assertEqual(report["unsupported_parts"][0]["part_index"], 2)
+        self.assertEqual(report["unsupported_parts"][0]["operator_signature"], "step, zoom")
+        self.assertEqual(
+            collect_warnings.call_args_list[2].args[0]["layers"][0]["filter"],
+            ["step", ["zoom"], False, 12, True],
+        )
+
+    def test_iter_direct_filter_parts_skips_non_boolean_and_non_list_parts(self):
+        self.assertEqual(list(mapbox_outdoors_style_audit._iter_direct_filter_parts([])), [])
+        self.assertEqual(
+            list(mapbox_outdoors_style_audit._iter_direct_filter_parts(["==", ["get", "class"], "park"])),
+            [],
+        )
+        self.assertEqual(
+            list(
+                mapbox_outdoors_style_audit._iter_direct_filter_parts(
+                    ["all", True, ["==", ["get", "class"], "park"], False, ["has", "name"]]
+                )
+            ),
+            [
+                (2, "all", ["==", ["get", "class"], "park"]),
+                (4, "all", ["has", "name"]),
+            ],
+        )
+
+    def test_filter_part_probe_style_uses_direct_part_filter(self):
+        layer = {
+            "id": "poi-label",
+            "type": "symbol",
+            "source": "composite",
+            "source-layer": "poi_label",
+            "filter": ["all", ["==", ["get", "class"], "park"], ["has", "name"]],
+        }
+        filter_part = ["==", ["get", "class"], "park"]
+
+        style = mapbox_outdoors_style_audit._filter_part_probe_style(
+            {"version": 8, "sources": {"composite": {"type": "vector"}}}, layer, filter_part
+        )
+
+        self.assertEqual(style["layers"][0]["filter"], ["==", ["get", "class"], "park"])
+        self.assertNotEqual(style["layers"][0]["filter"], layer["filter"])
+        filter_part[1][1] = "mutated"
+        self.assertEqual(style["layers"][0]["filter"], ["==", ["get", "class"], "park"])
+
     def test_qgis_converter_warning_report_can_include_sprite_context_probe(self):
         class FakeQImage:
             Format_ARGB32 = "argb32"
@@ -1999,6 +2090,9 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "filter_expression_count": 2,
                 "qgis_parser_supported_count": 1,
                 "qgis_parser_unsupported_count": 1,
+                "direct_filter_part_count": 2,
+                "qgis_parser_supported_part_count": 1,
+                "qgis_parser_unsupported_part_count": 1,
                 "unsupported_by_layer_group": [{"group": "pois/labels", "count": 1}],
                 "unsupported_by_warning_message": [{"message": "Skipping unsupported expression", "count": 1}],
                 "unsupported_by_layer_group_and_operator_signature": [
@@ -2007,6 +2101,31 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "operator_signature": "==, case, get",
                         "count": 1,
                         "example_layers": ["poi-label"],
+                    }
+                ],
+                "unsupported_parts_by_layer_group_and_operator_signature": [
+                    {
+                        "group": "pois/labels",
+                        "operator_signature": "step, zoom",
+                        "count": 1,
+                        "example_layers": ["poi-label"],
+                    }
+                ],
+                "unsupported_parts": [
+                    {
+                        "layer": "poi-label",
+                        "group": "pois/labels",
+                        "type": "symbol",
+                        "source_layer": "poi_label",
+                        "parent_operator": "all",
+                        "part_index": 2,
+                        "operator_signature": "step, zoom",
+                        "unsupported_warning_count": 1,
+                        "unsupported_warning_messages": [
+                            {"message": "Skipping unsupported expression", "count": 1}
+                        ],
+                        "supported_by_qgis_parser": False,
+                        "filter": ["step", ["zoom"], False, 12, True],
                     }
                 ],
                 "unsupported_layers": [
@@ -2313,12 +2432,19 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("Filter expressions tested: 2", markdown)
         self.assertIn("Accepted by the QGIS parser probe: 1", markdown)
         self.assertIn("Rejected by the QGIS parser probe: 1", markdown)
+        self.assertIn("Direct parts tested from rejected boolean filters: 2", markdown)
+        self.assertIn("Rejected direct parts: 1", markdown)
         self.assertIn("##### Unsupported filter probes by layer group", markdown)
         self.assertIn("| `pois/labels` | 1 |", markdown)
         self.assertIn("##### Unsupported filter parser warnings by message", markdown)
         self.assertIn("| `Skipping unsupported expression` | 1 |", markdown)
         self.assertIn("##### Unsupported filter probes by layer group and operators", markdown)
         self.assertIn("| `pois/labels` | `==, case, get` | 1 | `poi-label` |", markdown)
+        self.assertIn("##### Unsupported direct filter parts by layer group and operators", markdown)
+        self.assertIn("| `pois/labels` | `step, zoom` | 1 | `poi-label` |", markdown)
+        self.assertIn("##### Unsupported direct filter parts", markdown)
+        self.assertIn("| `poi-label` | `all` | 2 | `step, zoom` | 1 |", markdown)
+        self.assertIn('<code>["step",["zoom"],false,12,true]</code>', markdown)
         self.assertIn("##### Unsupported filter probe layers", markdown)
         self.assertIn("| `poi-label` | `pois/labels` | `symbol / poi_label` | `==, case, get` | 1 |", markdown)
         self.assertIn('<code>["case",["==",["get","class"],"park"],true,false]</code>', markdown)
