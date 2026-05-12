@@ -674,7 +674,7 @@ def _filter_probe_style(style_definition: dict[str, object], layer: dict[str, ob
 def _filter_part_probe_style(
     style_definition: dict[str, object],
     layer: dict[str, object],
-    filter_part: list[object],
+    filter_part: object,
 ) -> dict[str, object]:
     probe_layer = _minimal_filter_probe_layer(layer, copy.deepcopy(filter_part))
     return {
@@ -695,6 +695,91 @@ def _iter_direct_filter_parts(filter_value: list[object]) -> Iterable[tuple[int,
             yield index, parent_operator, filter_part
 
 
+def _diagnostic_arithmetic_value(operator: str, values: list[object]) -> object:
+    if not values or not all(isinstance(value, (int, float)) for value in values):
+        return _ABSENT
+    if operator == "+":
+        return sum(values)
+    if operator == "-":
+        return -values[0] if len(values) == 1 else values[0] - sum(values[1:])
+    if operator == "*":
+        result = 1.0
+        for value in values:
+            result *= value
+        return result
+    if operator == "/" and len(values) == 2 and values[1] != 0:
+        return values[0] / values[1]
+    return _ABSENT
+
+
+def _diagnostic_step_value_at_zoom(expression: list[object], zoom: float) -> object:
+    if len(expression) < 4:
+        return _ABSENT
+    input_value = _diagnostic_filter_value_at_zoom(expression[1], zoom)
+    if not isinstance(input_value, (int, float)):
+        return _ABSENT
+    selected_value = expression[2]
+    for index in range(3, len(expression) - 1, 2):
+        stop = expression[index]
+        if not isinstance(stop, (int, float)) or input_value < stop:
+            break
+        selected_value = expression[index + 1]
+    return _diagnostic_filter_value_at_zoom(selected_value, zoom)
+
+
+def _diagnostic_interpolate_value_at_zoom(expression: list[object], zoom: float) -> object:
+    if len(expression) < 6:
+        return _ABSENT
+    input_value = _diagnostic_filter_value_at_zoom(expression[2], zoom)
+    if not isinstance(input_value, (int, float)):
+        return _ABSENT
+    stops = [
+        (float(expression[index]), _diagnostic_filter_value_at_zoom(expression[index + 1], zoom))
+        for index in range(3, len(expression) - 1, 2)
+        if isinstance(expression[index], (int, float))
+    ]
+    if not stops:
+        return _ABSENT
+    if input_value <= stops[0][0]:
+        return stops[0][1]
+    for (lower_stop, lower_value), (upper_stop, upper_value) in zip(stops, stops[1:]):
+        if input_value <= upper_stop:
+            # Diagnostic-only: approximate in-range numeric interpolation linearly.
+            # This is not a full Mapbox expression evaluator for exponential/cubic-bezier curves.
+            outputs_are_numeric = all(isinstance(value, (int, float)) for value in (lower_value, upper_value))
+            if outputs_are_numeric and upper_stop != lower_stop:
+                fraction = (input_value - lower_stop) / (upper_stop - lower_stop)
+                return lower_value + (upper_value - lower_value) * fraction
+            return lower_value
+    return stops[-1][1]
+
+
+def _diagnostic_filter_value_at_zoom(value: object, zoom: float = _EXPRESSION_PROBE_ZOOM) -> object:
+    if not isinstance(value, list) or not value:
+        return value
+    operator = value[0]
+    if operator == "literal":
+        return value
+    if operator == "zoom" and len(value) == 1:
+        return zoom
+    if operator == "step":
+        step_value = _diagnostic_step_value_at_zoom(value, zoom)
+        if step_value is not _ABSENT:
+            return step_value
+    if operator == "interpolate":
+        interpolate_value = _diagnostic_interpolate_value_at_zoom(value, zoom)
+        if interpolate_value is not _ABSENT:
+            return interpolate_value
+    if isinstance(operator, str) and operator in {"+", "-", "*", "/"} and _diagnostic_value_depends_on_zoom(value):
+        arithmetic_value = _diagnostic_arithmetic_value(
+            operator,
+            [_diagnostic_filter_value_at_zoom(item, zoom) for item in value[1:]],
+        )
+        if arithmetic_value is not _ABSENT:
+            return arithmetic_value
+    return [_diagnostic_filter_value_at_zoom(item, zoom) for item in value]
+
+
 def _match_expression_children(candidate: list[object]) -> Iterable[object]:
     if len(candidate) > 1:
         yield candidate[1]
@@ -710,6 +795,19 @@ def _mapbox_operator_children(operator: str, candidate: list[object]) -> Iterabl
     if operator == "match":
         return _match_expression_children(candidate)
     return candidate[1:]
+
+
+def _diagnostic_value_depends_on_zoom(value: object) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    operator = value[0]
+    if operator == "zoom" and len(value) == 1:
+        return True
+    if isinstance(operator, str) and operator in _MAPBOX_FILTER_OPERATORS:
+        children = _mapbox_operator_children(operator, value)
+    else:
+        children = value[1:] if isinstance(operator, str) else value
+    return any(_diagnostic_value_depends_on_zoom(child) for child in children)
 
 
 def _filter_operator_names(value: object) -> list[str]:
@@ -859,16 +957,78 @@ def _filter_parse_part_support_rows(
     ]
 
 
-def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> dict[str, object]:
+def _filter_parse_zoom_normalized_part_support_row(
+    style_definition: dict[str, object],
+    layer: dict[str, object],
+    unsupported_part_row: dict[str, object],
+) -> dict[str, object]:
+    original_filter = unsupported_part_row.get("filter")
+    normalized_filter = _diagnostic_filter_value_at_zoom(original_filter)
+    warnings = _collect_qgis_converter_warnings(_filter_part_probe_style(style_definition, layer, normalized_filter))
+    unsupported_warning_count = _filter_parse_unsupported_warning_count(warnings)
+    return {
+        "layer": str(unsupported_part_row.get("layer") or ""),
+        "group": str(unsupported_part_row.get("group") or ""),
+        "type": str(unsupported_part_row.get("type") or ""),
+        "source_layer": str(unsupported_part_row.get("source_layer") or ""),
+        "parent_operator": str(unsupported_part_row.get("parent_operator") or ""),
+        "part_index": int(unsupported_part_row.get("part_index") or 0),
+        "original_operator_signature": str(unsupported_part_row.get("operator_signature") or _NO_OPERATOR_SIGNATURE),
+        "operator_signature": _operator_signature(normalized_filter),
+        "changed_by_zoom_normalization": normalized_filter != original_filter,
+        "unsupported_warning_count": unsupported_warning_count,
+        "unsupported_warning_messages": _filter_parse_unsupported_message_summary(warnings),
+        "supported_by_qgis_parser": unsupported_warning_count == 0,
+        "warnings": warnings,
+        "filter": normalized_filter,
+        "original_filter": original_filter,
+    }
+
+
+def _filter_parse_zoom_normalized_part_support_rows(
+    style_definition: dict[str, object],
+    layers_by_id: dict[str, dict[str, object]],
+    unsupported_part_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for unsupported_part_row in unsupported_part_rows:
+        layer = layers_by_id.get(str(unsupported_part_row.get("layer") or ""))
+        if layer is not None:
+            rows.append(_filter_parse_zoom_normalized_part_support_row(style_definition, layer, unsupported_part_row))
+    return rows
+
+
+def _filter_parse_row_is_unsupported(row: dict[str, object]) -> bool:
+    return int(row.get("unsupported_warning_count") or 0) > 0
+
+
+def _collect_filter_parse_support_rows(
+    style_definition: dict[str, object],
+) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, dict[str, object]]]:
     rows: list[dict[str, object]] = []
     part_rows: list[dict[str, object]] = []
+    layers_by_id: dict[str, dict[str, object]] = {}
     for layer, filter_value in _iter_filter_probe_layers(style_definition):
+        layers_by_id[str(layer.get("id") or "")] = layer
         row = _filter_parse_support_row(style_definition, layer, filter_value)
         rows.append(row)
-        if int(row.get("unsupported_warning_count") or 0) > 0:
+        if _filter_parse_row_is_unsupported(row):
             part_rows.extend(_filter_parse_part_support_rows(style_definition, layer, filter_value))
-    unsupported_rows = [row for row in rows if int(row.get("unsupported_warning_count") or 0) > 0]
-    unsupported_part_rows = [row for row in part_rows if int(row.get("unsupported_warning_count") or 0) > 0]
+    return rows, part_rows, layers_by_id
+
+
+def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> dict[str, object]:
+    rows, part_rows, layers_by_id = _collect_filter_parse_support_rows(style_definition)
+    unsupported_rows = [row for row in rows if _filter_parse_row_is_unsupported(row)]
+    unsupported_part_rows = [row for row in part_rows if _filter_parse_row_is_unsupported(row)]
+    zoom_normalized_part_rows = _filter_parse_zoom_normalized_part_support_rows(
+        style_definition,
+        layers_by_id,
+        unsupported_part_rows,
+    )
+    zoom_normalized_supported_part_rows = [
+        row for row in zoom_normalized_part_rows if not _filter_parse_row_is_unsupported(row)
+    ]
     supported_count = len(rows) - len(unsupported_rows)
     return {
         "filter_expression_count": len(rows),
@@ -877,11 +1037,26 @@ def _qgis_filter_parse_support_report(style_definition: dict[str, object]) -> di
         "direct_filter_part_count": len(part_rows),
         "qgis_parser_supported_part_count": len(part_rows) - len(unsupported_part_rows),
         "qgis_parser_unsupported_part_count": len(unsupported_part_rows),
+        "zoom_normalized_direct_part_count": len(zoom_normalized_part_rows),
+        "zoom_normalized_changed_direct_part_count": sum(
+            1 for row in zoom_normalized_part_rows if bool(row.get("changed_by_zoom_normalization"))
+        ),
+        "qgis_parser_supported_zoom_normalized_part_count": len(zoom_normalized_supported_part_rows),
+        "qgis_parser_unsupported_zoom_normalized_part_count": len(zoom_normalized_part_rows)
+        - len(zoom_normalized_supported_part_rows),
         "unsupported_by_layer_group": _count_rows_by_key(unsupported_rows, "group"),
         "unsupported_by_warning_message": _filter_parse_warning_message_summary(unsupported_rows),
         "unsupported_by_layer_group_and_operator_signature": _filter_parse_signature_summary(unsupported_rows),
         "unsupported_parts_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
             unsupported_part_rows
+        ),
+        "zoom_normalized_supported_parts": sorted(
+            zoom_normalized_supported_part_rows,
+            key=lambda row: (
+                str(row.get("group") or ""),
+                str(row.get("layer") or ""),
+                int(row.get("part_index") or 0),
+            ),
         ),
         "unsupported_parts": sorted(
             unsupported_part_rows,
@@ -2635,6 +2810,34 @@ def _markdown_filter_parse_unsupported_part_table(
     return lines
 
 
+def _markdown_filter_parse_zoom_normalized_part_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    shown_rows = rows[:limit]
+    lines = [
+        "| Layer | Part | Original operators | Normalized operators | Normalized filter part |",
+        "| --- | ---: | --- | --- | --- |",
+    ]
+    for row in shown_rows:
+        lines.append(
+            "| `{layer}` | {part} | `{original}` | `{normalized}` | {filter_value} |".format(
+                layer=row.get("layer", ""),
+                part=row.get("part_index", 0),
+                original=row.get("original_operator_signature", ""),
+                normalized=row.get("operator_signature", ""),
+                filter_value=_markdown_code_cell(_compact_json(row.get("filter"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | {len(rows) - limit} more zoom-normalized parts omitted |")
+    lines.append("")
+    return lines
+
+
 def _markdown_filter_parse_warning_message_table(rows: list[dict[str, object]]) -> list[str]:
     return _markdown_named_count_table(rows, key="message", label=_MARKDOWN_MESSAGE_LABEL)
 
@@ -2644,6 +2847,7 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
         return []
     unsupported_rows = list(probe.get("unsupported_layers") or [])
     unsupported_parts = list(probe.get("unsupported_parts") or [])
+    zoom_normalized_supported_parts = list(probe.get("zoom_normalized_supported_parts") or [])
     return [
         "#### Diagnostic filter parser support probe",
         "",
@@ -2659,6 +2863,15 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
         f"Rejected by the QGIS parser probe: {probe.get('qgis_parser_unsupported_count', 0)}",
         f"Direct parts tested from rejected boolean filters: {probe.get('direct_filter_part_count', 0)}",
         f"Rejected direct parts: {probe.get('qgis_parser_unsupported_part_count', 0)}",
+        (
+            "Unsupported direct parts re-tested after zoom-normalizing at "
+            f"z{_EXPRESSION_PROBE_ZOOM:g}: {probe.get('zoom_normalized_direct_part_count', 0)}"
+        ),
+        f"Changed by zoom-normalization: {probe.get('zoom_normalized_changed_direct_part_count', 0)}",
+        (
+            "Accepted after zoom-normalization: "
+            f"{probe.get('qgis_parser_supported_zoom_normalized_part_count', 0)}"
+        ),
         "",
         "##### Unsupported filter probes by layer group",
         "",
@@ -2682,6 +2895,14 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             list(probe.get("unsupported_parts_by_layer_group_and_operator_signature") or []),
             count_label="Unsupported parts",
         ),
+        "##### Direct filter parts accepted after zoom-normalization",
+        "",
+        (
+            "This diagnostic evaluates zoom-driven `step`/`interpolate` filter fragments at "
+            f"z{_EXPRESSION_PROBE_ZOOM:g}. It is evidence only, not a rendering-safe rewrite."
+        ),
+        "",
+        *_markdown_filter_parse_zoom_normalized_part_table(zoom_normalized_supported_parts),
         "##### Unsupported direct filter parts",
         "",
         *_markdown_filter_parse_unsupported_part_table(unsupported_parts),
