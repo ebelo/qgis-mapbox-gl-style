@@ -804,6 +804,55 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(result["layers"][7]["paint"]["line-dasharray"], ["get", "dash"])
         self.assertEqual(style["layers"][0]["paint"]["line-dasharray"][0], "step")
 
+    def test_style_with_scalar_symbol_spacing_replaces_supported_expressions_without_mutating_original(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-label",
+                    "layout": {"symbol-spacing": ["step", ["zoom"], 150, 12, 300]},
+                },
+                {
+                    "id": "water-label",
+                    "layout": {
+                        "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 8, 100, 12, 250, 16, 400]
+                    },
+                },
+                {
+                    "id": "trail-label",
+                    "layout": {
+                        "symbol-spacing": [
+                            "case",
+                            ["==", ["get", "class"], "minor"],
+                            90,
+                            180,
+                        ]
+                    },
+                },
+                {"id": "poi-label", "layout": {"symbol-spacing": ["coalesce", ["get", "spacing"], 220]}},
+                {
+                    "id": "settlement-label",
+                    "layout": {"symbol-spacing": ["match", ["get", "rank"], 1, 400, 120]},
+                },
+                {"id": "literal", "layout": {"symbol-spacing": 250}},
+                {"id": "data-only", "layout": {"symbol-spacing": ["get", "spacing"]}},
+                {"id": "negative", "layout": {"symbol-spacing": ["step", ["zoom"], -1, 12, -2]}},
+                {"id": "background", "paint": {"background-color": "#ffffff"}},
+            ]
+        }
+
+        result, replaced_count = mapbox_outdoors_style_audit._style_with_scalar_symbol_spacing(style)
+
+        self.assertEqual(replaced_count, 5)
+        self.assertEqual(result["layers"][0]["layout"]["symbol-spacing"], 300.0)
+        self.assertEqual(result["layers"][1]["layout"]["symbol-spacing"], 250.0)
+        self.assertEqual(result["layers"][2]["layout"]["symbol-spacing"], 180.0)
+        self.assertEqual(result["layers"][3]["layout"]["symbol-spacing"], 220.0)
+        self.assertEqual(result["layers"][4]["layout"]["symbol-spacing"], 120.0)
+        self.assertEqual(result["layers"][5]["layout"]["symbol-spacing"], 250)
+        self.assertEqual(result["layers"][6]["layout"]["symbol-spacing"], ["get", "spacing"])
+        self.assertEqual(result["layers"][7]["layout"]["symbol-spacing"], ["step", ["zoom"], -1, 12, -2])
+        self.assertEqual(style["layers"][0]["layout"]["symbol-spacing"][0], "step")
+
     def test_qgis_converter_warning_report_initializes_and_closes_qgis_app(self):
         raw_style = {"layers": []}
         qfit_style = {
@@ -828,6 +877,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ],
                 ["poi-label: Could not retrieve sprite 'park'"],
                 ["poi-label: Skipping unsupported expression"],
+                [
+                    "poi-label: Skipping unsupported expression",
+                    "poi-label: Could not retrieve sprite 'park'",
+                ],
                 [
                     "poi-label: Skipping unsupported expression",
                     "poi-label: Could not retrieve sprite 'park'",
@@ -900,6 +953,14 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             report["with_literal_line_dasharray_probe"]["reduced_from_qfit"],
             {"by_message": [], "by_layer": []},
         )
+        self.assertEqual(report["with_scalar_symbol_spacing_probe"]["symbol_spacing_expression_count_replaced"], 0)
+        self.assertEqual(report["with_scalar_symbol_spacing_probe"]["symbol_spacing_replaced_layers"], [])
+        self.assertEqual(report["with_scalar_symbol_spacing_probe"]["summary"]["count"], 2)
+        self.assertEqual(report["with_scalar_symbol_spacing_probe"]["warning_count_delta_from_qfit"], 0)
+        self.assertEqual(
+            report["with_scalar_symbol_spacing_probe"]["reduced_from_qfit"],
+            {"by_message": [], "by_layer": []},
+        )
         self.assertEqual(
             report["reduced_by_qfit"],
             {
@@ -927,6 +988,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertEqual(fake_converter.converted_styles[4], qfit_style)
         self.assertEqual(fake_converter.converted_styles[5], qfit_style)
+        self.assertEqual(fake_converter.converted_styles[6], qfit_style)
         self.assertIn("filter", qfit_style["layers"][0])
         self.assertIn("icon-image", qfit_style["layers"][0]["layout"])
         self.assertEqual(len(fake_app.created), 1)
@@ -945,6 +1007,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ["iconless warning"],
                 ["line opacity warning"],
                 ["line dasharray warning"],
+                ["symbol spacing warning"],
             ],
             existing_app=existing_app,
         )
@@ -961,6 +1024,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(report["without_icon_images_probe"]["summary"]["warnings"], ["iconless warning"])
         self.assertEqual(report["with_scalar_line_opacity_probe"]["summary"]["warnings"], ["line opacity warning"])
         self.assertEqual(report["with_literal_line_dasharray_probe"]["summary"]["warnings"], ["line dasharray warning"])
+        self.assertEqual(report["with_scalar_symbol_spacing_probe"]["summary"]["warnings"], ["symbol spacing warning"])
         self.assertEqual(fake_app.created, [])
 
     def test_qgis_converter_warning_report_can_include_sprite_context_probe(self):
@@ -990,6 +1054,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ["iconless warning"],
                 ["line opacity warning"],
                 ["line dasharray warning"],
+                ["symbol spacing warning"],
                 ["poi-label: Skipping unsupported expression"],
             ]
         )
@@ -1026,7 +1091,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 }
             ],
         )
-        sprite_context = fake_converter.converted_contexts[6]
+        sprite_context = fake_converter.converted_contexts[7]
         self.assertEqual(sprite_context.target_unit, "millimeters")
         self.assertAlmostEqual(sprite_context.pixel_size_conversion_factor, 25.4 / 96.0)
         image, definitions = sprite_context.sprites
@@ -1056,6 +1121,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 ["iconless warning"],
                 ["line opacity warning"],
                 ["line dasharray warning"],
+                ["symbol spacing warning"],
                 ["poi-label: Could not retrieve sprite 'park'"],
             ]
         )
@@ -1080,7 +1146,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(probe["sprite_definition_count"], 1)
         self.assertFalse(probe["sprite_image_loaded"])
         self.assertEqual(probe["warning_count_delta_from_qfit"], 0)
-        self.assertIsNone(fake_converter.converted_contexts[6].sprites)
+        self.assertIsNone(fake_converter.converted_contexts[7].sprites)
 
     def test_build_style_audit_summarizes_sprite_context_residual_unresolved_properties(self):
         warning_report = {
@@ -1170,6 +1236,85 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "by_layer_group_and_property": [
                     {"group": "pois/labels", "property": "filter", "count": 1},
                     {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                ],
+            },
+        )
+
+    def test_build_style_audit_summarizes_symbol_spacing_probe_residual_unresolved_properties(self):
+        style = {
+            "version": 8,
+            "sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}},
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "source": "composite",
+                    "source-layer": "road",
+                    "layout": {"symbol-spacing": ["step", ["zoom"], 100, 12, 200]},
+                },
+                {
+                    "id": "poi-label",
+                    "type": "symbol",
+                    "source": "composite",
+                    "source-layer": "poi_label",
+                    "layout": {"icon-image": ["get", "maki"]},
+                },
+                {
+                    "id": "data-symbol-label",
+                    "type": "symbol",
+                    "source": "composite",
+                    "source-layer": "road",
+                    "layout": {"symbol-spacing": ["get", "spacing"]},
+                },
+            ],
+        }
+        warning_report = {
+            "raw": {"count": 0, "warnings": []},
+            "qfit_preprocessed": {
+                "count": 3,
+                "warnings": [
+                    "road-label: Skipping unsupported expression",
+                    "poi-label: Skipping unsupported expression",
+                    "data-symbol-label: Skipping unsupported expression",
+                ],
+            },
+            "reduced_by_qfit": {},
+            "with_scalar_symbol_spacing_probe": {
+                "symbol_spacing_expression_count_replaced": 1,
+                "symbol_spacing_replaced_layers": ["road-label"],
+                "summary": {
+                    "count": 3,
+                    "warnings": [
+                        "road-label: Skipping unsupported expression",
+                        "poi-label: Skipping unsupported expression",
+                        "data-symbol-label: Skipping unsupported expression",
+                    ],
+                },
+                "reduced_from_qfit": {},
+            },
+        }
+
+        with patch.object(
+            mapbox_outdoors_style_audit,
+            "_qgis_converter_warning_report",
+            return_value=warning_report,
+        ):
+            audit = build_style_audit(
+                style,
+                config=StyleAuditConfig(include_qgis_converter_warnings=True),
+            )
+
+        symbol_spacing_probe = audit["qgis_converter_warnings"]["with_scalar_symbol_spacing_probe"]
+        self.assertEqual(
+            symbol_spacing_probe["remaining_warning_layers_by_unresolved_property"],
+            {
+                "by_property": [
+                    {"property": "layout.icon-image", "count": 1},
+                    {"property": "layout.symbol-spacing", "count": 1},
+                ],
+                "by_layer_group_and_property": [
+                    {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                    {"group": "roads/trails", "property": "layout.symbol-spacing", "count": 1},
                 ],
             },
         )
@@ -1381,6 +1526,40 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                     ],
                 },
             },
+            "with_scalar_symbol_spacing_probe": {
+                "symbol_spacing_expression_count_replaced": 2,
+                "summary": {
+                    "count": 1,
+                    "by_message": [{"message": "Could not retrieve sprite 'park'", "count": 1}],
+                    "by_layer_group": [{"group": "pois/labels", "count": 1}],
+                    "by_layer_group_and_message": [
+                        {"group": "pois/labels", "message": "Could not retrieve sprite 'park'", "count": 1}
+                    ],
+                    "by_layer": [{"layer": "poi-label", "count": 1}],
+                },
+                "warning_count_delta_from_qfit": 1,
+                "reduced_from_qfit": {
+                    "by_message": [
+                        {
+                            "message": "Skipping unsupported expression",
+                            "raw_count": 2,
+                            "qfit_count": 1,
+                            "reduced_count": 1,
+                        }
+                    ],
+                    "by_layer_group": [
+                        {"group": "pois/labels", "raw_count": 2, "qfit_count": 1, "reduced_count": 1}
+                    ],
+                },
+                "remaining_warning_layers_by_unresolved_property": {
+                    "by_property": [
+                        {"property": "layout.icon-image", "count": 1},
+                    ],
+                    "by_layer_group_and_property": [
+                        {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
+                    ],
+                },
+            },
             "with_sprite_context_probe": {
                 "sprite_definition_count": 2,
                 "sprite_image_loaded": True,
@@ -1522,6 +1701,15 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("##### Remaining line-dasharray probe warnings by message", markdown)
         self.assertIn("##### Remaining line-dasharray probe warnings by layer", markdown)
         self.assertIn("##### Remaining line-dasharray probe warning layers by unresolved qfit property", markdown)
+        self.assertIn("#### Diagnostic symbol-spacing scalarization probe", markdown)
+        self.assertIn("Symbol spacing expressions replaced in probe: 2", markdown)
+        self.assertIn("Warnings after scalar symbol spacing: 1", markdown)
+        self.assertIn("##### Symbol-spacing probe reductions by message", markdown)
+        self.assertIn("| Message | Before symbol-spacing probe | Scalar symbol-spacing | Reduced |", markdown)
+        self.assertIn("##### Symbol-spacing probe reductions by layer group", markdown)
+        self.assertIn("##### Remaining symbol-spacing probe warnings by message", markdown)
+        self.assertIn("##### Remaining symbol-spacing probe warnings by layer", markdown)
+        self.assertIn("##### Remaining symbol-spacing probe warning layers by unresolved qfit property", markdown)
         self.assertIn("QGIS converter warnings: 2", markdown)
         self.assertIn("`Referenced font DIN Pro Medium is not available on system` (1)", markdown)
 

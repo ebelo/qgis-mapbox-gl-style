@@ -30,6 +30,9 @@ _SCALAR_LINE_OPACITY_PROBE_KEY = "with_scalar_line_opacity_probe"
 _LINE_OPACITY_EXPRESSION_COUNT_KEY = "line_opacity_expression_count_replaced"
 _LITERAL_LINE_DASHARRAY_PROBE_KEY = "with_literal_line_dasharray_probe"
 _LINE_DASHARRAY_EXPRESSION_COUNT_KEY = "line_dasharray_expression_count_replaced"
+_SCALAR_SYMBOL_SPACING_PROBE_KEY = "with_scalar_symbol_spacing_probe"
+_SYMBOL_SPACING_EXPRESSION_COUNT_KEY = "symbol_spacing_expression_count_replaced"
+_SYMBOL_SPACING_REPLACED_LAYERS_KEY = "symbol_spacing_replaced_layers"
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -662,8 +665,10 @@ def _warning_layer_unresolved_property_summaries(
     layers: list[dict[str, object]],
     *,
     exclude_properties: set[str] | None = None,
+    exclude_properties_by_layer: dict[str, set[str]] | None = None,
 ) -> dict[str, list[dict[str, object]]]:
     excluded = exclude_properties or set()
+    excluded_by_layer = exclude_properties_by_layer or {}
     warning_layer_ids = {
         layer
         for warning in warnings
@@ -677,8 +682,9 @@ def _warning_layer_unresolved_property_summaries(
         if layer_id not in warning_layer_ids:
             continue
         group = str(layer.get("group") or "other")
+        layer_excluded = excluded | excluded_by_layer.get(layer_id, set())
         for property_name in _iter_property_names(layer, "qfit_unresolved"):
-            if property_name in excluded:
+            if property_name in layer_excluded:
                 continue
             property_counts[property_name] += 1
             group_property_counts[(group, property_name)] += 1
@@ -705,6 +711,7 @@ def _annotate_probe_remaining_warning_unresolved_properties(
     layers: list[dict[str, object]],
     *,
     exclude_properties: set[str] | None = None,
+    exclude_properties_by_layer: dict[str, set[str]] | None = None,
 ) -> None:
     summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
     warnings = summary.get("warnings")
@@ -713,6 +720,7 @@ def _annotate_probe_remaining_warning_unresolved_properties(
             [str(warning) for warning in warnings],
             layers,
             exclude_properties=exclude_properties,
+            exclude_properties_by_layer=exclude_properties_by_layer,
         )
 
 
@@ -769,6 +777,24 @@ def _annotate_qgis_warning_group_summaries(
         line_dasharray_probe,
         layers,
         exclude_properties={"paint.line-dasharray"},
+    )
+    symbol_spacing_probe = (
+        warning_report.get(_SCALAR_SYMBOL_SPACING_PROBE_KEY)
+        if isinstance(warning_report.get(_SCALAR_SYMBOL_SPACING_PROBE_KEY), dict)
+        else {}
+    )
+    _annotate_probe_warning_groups(symbol_spacing_probe, qfit_summary, layer_groups)
+    symbol_spacing_replaced_layers = {
+        str(layer_id)
+        for layer_id in symbol_spacing_probe.get(_SYMBOL_SPACING_REPLACED_LAYERS_KEY, [])
+        if layer_id
+    }
+    _annotate_probe_remaining_warning_unresolved_properties(
+        symbol_spacing_probe,
+        layers,
+        exclude_properties_by_layer={
+            layer_id: {"layout.symbol-spacing"} for layer_id in symbol_spacing_replaced_layers
+        },
     )
     sprite_context_probe = (
         warning_report.get(_SPRITE_CONTEXT_PROBE_KEY)
@@ -972,7 +998,7 @@ def _first_line_dasharray_literal(candidates: Iterable[object]) -> list[object] 
     return None
 
 
-def _case_line_dasharray_output_candidates(expr: list[object]) -> list[object]:
+def _case_expression_output_candidates(expr: list[object]) -> list[object]:
     if len(expr) < 4:
         return []
     return [expr[-1], *(expr[index] for index in range(len(expr) - 2, 1, -2))]
@@ -993,7 +1019,7 @@ def _extract_line_dasharray_literal(expr: object) -> list[object] | None:
     if op == "match":
         return _extract_line_dasharray_literal(expr[-1]) if len(expr) >= 5 else None
     if op == "case":
-        return _first_line_dasharray_literal(_case_line_dasharray_output_candidates(expr))
+        return _first_line_dasharray_literal(_case_expression_output_candidates(expr))
     if op == "coalesce":
         return _first_line_dasharray_literal(reversed(expr[1:]))
     return None
@@ -1021,6 +1047,65 @@ def _style_with_literal_line_dasharray(style_definition: dict[str, object]) -> t
         paint["line-dasharray"] = literal_dasharray
         replaced_count += 1
     return style_with_literal_dasharray, replaced_count
+
+
+def _extract_symbol_spacing_scalar(expr: object) -> float | None:
+    if isinstance(expr, bool):
+        return None
+    if isinstance(expr, (int, float)):
+        return float(expr) if expr >= 0 else None
+    if not isinstance(expr, list) or not expr:
+        return None
+
+    op = expr[0]
+    if op == "interpolate":
+        return _extract_symbol_spacing_scalar(_representative_interpolate_output(expr))
+    if op == "step":
+        return _extract_symbol_spacing_scalar(_representative_step_output(expr))
+    if op == "match":
+        return _extract_symbol_spacing_scalar(expr[-1]) if len(expr) >= 5 else None
+    if op == "case":
+        return _first_symbol_spacing_scalar(_case_expression_output_candidates(expr))
+    if op == "coalesce":
+        return _first_symbol_spacing_scalar(reversed(expr[1:]))
+    return None
+
+
+def _first_symbol_spacing_scalar(candidates: Iterable[object]) -> float | None:
+    for candidate in candidates:
+        scalar = _extract_symbol_spacing_scalar(candidate)
+        if scalar is not None:
+            return scalar
+    return None
+
+
+def _style_with_scalar_symbol_spacing_details(style_definition: dict[str, object]) -> tuple[dict[str, object], list[str]]:
+    """Return a copy with symbol-spacing expressions scalarized for converter diagnostics only."""
+    style_with_scalar_spacing = copy.deepcopy(style_definition)
+    replaced_layer_ids: list[str] = []
+    layers = style_with_scalar_spacing.get("layers")
+    if not isinstance(layers, list):
+        return style_with_scalar_spacing, replaced_layer_ids
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        layout = layer.get("layout")
+        if not isinstance(layout, dict):
+            continue
+        symbol_spacing = layout.get("symbol-spacing")
+        if not isinstance(symbol_spacing, list):
+            continue
+        scalar_spacing = _extract_symbol_spacing_scalar(symbol_spacing)
+        if scalar_spacing is None:
+            continue
+        layout["symbol-spacing"] = scalar_spacing
+        replaced_layer_ids.append(str(layer.get("id") or ""))
+    return style_with_scalar_spacing, replaced_layer_ids
+
+
+def _style_with_scalar_symbol_spacing(style_definition: dict[str, object]) -> tuple[dict[str, object], int]:
+    style_with_scalar_spacing, replaced_layer_ids = _style_with_scalar_symbol_spacing_details(style_definition)
+    return style_with_scalar_spacing, len(replaced_layer_ids)
 
 
 def _qgis_conversion_context_with_sprites(sprite_resources: MapboxSpriteResources):
@@ -1095,6 +1180,10 @@ def _qgis_converter_warning_report(
             qfit_preprocessed_style
         )
         literal_line_dasharray_warnings = _collect_qgis_converter_warnings(literal_line_dasharray_style)
+        scalar_symbol_spacing_style, symbol_spacing_replaced_layers = _style_with_scalar_symbol_spacing_details(
+            qfit_preprocessed_style
+        )
+        scalar_symbol_spacing_warnings = _collect_qgis_converter_warnings(scalar_symbol_spacing_style)
         sprite_image_loaded = None
         if sprite_resources is not None:
             sprite_context_warnings, sprite_image_loaded = _collect_qgis_converter_warnings_with_sprite_context(
@@ -1112,6 +1201,7 @@ def _qgis_converter_warning_report(
     iconless_summary = _qgis_warning_summary(iconless_warnings)
     scalar_line_opacity_summary = _qgis_warning_summary(scalar_line_opacity_warnings)
     literal_line_dasharray_summary = _qgis_warning_summary(literal_line_dasharray_warnings)
+    scalar_symbol_spacing_summary = _qgis_warning_summary(scalar_symbol_spacing_warnings)
     report = {
         "raw": raw_summary,
         "qfit_preprocessed": qfit_summary,
@@ -1140,6 +1230,13 @@ def _qgis_converter_warning_report(
             "summary": literal_line_dasharray_summary,
             "warning_count_delta_from_qfit": len(qfit_warnings) - len(literal_line_dasharray_warnings),
             "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, literal_line_dasharray_summary),
+        },
+        _SCALAR_SYMBOL_SPACING_PROBE_KEY: {
+            _SYMBOL_SPACING_EXPRESSION_COUNT_KEY: len(symbol_spacing_replaced_layers),
+            _SYMBOL_SPACING_REPLACED_LAYERS_KEY: symbol_spacing_replaced_layers,
+            "summary": scalar_symbol_spacing_summary,
+            "warning_count_delta_from_qfit": len(qfit_warnings) - len(scalar_symbol_spacing_warnings),
+            "reduced_from_qfit": _qgis_warning_reduction_report(qfit_summary, scalar_symbol_spacing_summary),
         },
     }
     if sprite_context_warnings is not None:
@@ -1580,171 +1677,213 @@ def _markdown_icon_image_probe(probe: object) -> list[str]:
     return lines
 
 
-def _markdown_line_opacity_probe(probe: object) -> list[str]:
+@dataclass(frozen=True)
+class _ProbeMarkdownConfig:
+    title: str
+    safety_note: str
+    guidance: str
+    count_key: str
+    count_label: str
+    warning_count_label: str
+    section_label: str
+    remaining_label: str
+    before_label: str
+    after_label: str
+    include_unresolved_properties: bool = False
+
+
+def _markdown_expression_property_probe(probe: object, *, config: _ProbeMarkdownConfig) -> list[str]:
     if not isinstance(probe, dict):
         return []
     summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
     reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
     lines = [
-        "#### Diagnostic line-opacity scalarization probe",
+        config.title,
         "",
-        "This is not a rendering-safe qfit preprocessing mode; line opacity preserves zoom/data-driven cartographic emphasis.",
-        "Use it only to estimate how much converter warning debt is tied to Mapbox line-opacity expressions.",
+        config.safety_note,
+        config.guidance,
         "",
-        f"Line opacity expressions replaced in probe: {probe.get(_LINE_OPACITY_EXPRESSION_COUNT_KEY, 0)}",
-        f"Warnings after scalar line opacity: {summary.get('count', 0)}",
+        f"{config.count_label}: {probe.get(config.count_key, 0)}",
+        f"{config.warning_count_label}: {summary.get('count', 0)}",
         f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
         "",
     ]
+    _extend_markdown_probe_reduction_sections(lines, reduced=reduced, config=config)
+    lines.extend(_markdown_probe_remaining_warning_sections(summary, config=config))
+    lines.extend(_markdown_probe_unresolved_property_sections(probe, config=config))
+    return lines
+
+
+def _extend_markdown_probe_reduction_sections(
+    lines: list[str],
+    *,
+    reduced: dict[str, object],
+    config: _ProbeMarkdownConfig,
+) -> None:
     by_message = list(reduced.get("by_message") or [])
     by_group = list(reduced.get("by_layer_group") or [])
     if by_message:
         lines.extend(
             [
-                "##### Line-opacity probe reductions by message",
+                f"##### {config.section_label} probe reductions by message",
                 "",
                 *_markdown_warning_reduction_table(
                     by_message,
                     key="message",
                     label=_MARKDOWN_MESSAGE_LABEL,
-                    before_label="Before line-opacity probe",
-                    after_label="Scalar line-opacity",
+                    before_label=config.before_label,
+                    after_label=config.after_label,
                 ),
             ]
         )
     if by_group:
         lines.extend(
             [
-                "##### Line-opacity probe reductions by layer group",
+                f"##### {config.section_label} probe reductions by layer group",
                 "",
                 *_markdown_warning_reduction_table(
                     by_group,
                     key="group",
                     label=_MARKDOWN_LAYER_GROUP_LABEL,
-                    before_label="Before line-opacity probe",
-                    after_label="Scalar line-opacity",
+                    before_label=config.before_label,
+                    after_label=config.after_label,
                 ),
             ]
         )
-    lines.extend(
-        [
-            "##### Remaining line-opacity probe warnings by message",
-            "",
-            *_markdown_named_count_table(
-                list(summary.get("by_message") or []),
-                key="message",
-                label=_MARKDOWN_MESSAGE_LABEL,
-            ),
-            "##### Remaining line-opacity probe warnings by layer group",
-            "",
-            *_markdown_named_count_table(
-                list(summary.get("by_layer_group") or []),
-                key="group",
-                label=_MARKDOWN_LAYER_GROUP_LABEL,
-            ),
-            "##### Remaining line-opacity probe warnings by layer group and message",
-            "",
-            *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
-            "##### Remaining line-opacity probe warnings by layer",
-            "",
-            *_markdown_named_count_table(
-                list(summary.get("by_layer") or []),
-                key="layer",
-                label=_MARKDOWN_LAYER_LABEL,
-            ),
-        ]
-    )
-    return lines
 
 
-def _markdown_line_dasharray_probe(probe: object) -> list[str]:
-    if not isinstance(probe, dict):
+def _markdown_probe_remaining_warning_sections(
+    summary: dict[str, object],
+    *,
+    config: _ProbeMarkdownConfig,
+) -> list[str]:
+    return [
+        f"##### Remaining {config.remaining_label} probe warnings by message",
+        "",
+        *_markdown_named_count_table(
+            list(summary.get("by_message") or []),
+            key="message",
+            label=_MARKDOWN_MESSAGE_LABEL,
+        ),
+        f"##### Remaining {config.remaining_label} probe warnings by layer group",
+        "",
+        *_markdown_named_count_table(
+            list(summary.get("by_layer_group") or []),
+            key="group",
+            label=_MARKDOWN_LAYER_GROUP_LABEL,
+        ),
+        f"##### Remaining {config.remaining_label} probe warnings by layer group and message",
+        "",
+        *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
+        f"##### Remaining {config.remaining_label} probe warnings by layer",
+        "",
+        *_markdown_named_count_table(
+            list(summary.get("by_layer") or []),
+            key="layer",
+            label=_MARKDOWN_LAYER_LABEL,
+        ),
+    ]
+
+
+def _markdown_probe_unresolved_property_sections(
+    probe: dict[str, object],
+    *,
+    config: _ProbeMarkdownConfig,
+) -> list[str]:
+    if not config.include_unresolved_properties:
         return []
-    summary = probe.get("summary") if isinstance(probe.get("summary"), dict) else {}
-    reduced = probe.get("reduced_from_qfit") if isinstance(probe.get("reduced_from_qfit"), dict) else {}
     unresolved_property_summary = (
         probe.get("remaining_warning_layers_by_unresolved_property")
         if isinstance(probe.get("remaining_warning_layers_by_unresolved_property"), dict)
         else {}
     )
-    lines = [
-        "#### Diagnostic line-dasharray literalization probe",
-        "",
-        "This is not a rendering-safe qfit preprocessing mode; line dash arrays preserve zoom/data-driven cartographic distinctions.",
-        "Use it only to estimate how much converter warning debt is tied to Mapbox line-dasharray expressions.",
-        "",
-        f"Line dasharray expressions replaced in probe: {probe.get(_LINE_DASHARRAY_EXPRESSION_COUNT_KEY, 0)}",
-        f"Warnings after literal line dasharray: {summary.get('count', 0)}",
-        f"{_MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL}: {probe.get('warning_count_delta_from_qfit', 0)}",
-        "",
-    ]
-    by_message = list(reduced.get("by_message") or [])
-    by_group = list(reduced.get("by_layer_group") or [])
     unresolved_by_property = list(unresolved_property_summary.get("by_property") or [])
     unresolved_by_group_property = list(unresolved_property_summary.get("by_layer_group_and_property") or [])
-    if by_message:
-        lines.extend(
-            [
-                "##### Line-dasharray probe reductions by message",
-                "",
-                *_markdown_warning_reduction_table(
-                    by_message,
-                    key="message",
-                    label=_MARKDOWN_MESSAGE_LABEL,
-                    before_label="Before line-dasharray probe",
-                    after_label="Literal line-dasharray",
-                ),
-            ]
-        )
-    if by_group:
-        lines.extend(
-            [
-                "##### Line-dasharray probe reductions by layer group",
-                "",
-                *_markdown_warning_reduction_table(
-                    by_group,
-                    key="group",
-                    label=_MARKDOWN_LAYER_GROUP_LABEL,
-                    before_label="Before line-dasharray probe",
-                    after_label="Literal line-dasharray",
-                ),
-            ]
-        )
-    lines.extend(
-        [
-            "##### Remaining line-dasharray probe warnings by message",
-            "",
-            *_markdown_named_count_table(
-                list(summary.get("by_message") or []),
-                key="message",
-                label=_MARKDOWN_MESSAGE_LABEL,
+    return [
+        f"##### Remaining {config.remaining_label} probe warning layers by unresolved qfit property",
+        "",
+        *_markdown_count_table(unresolved_by_property),
+        (
+            f"##### Remaining {config.remaining_label} probe warning layers "
+            "by layer group and unresolved qfit property"
+        ),
+        "",
+        *_markdown_group_count_table(unresolved_by_group_property),
+    ]
+
+
+def _markdown_line_opacity_probe(probe: object) -> list[str]:
+    return _markdown_expression_property_probe(
+        probe,
+        config=_ProbeMarkdownConfig(
+            title="#### Diagnostic line-opacity scalarization probe",
+            safety_note=(
+                "This is not a rendering-safe qfit preprocessing mode; "
+                "line opacity preserves zoom/data-driven cartographic emphasis."
             ),
-            "##### Remaining line-dasharray probe warnings by layer group",
-            "",
-            *_markdown_named_count_table(
-                list(summary.get("by_layer_group") or []),
-                key="group",
-                label=_MARKDOWN_LAYER_GROUP_LABEL,
+            guidance=(
+                "Use it only to estimate how much converter warning debt is tied to "
+                "Mapbox line-opacity expressions."
             ),
-            "##### Remaining line-dasharray probe warnings by layer group and message",
-            "",
-            *_markdown_group_message_count_table(list(summary.get("by_layer_group_and_message") or [])),
-            "##### Remaining line-dasharray probe warnings by layer",
-            "",
-            *_markdown_named_count_table(
-                list(summary.get("by_layer") or []),
-                key="layer",
-                label=_MARKDOWN_LAYER_LABEL,
-            ),
-            "##### Remaining line-dasharray probe warning layers by unresolved qfit property",
-            "",
-            *_markdown_count_table(unresolved_by_property),
-            "##### Remaining line-dasharray probe warning layers by layer group and unresolved qfit property",
-            "",
-            *_markdown_group_count_table(unresolved_by_group_property),
-        ]
+            count_key=_LINE_OPACITY_EXPRESSION_COUNT_KEY,
+            count_label="Line opacity expressions replaced in probe",
+            warning_count_label="Warnings after scalar line opacity",
+            section_label="Line-opacity",
+            remaining_label="line-opacity",
+            before_label="Before line-opacity probe",
+            after_label="Scalar line-opacity",
+        ),
     )
-    return lines
+
+
+def _markdown_line_dasharray_probe(probe: object) -> list[str]:
+    return _markdown_expression_property_probe(
+        probe,
+        config=_ProbeMarkdownConfig(
+            title="#### Diagnostic line-dasharray literalization probe",
+            safety_note=(
+                "This is not a rendering-safe qfit preprocessing mode; "
+                "line dash arrays preserve zoom/data-driven cartographic distinctions."
+            ),
+            guidance=(
+                "Use it only to estimate how much converter warning debt is tied to "
+                "Mapbox line-dasharray expressions."
+            ),
+            count_key=_LINE_DASHARRAY_EXPRESSION_COUNT_KEY,
+            count_label="Line dasharray expressions replaced in probe",
+            warning_count_label="Warnings after literal line dasharray",
+            section_label="Line-dasharray",
+            remaining_label="line-dasharray",
+            before_label="Before line-dasharray probe",
+            after_label="Literal line-dasharray",
+            include_unresolved_properties=True,
+        ),
+    )
+
+
+def _markdown_symbol_spacing_probe(probe: object) -> list[str]:
+    return _markdown_expression_property_probe(
+        probe,
+        config=_ProbeMarkdownConfig(
+            title="#### Diagnostic symbol-spacing scalarization probe",
+            safety_note=(
+                "This is not a rendering-safe qfit preprocessing mode; "
+                "symbol spacing preserves zoom/data-driven label density."
+            ),
+            guidance=(
+                "Use it only to estimate how much converter warning debt is tied to "
+                "Mapbox symbol-spacing expressions."
+            ),
+            count_key=_SYMBOL_SPACING_EXPRESSION_COUNT_KEY,
+            count_label="Symbol spacing expressions replaced in probe",
+            warning_count_label="Warnings after scalar symbol spacing",
+            section_label="Symbol-spacing",
+            remaining_label="symbol-spacing",
+            before_label="Before symbol-spacing probe",
+            after_label="Scalar symbol-spacing",
+            include_unresolved_properties=True,
+        ),
+    )
 
 
 def _markdown_sprite_context_probe(probe: object) -> list[str]:
@@ -1851,6 +1990,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
     icon_image_probe = report.get("without_icon_images_probe")
     line_opacity_probe = report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
     line_dasharray_probe = report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY)
+    symbol_spacing_probe = report.get(_SCALAR_SYMBOL_SPACING_PROBE_KEY)
     sprite_context_probe = report.get(_SPRITE_CONTEXT_PROBE_KEY)
     lines = [
         "### QGIS converter warnings",
@@ -1927,6 +2067,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
             *_markdown_icon_image_probe(icon_image_probe),
             *_markdown_line_opacity_probe(line_opacity_probe),
             *_markdown_line_dasharray_probe(line_dasharray_probe),
+            *_markdown_symbol_spacing_probe(symbol_spacing_probe),
         ]
     )
     return lines
