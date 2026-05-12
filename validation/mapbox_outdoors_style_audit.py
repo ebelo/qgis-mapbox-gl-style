@@ -1117,6 +1117,52 @@ def _filter_parse_parser_friendly_part_support_rows(
     return rows
 
 
+def _filter_parse_parser_friendly_filter_support_row(
+    style_definition: dict[str, object],
+    layer: dict[str, object],
+    unsupported_row: dict[str, object],
+) -> dict[str, object]:
+    original_filter = unsupported_row.get("filter")
+    zoom_normalized_filter = _diagnostic_filter_value_at_zoom(original_filter)
+    parser_friendly_filter = _diagnostic_filter_parser_friendly_value(zoom_normalized_filter)
+    warnings = _collect_qgis_converter_warnings(
+        _filter_part_probe_style(style_definition, layer, parser_friendly_filter)
+    )
+    unsupported_warning_count = _filter_parse_unsupported_warning_count(warnings)
+    return {
+        "layer": str(unsupported_row.get("layer") or ""),
+        "group": str(unsupported_row.get("group") or ""),
+        "type": str(unsupported_row.get("type") or ""),
+        "source_layer": str(unsupported_row.get("source_layer") or ""),
+        "original_operator_signature": str(unsupported_row.get("operator_signature") or _NO_OPERATOR_SIGNATURE),
+        "zoom_normalized_operator_signature": _operator_signature(zoom_normalized_filter),
+        "operator_signature": _operator_signature(parser_friendly_filter),
+        "changed_by_zoom_normalization": zoom_normalized_filter != original_filter,
+        "changed_by_parser_friendly_normalization": parser_friendly_filter != zoom_normalized_filter,
+        "changed_by_zoom_or_parser_friendly_normalization": parser_friendly_filter != original_filter,
+        "unsupported_warning_count": unsupported_warning_count,
+        "unsupported_warning_messages": _filter_parse_unsupported_message_summary(warnings),
+        "supported_by_qgis_parser": unsupported_warning_count == 0,
+        "warnings": warnings,
+        "filter": parser_friendly_filter,
+        "zoom_normalized_filter": zoom_normalized_filter,
+        "original_filter": original_filter,
+    }
+
+
+def _filter_parse_parser_friendly_filter_support_rows(
+    style_definition: dict[str, object],
+    layers_by_id: dict[str, dict[str, object]],
+    unsupported_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for unsupported_row in unsupported_rows:
+        layer = layers_by_id.get(str(unsupported_row.get("layer") or ""))
+        if layer is not None:
+            rows.append(_filter_parse_parser_friendly_filter_support_row(style_definition, layer, unsupported_row))
+    return rows
+
+
 def _filter_parse_row_is_unsupported(row: dict[str, object]) -> bool:
     return int(row.get("unsupported_warning_count") or 0) > 0
 
@@ -1138,6 +1184,13 @@ def _filter_parse_supported_part_sort_key(row: dict[str, object]) -> tuple[str, 
         str(row.get("group") or ""),
         str(row.get("layer") or ""),
         int(row.get("part_index") or 0),
+    )
+
+
+def _filter_parse_supported_filter_sort_key(row: dict[str, object]) -> tuple[str, str]:
+    return (
+        str(row.get("group") or ""),
+        str(row.get("layer") or ""),
     )
 
 
@@ -1164,6 +1217,9 @@ class _FilterParseSupportReportRows:
     part_rows: list[dict[str, object]]
     unsupported_rows: list[dict[str, object]]
     unsupported_part_rows: list[dict[str, object]]
+    parser_friendly_filter_rows: list[dict[str, object]]
+    parser_friendly_supported_filter_rows: list[dict[str, object]]
+    parser_friendly_unsupported_filter_rows: list[dict[str, object]]
     zoom_normalized_part_rows: list[dict[str, object]]
     zoom_normalized_supported_part_rows: list[dict[str, object]]
     zoom_normalized_unsupported_part_rows: list[dict[str, object]]
@@ -1191,6 +1247,13 @@ def _filter_parse_support_report_rows(style_definition: dict[str, object]) -> _F
     rows, part_rows, layers_by_id = _collect_filter_parse_support_rows(style_definition)
     unsupported_rows = _filter_parse_unsupported_rows(rows)
     unsupported_part_rows = _filter_parse_unsupported_rows(part_rows)
+    parser_friendly_filter_rows = _filter_parse_parser_friendly_filter_support_rows(
+        style_definition,
+        layers_by_id,
+        unsupported_rows,
+    )
+    parser_friendly_supported_filter_rows = _filter_parse_supported_rows(parser_friendly_filter_rows)
+    parser_friendly_unsupported_filter_rows = _filter_parse_unsupported_rows(parser_friendly_filter_rows)
     zoom_normalized_part_rows = _filter_parse_zoom_normalized_part_support_rows(
         style_definition,
         layers_by_id,
@@ -1210,6 +1273,9 @@ def _filter_parse_support_report_rows(style_definition: dict[str, object]) -> _F
         part_rows=part_rows,
         unsupported_rows=unsupported_rows,
         unsupported_part_rows=unsupported_part_rows,
+        parser_friendly_filter_rows=parser_friendly_filter_rows,
+        parser_friendly_supported_filter_rows=parser_friendly_supported_filter_rows,
+        parser_friendly_unsupported_filter_rows=parser_friendly_unsupported_filter_rows,
         zoom_normalized_part_rows=zoom_normalized_part_rows,
         zoom_normalized_supported_part_rows=zoom_normalized_supported_part_rows,
         zoom_normalized_unsupported_part_rows=zoom_normalized_unsupported_part_rows,
@@ -1224,6 +1290,17 @@ def _qgis_filter_parse_support_count_report(report_rows: _FilterParseSupportRepo
         "filter_expression_count": len(report_rows.rows),
         "qgis_parser_supported_count": len(report_rows.rows) - len(report_rows.unsupported_rows),
         "qgis_parser_unsupported_count": len(report_rows.unsupported_rows),
+        "parser_friendly_filter_count": len(report_rows.parser_friendly_filter_rows),
+        "parser_friendly_changed_filter_count": _filter_parse_changed_row_count(
+            report_rows.parser_friendly_filter_rows,
+            "changed_by_zoom_or_parser_friendly_normalization",
+        ),
+        "qgis_parser_supported_parser_friendly_filter_count": len(
+            report_rows.parser_friendly_supported_filter_rows
+        ),
+        "qgis_parser_unsupported_parser_friendly_filter_count": len(
+            report_rows.parser_friendly_unsupported_filter_rows
+        ),
         "direct_filter_part_count": len(report_rows.part_rows),
         "qgis_parser_supported_part_count": len(report_rows.part_rows) - len(report_rows.unsupported_part_rows),
         "qgis_parser_unsupported_part_count": len(report_rows.unsupported_part_rows),
@@ -1255,6 +1332,12 @@ def _qgis_filter_parse_support_group_report(report_rows: _FilterParseSupportRepo
         "unsupported_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
             report_rows.unsupported_rows
         ),
+        "parser_friendly_supported_filters_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
+            report_rows.parser_friendly_supported_filter_rows
+        ),
+        "parser_friendly_unsupported_filters_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
+            report_rows.parser_friendly_unsupported_filter_rows
+        ),
         "unsupported_parts_by_layer_group_and_operator_signature": _filter_parse_signature_summary(
             report_rows.unsupported_part_rows
         ),
@@ -1272,6 +1355,14 @@ def _qgis_filter_parse_support_group_report(report_rows: _FilterParseSupportRepo
 
 def _qgis_filter_parse_support_detail_report(report_rows: _FilterParseSupportReportRows) -> dict[str, object]:
     return {
+        "parser_friendly_supported_filters": sorted(
+            report_rows.parser_friendly_supported_filter_rows,
+            key=_filter_parse_supported_filter_sort_key,
+        ),
+        "parser_friendly_unsupported_filters": sorted(
+            report_rows.parser_friendly_unsupported_filter_rows,
+            key=_filter_parse_unsupported_layer_sort_key,
+        ),
         "zoom_normalized_supported_parts": sorted(
             report_rows.zoom_normalized_supported_part_rows,
             key=_filter_parse_supported_part_sort_key,
@@ -3005,6 +3096,73 @@ def _markdown_filter_parse_unsupported_layer_table(
     return lines
 
 
+def _markdown_filter_parse_parser_friendly_filter_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    shown_rows = rows[:limit]
+    lines = [
+        "| Layer | Original operators | Zoom-normalized operators | Parser-friendly operators | Parser-friendly filter |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in shown_rows:
+        lines.append(
+            "| `{layer}` | `{original}` | `{zoom_normalized}` | `{parser_friendly}` | {filter_value} |".format(
+                layer=row.get("layer", ""),
+                original=row.get("original_operator_signature", ""),
+                zoom_normalized=row.get("zoom_normalized_operator_signature", ""),
+                parser_friendly=row.get("operator_signature", ""),
+                filter_value=_markdown_code_cell(_compact_json(row.get("filter"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | {len(rows) - limit} more parser-friendly filters omitted |")
+    lines.append("")
+    return lines
+
+
+def _markdown_filter_parse_parser_friendly_unsupported_filter_table(
+    rows: list[dict[str, object]],
+    *,
+    limit: int = 25,
+) -> list[str]:
+    if not rows:
+        return ["—", ""]
+    shown_rows = rows[:limit]
+    lines = [
+        (
+            "| Layer | Original operators | Zoom-normalized operators | Parser-friendly operators | "
+            "Unsupported warnings | Messages | Parser-friendly filter |"
+        ),
+        "| --- | --- | --- | --- | ---: | --- | --- |",
+    ]
+    for row in shown_rows:
+        lines.append(
+            "| `{layer}` | `{original}` | `{zoom_normalized}` | `{parser_friendly}` | {warnings} | "
+            "{messages} | {filter_value} |".format(
+                layer=row.get("layer", ""),
+                original=row.get("original_operator_signature", ""),
+                zoom_normalized=row.get("zoom_normalized_operator_signature", ""),
+                parser_friendly=row.get("operator_signature", ""),
+                warnings=row.get("unsupported_warning_count", 0),
+                messages=_markdown_code_cell(
+                    ", ".join(
+                        str(message_row.get("message") or "")
+                        for message_row in row.get("unsupported_warning_messages", []) or []
+                    )
+                ),
+                filter_value=_markdown_code_cell(_compact_json(row.get("filter"))),
+            )
+        )
+    if len(rows) > limit:
+        lines.append(f"| … | … | … | … | … | … | {len(rows) - limit} more rejected filters omitted |")
+    lines.append("")
+    return lines
+
+
 def _markdown_filter_parse_unsupported_part_table(
     rows: list[dict[str, object]],
     *,
@@ -3168,28 +3326,31 @@ def _markdown_filter_parse_warning_message_table(rows: list[dict[str, object]]) 
     return _markdown_named_count_table(rows, key="message", label=_MARKDOWN_MESSAGE_LABEL)
 
 
-def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
-    if not isinstance(probe, dict):
-        return []
-    unsupported_rows = list(probe.get("unsupported_layers") or [])
-    unsupported_parts = list(probe.get("unsupported_parts") or [])
-    zoom_normalized_supported_parts = list(probe.get("zoom_normalized_supported_parts") or [])
-    zoom_normalized_unsupported_parts = list(probe.get("zoom_normalized_unsupported_parts") or [])
-    parser_friendly_supported_parts = list(probe.get("parser_friendly_supported_parts") or [])
-    parser_friendly_unsupported_parts = list(probe.get("parser_friendly_unsupported_parts") or [])
+def _filter_parse_probe_rows(probe: dict[str, object], key: str) -> list[dict[str, object]]:
+    return list(probe.get(key) or [])
+
+
+def _markdown_filter_parse_support_count_lines(probe: dict[str, object]) -> list[str]:
     return [
-        "#### Diagnostic filter parser support probe",
-        "",
-        (
-            "This isolates each remaining qfit-preprocessed filter in a minimal same-type "
-            "QGIS converter style to distinguish filters the QGIS parser accepts from "
-            "filters that directly trigger unsupported-expression warnings. It is not a "
-            "rendering-safe qfit preprocessing mode."
-        ),
-        "",
         f"Filter expressions tested: {probe.get('filter_expression_count', 0)}",
         f"Accepted by the QGIS parser probe: {probe.get('qgis_parser_supported_count', 0)}",
         f"Rejected by the QGIS parser probe: {probe.get('qgis_parser_unsupported_count', 0)}",
+        (
+            "Rejected filters re-tested with zoom + parser-friendly simplifications: "
+            f"{probe.get('parser_friendly_filter_count', 0)}"
+        ),
+        (
+            "Changed by zoom + parser-friendly simplification: "
+            f"{probe.get('parser_friendly_changed_filter_count', 0)}"
+        ),
+        (
+            "Accepted after zoom + parser-friendly simplification: "
+            f"{probe.get('qgis_parser_supported_parser_friendly_filter_count', 0)}"
+        ),
+        (
+            "Still rejected after zoom + parser-friendly simplification: "
+            f"{probe.get('qgis_parser_unsupported_parser_friendly_filter_count', 0)}"
+        ),
         f"Direct parts tested from rejected boolean filters: {probe.get('direct_filter_part_count', 0)}",
         f"Rejected direct parts: {probe.get('qgis_parser_unsupported_part_count', 0)}",
         (
@@ -3218,47 +3379,90 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             "Still rejected after parser-friendly simplification: "
             f"{probe.get('qgis_parser_unsupported_parser_friendly_part_count', 0)}"
         ),
-        "",
+    ]
+
+
+def _markdown_filter_parse_support_summary_sections(probe: dict[str, object]) -> list[str]:
+    return [
         "##### Unsupported filter probes by layer group",
         "",
         *_markdown_named_count_table(
-            list(probe.get("unsupported_by_layer_group") or []),
+            _filter_parse_probe_rows(probe, "unsupported_by_layer_group"),
             key="group",
             label=_MARKDOWN_LAYER_GROUP_LABEL,
         ),
         "##### Unsupported filter parser warnings by message",
         "",
-        *_markdown_filter_parse_warning_message_table(list(probe.get("unsupported_by_warning_message") or [])),
+        *_markdown_filter_parse_warning_message_table(
+            _filter_parse_probe_rows(probe, "unsupported_by_warning_message")
+        ),
         "##### Unsupported filter probes by layer group and operators",
         "",
         *_markdown_filter_signature_group_table(
-            list(probe.get("unsupported_by_layer_group_and_operator_signature") or []),
+            _filter_parse_probe_rows(probe, "unsupported_by_layer_group_and_operator_signature"),
             count_label="Unsupported filters",
+        ),
+        "##### Parser-friendly full filters accepted by layer group and operators",
+        "",
+        *_markdown_filter_signature_group_table(
+            _filter_parse_probe_rows(probe, "parser_friendly_supported_filters_by_layer_group_and_operator_signature"),
+            count_label="Accepted filters",
+        ),
+        "##### Parser-friendly full filters still rejected by layer group and operators",
+        "",
+        *_markdown_filter_signature_group_table(
+            _filter_parse_probe_rows(probe, "parser_friendly_unsupported_filters_by_layer_group_and_operator_signature"),
+            count_label="Still rejected filters",
         ),
         "##### Unsupported direct filter parts by layer group and operators",
         "",
         *_markdown_filter_signature_group_table(
-            list(probe.get("unsupported_parts_by_layer_group_and_operator_signature") or []),
+            _filter_parse_probe_rows(probe, "unsupported_parts_by_layer_group_and_operator_signature"),
             count_label="Unsupported parts",
         ),
         "##### Zoom-normalized direct parts still rejected by layer group and operators",
         "",
         *_markdown_filter_signature_group_table(
-            list(probe.get("zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature") or []),
+            _filter_parse_probe_rows(probe, "zoom_normalized_unsupported_parts_by_layer_group_and_operator_signature"),
             count_label="Still rejected parts",
         ),
         "##### Parser-friendly direct parts accepted by layer group and operators",
         "",
         *_markdown_filter_signature_group_table(
-            list(probe.get("parser_friendly_supported_parts_by_layer_group_and_operator_signature") or []),
+            _filter_parse_probe_rows(probe, "parser_friendly_supported_parts_by_layer_group_and_operator_signature"),
             count_label="Accepted parts",
         ),
         "##### Parser-friendly direct parts still rejected by layer group and operators",
         "",
         *_markdown_filter_signature_group_table(
-            list(probe.get("parser_friendly_unsupported_parts_by_layer_group_and_operator_signature") or []),
+            _filter_parse_probe_rows(probe, "parser_friendly_unsupported_parts_by_layer_group_and_operator_signature"),
             count_label="Still rejected parts",
         ),
+    ]
+
+
+def _markdown_filter_parse_support_full_filter_sections(probe: dict[str, object]) -> list[str]:
+    return [
+        "##### Full filters accepted after zoom + parser-friendly simplification",
+        "",
+        (
+            "This diagnostic applies the same fixed-z12 zoom substitution and parser-friendly simplifications to "
+            "entire rejected filters. It remains evidence only, not a rendering-safe qfit preprocessing mode."
+        ),
+        "",
+        *_markdown_filter_parse_parser_friendly_filter_table(
+            _filter_parse_probe_rows(probe, "parser_friendly_supported_filters")
+        ),
+        "##### Full filters still rejected after zoom + parser-friendly simplification",
+        "",
+        *_markdown_filter_parse_parser_friendly_unsupported_filter_table(
+            _filter_parse_probe_rows(probe, "parser_friendly_unsupported_filters")
+        ),
+    ]
+
+
+def _markdown_filter_parse_support_direct_part_sections(probe: dict[str, object]) -> list[str]:
+    return [
         "##### Direct filter parts accepted after zoom-normalization",
         "",
         (
@@ -3266,7 +3470,9 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             f"z{_EXPRESSION_PROBE_ZOOM:g}. It is evidence only, not a rendering-safe rewrite."
         ),
         "",
-        *_markdown_filter_parse_zoom_normalized_part_table(zoom_normalized_supported_parts),
+        *_markdown_filter_parse_zoom_normalized_part_table(
+            _filter_parse_probe_rows(probe, "zoom_normalized_supported_parts")
+        ),
         "##### Direct filter parts still rejected after zoom-normalization",
         "",
         (
@@ -3274,7 +3480,9 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             f"z{_EXPRESSION_PROBE_ZOOM:g} diagnostic zoom substituted."
         ),
         "",
-        *_markdown_filter_parse_zoom_normalized_unsupported_part_table(zoom_normalized_unsupported_parts),
+        *_markdown_filter_parse_zoom_normalized_unsupported_part_table(
+            _filter_parse_probe_rows(probe, "zoom_normalized_unsupported_parts")
+        ),
         "##### Direct filter parts accepted after parser-friendly simplification",
         "",
         (
@@ -3282,16 +3490,41 @@ def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
             "zoom-normalized parts. It remains evidence only, not a rendering-safe qfit preprocessing mode."
         ),
         "",
-        *_markdown_filter_parse_parser_friendly_part_table(parser_friendly_supported_parts),
+        *_markdown_filter_parse_parser_friendly_part_table(
+            _filter_parse_probe_rows(probe, "parser_friendly_supported_parts")
+        ),
         "##### Direct filter parts still rejected after parser-friendly simplification",
         "",
-        *_markdown_filter_parse_parser_friendly_unsupported_part_table(parser_friendly_unsupported_parts),
+        *_markdown_filter_parse_parser_friendly_unsupported_part_table(
+            _filter_parse_probe_rows(probe, "parser_friendly_unsupported_parts")
+        ),
         "##### Unsupported direct filter parts",
         "",
-        *_markdown_filter_parse_unsupported_part_table(unsupported_parts),
+        *_markdown_filter_parse_unsupported_part_table(_filter_parse_probe_rows(probe, "unsupported_parts")),
         "##### Unsupported filter probe layers",
         "",
-        *_markdown_filter_parse_unsupported_layer_table(unsupported_rows),
+        *_markdown_filter_parse_unsupported_layer_table(_filter_parse_probe_rows(probe, "unsupported_layers")),
+    ]
+
+
+def _markdown_filter_parse_support_probe(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    return [
+        "#### Diagnostic filter parser support probe",
+        "",
+        (
+            "This isolates each remaining qfit-preprocessed filter in a minimal same-type "
+            "QGIS converter style to distinguish filters the QGIS parser accepts from "
+            "filters that directly trigger unsupported-expression warnings. It is not a "
+            "rendering-safe qfit preprocessing mode."
+        ),
+        "",
+        *_markdown_filter_parse_support_count_lines(probe),
+        "",
+        *_markdown_filter_parse_support_summary_sections(probe),
+        *_markdown_filter_parse_support_full_filter_sections(probe),
+        *_markdown_filter_parse_support_direct_part_sections(probe),
     ]
 
 
