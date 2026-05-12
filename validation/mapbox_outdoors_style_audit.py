@@ -670,6 +670,23 @@ def _filter_probe_style(style_definition: dict[str, object], layer: dict[str, ob
     }
 
 
+def _match_expression_children(candidate: list[object]) -> Iterable[object]:
+    if len(candidate) > 1:
+        yield candidate[1]
+    for output_index in range(3, len(candidate) - 1, 2):
+        yield candidate[output_index]
+    if len(candidate) > 2:
+        yield candidate[-1]
+
+
+def _filter_operator_children(operator: str, candidate: list[object]) -> Iterable[object]:
+    if operator == "literal":
+        return []
+    if operator == "match":
+        return _match_expression_children(candidate)
+    return candidate[1:]
+
+
 def _filter_operator_names(value: object) -> list[str]:
     operators: set[str] = set()
 
@@ -679,7 +696,7 @@ def _filter_operator_names(value: object) -> list[str]:
         operator = candidate[0]
         if isinstance(operator, str) and operator in _MAPBOX_FILTER_OPERATORS:
             operators.add(operator)
-            children = [] if operator == "literal" else candidate[1:]
+            children = _filter_operator_children(operator, candidate)
         else:
             children = candidate
         for child in children:

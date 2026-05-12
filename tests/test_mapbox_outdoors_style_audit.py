@@ -523,6 +523,38 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ],
         )
 
+    def test_filter_operator_signature_omits_match_label_arrays(self):
+        self.assertEqual(
+            mapbox_outdoors_style_audit._operator_signature(
+                [
+                    "match",
+                    ["get", "structure"],
+                    ["none", "ford"],
+                    True,
+                    False,
+                ]
+            ),
+            "get, match",
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._operator_signature(
+                ["none", ["!has", "reflen"], ["!in", "class", "path"]]
+            ),
+            "!has, !in, none",
+        )
+        self.assertEqual(
+            mapbox_outdoors_style_audit._operator_signature(
+                [
+                    "match",
+                    ["get", "class"],
+                    "road",
+                    ["case", ["has", "layer"], True, False],
+                    False,
+                ]
+            ),
+            "case, get, has, match",
+        )
+
     def test_property_removal_impact_probe_ranks_expression_property_warning_deltas(self):
         style = {
             "version": 8,
