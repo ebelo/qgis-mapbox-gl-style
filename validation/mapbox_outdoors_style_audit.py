@@ -22,6 +22,11 @@ _MARKDOWN_THREE_COLUMN_COUNT_SEPARATOR = "| --- | --- | ---: |"
 _MARKDOWN_LAYER_GROUP_LABEL = "Layer group"
 _MARKDOWN_MESSAGE_LABEL = "Message"
 _MARKDOWN_LAYER_LABEL = "Layer"
+_MARKDOWN_LAYER_TYPE_LABEL = "Layer type"
+_MARKDOWN_SOURCE_LAYER_LABEL = "Source layer"
+_MARKDOWN_TYPED_CANDIDATE_SEPARATOR = "| --- | --- | --- | --- | --- | --- | --- | --- |"
+_MARKDOWN_TYPED_CANDIDATE_ROW_PREFIX = "| `{layer}` | `{layer_type}` | `{source_layer}` | {zoom} | `{filter_operators}` | "
+_MARKDOWN_TYPED_CANDIDATE_ROW_SUFFIX = "{controls} | {simplified} | {unresolved} |"
 _MARKDOWN_WARNING_DELTA_FROM_QFIT_LABEL = "Warning count delta from qfit preprocessing"
 _EXPRESSION_PROBE_ZOOM = 12.0
 _SPRITE_CONTEXT_PROBE_KEY = "with_sprite_context_probe"
@@ -47,6 +52,12 @@ _TERRAIN_LANDCOVER_CANDIDATES_BY_TYPE_KEY = "terrain_landcover_palette_candidate
 _TERRAIN_LANDCOVER_SIMPLIFIED_BY_PROPERTY_KEY = "terrain_landcover_palette_simplified_by_property"
 _TERRAIN_LANDCOVER_QGIS_DEPENDENT_BY_PROPERTY_KEY = "terrain_landcover_palette_qgis_dependent_by_property"
 _TERRAIN_LANDCOVER_CONTROL_PROPERTIES_KEY = "terrain_landcover_palette_control_properties"
+_WATER_FLOW_CANDIDATES_KEY = "water_surface_flow_candidates"
+_WATER_FLOW_CANDIDATES_BY_SOURCE_LAYER_KEY = "water_surface_flow_candidates_by_source_layer"
+_WATER_FLOW_CANDIDATES_BY_TYPE_KEY = "water_surface_flow_candidates_by_type"
+_WATER_FLOW_SIMPLIFIED_BY_PROPERTY_KEY = "water_surface_flow_simplified_by_property"
+_WATER_FLOW_QGIS_DEPENDENT_BY_PROPERTY_KEY = "water_surface_flow_qgis_dependent_by_property"
+_WATER_FLOW_CONTROL_PROPERTIES_KEY = "water_surface_flow_control_properties"
 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY = "qfit_simplified_control_properties"
 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY = "qgis_dependent_control_properties"
 _PROPERTY_REMOVAL_IMPACT_PROBE_KEY = "property_removal_impact_probe"
@@ -124,6 +135,12 @@ _TERRAIN_LANDCOVER_CONTROL_PROPERTIES = (
     "paint.line-translate",
     "paint.line-width",
 )
+# Water candidates intentionally share the visible fill/line layer types and broad
+# paint/layout control inventory used by the existing road and terrain diagnostics.
+# Keep these aliases explicit so future water-only divergences can be reassigned
+# deliberately without changing the other diagnostic domains.
+_WATER_FLOW_LAYER_TYPES = _ROAD_TRAIL_HIERARCHY_LAYER_TYPES
+_WATER_FLOW_CONTROL_PROPERTIES = _TERRAIN_LANDCOVER_CONTROL_PROPERTIES
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -739,6 +756,19 @@ def _terrain_landcover_control_properties(layer: dict[str, object]) -> list[str]
     return _control_properties(layer, _TERRAIN_LANDCOVER_CONTROL_PROPERTIES, include_filter=True)
 
 
+def _is_water_flow_candidate_layer(layer: dict[str, object]) -> bool:
+    return (
+        str(layer.get("group") or "") == "water"
+        and str(layer.get("type") or "") in _WATER_FLOW_LAYER_TYPES
+        and not _is_source_hidden_layer(layer)
+        and not _is_qfit_hidden_layer(layer)
+    )
+
+
+def _water_flow_control_properties(layer: dict[str, object]) -> list[str]:
+    return _control_properties(layer, _WATER_FLOW_CONTROL_PROPERTIES, include_filter=True)
+
+
 def _qfit_simplified_control_properties(layer: dict[str, object], controls: set[str]) -> list[str]:
     simplified = layer.get("qfit_simplifies")
     if not isinstance(simplified, list):
@@ -810,6 +840,30 @@ def _terrain_landcover_candidate_rows(layers: list[dict[str, object]]) -> list[d
                     layer,
                     control_set,
                 ),
+            }
+        )
+    return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
+
+
+def _water_flow_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_water_flow_candidate_layer(layer):
+            continue
+        controls = _water_flow_control_properties(layer)
+        if not controls:
+            continue
+        control_set = set(controls)
+        rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "type": str(layer.get("type") or ""),
+                "source_layer": str(layer.get("source_layer") or ""),
+                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                _WATER_FLOW_CONTROL_PROPERTIES_KEY: controls,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
             }
         )
     return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
@@ -2623,6 +2677,7 @@ def build_style_audit(
     label_density_candidates = _label_density_candidate_rows(layers)
     road_trail_hierarchy_candidates = _road_trail_hierarchy_candidate_rows(layers)
     terrain_landcover_candidates = _terrain_landcover_candidate_rows(layers)
+    water_flow_candidates = _water_flow_candidate_rows(layers)
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
     audit = {
         "style": {
@@ -2686,6 +2741,23 @@ def build_style_audit(
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
             ),
             _TERRAIN_LANDCOVER_CANDIDATES_KEY: terrain_landcover_candidates,
+            _WATER_FLOW_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
+                water_flow_candidates,
+                "source_layer",
+            ),
+            _WATER_FLOW_CANDIDATES_BY_TYPE_KEY: _count_rows_by_key(
+                water_flow_candidates,
+                "type",
+            ),
+            _WATER_FLOW_SIMPLIFIED_BY_PROPERTY_KEY: _count_row_values(
+                water_flow_candidates,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY,
+            ),
+            _WATER_FLOW_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                water_flow_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
+            _WATER_FLOW_CANDIDATES_KEY: water_flow_candidates,
         },
         "layers": layers,
     }
@@ -2881,13 +2953,13 @@ def _markdown_road_trail_hierarchy_candidate_table(
             "| Layer | Type | Source layer | Zoom | Filter operators | Road/trail controls | "
             "Simplified/substituted by qfit | QGIS-dependent controls |"
         ),
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        _MARKDOWN_TYPED_CANDIDATE_SEPARATOR,
     ]
     for row in rows:
         lines.append(
             (
-                "| `{layer}` | `{layer_type}` | `{source_layer}` | {zoom} | `{filter_operators}` | "
-                "{controls} | {simplified} | {unresolved} |"
+                _MARKDOWN_TYPED_CANDIDATE_ROW_PREFIX
+                + _MARKDOWN_TYPED_CANDIDATE_ROW_SUFFIX
             ).format(
                 layer=row.get("layer", ""),
                 layer_type=row.get("type", ""),
@@ -2915,13 +2987,13 @@ def _markdown_terrain_landcover_candidate_table(
             "| Layer | Type | Source layer | Zoom | Filter operators | Terrain/landcover controls | "
             "Simplified/substituted by qfit | QGIS-dependent controls |"
         ),
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        _MARKDOWN_TYPED_CANDIDATE_SEPARATOR,
     ]
     for row in rows:
         lines.append(
             (
-                "| `{layer}` | `{layer_type}` | `{source_layer}` | {zoom} | `{filter_operators}` | "
-                "{controls} | {simplified} | {unresolved} |"
+                _MARKDOWN_TYPED_CANDIDATE_ROW_PREFIX
+                + _MARKDOWN_TYPED_CANDIDATE_ROW_SUFFIX
             ).format(
                 layer=row.get("layer", ""),
                 layer_type=row.get("type", ""),
@@ -2929,6 +3001,40 @@ def _markdown_terrain_landcover_candidate_table(
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
                 filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get(_TERRAIN_LANDCOVER_CONTROL_PROPERTIES_KEY) or [])),
+                simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
+                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_water_flow_candidate_table(
+    rows: list[dict[str, object]],
+    *,
+    empty: str = "—",
+) -> list[str]:
+    if not rows:
+        return [empty, ""]
+    lines = [
+        (
+            "| Layer | Type | Source layer | Zoom | Filter operators | Water surface/flow controls | "
+            "Simplified/substituted by qfit | QGIS-dependent controls |"
+        ),
+        _MARKDOWN_TYPED_CANDIDATE_SEPARATOR,
+    ]
+    for row in rows:
+        lines.append(
+            (
+                _MARKDOWN_TYPED_CANDIDATE_ROW_PREFIX
+                + _MARKDOWN_TYPED_CANDIDATE_ROW_SUFFIX
+            ).format(
+                layer=row.get("layer", ""),
+                layer_type=row.get("type", ""),
+                source_layer=row.get("source_layer", ""),
+                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
+                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                controls=_markdown_list(list(row.get(_WATER_FLOW_CONTROL_PROPERTIES_KEY) or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
             )
@@ -4253,12 +4359,12 @@ def _markdown_road_trail_hierarchy_summary(summary: dict[str, object]) -> list[s
         *_markdown_named_count_table(
             _summary_rows(summary, _ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_SOURCE_LAYER_KEY),
             key="source_layer",
-            label="Source layer",
+            label=_MARKDOWN_SOURCE_LAYER_LABEL,
         ),
         *_markdown_named_count_table(
             _summary_rows(summary, _ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_TYPE_KEY),
             key="type",
-            label="Layer type",
+            label=_MARKDOWN_LAYER_TYPE_LABEL,
         ),
         "#### Road/trail hierarchy candidates simplified/substituted by qfit",
         "",
@@ -4282,12 +4388,12 @@ def _markdown_terrain_landcover_summary(summary: dict[str, object]) -> list[str]
         *_markdown_named_count_table(
             _summary_rows(summary, _TERRAIN_LANDCOVER_CANDIDATES_BY_SOURCE_LAYER_KEY),
             key="source_layer",
-            label="Source layer",
+            label=_MARKDOWN_SOURCE_LAYER_LABEL,
         ),
         *_markdown_named_count_table(
             _summary_rows(summary, _TERRAIN_LANDCOVER_CANDIDATES_BY_TYPE_KEY),
             key="type",
-            label="Layer type",
+            label=_MARKDOWN_LAYER_TYPE_LABEL,
         ),
         "#### Terrain/landcover palette candidates simplified/substituted by qfit",
         "",
@@ -4296,6 +4402,35 @@ def _markdown_terrain_landcover_summary(summary: dict[str, object]) -> list[str]
         "",
         *_markdown_count_table(_summary_rows(summary, _TERRAIN_LANDCOVER_QGIS_DEPENDENT_BY_PROPERTY_KEY)),
         *_markdown_terrain_landcover_candidate_table(_summary_rows(summary, _TERRAIN_LANDCOVER_CANDIDATES_KEY)),
+    ]
+
+
+def _markdown_water_flow_summary(summary: dict[str, object]) -> list[str]:
+    return [
+        "### Water surface/flow candidates",
+        "",
+        (
+            "Visible water fill and line layers. Use this diagnostic with live screenshots before changing "
+            "water, depth, waterway, shadow, translate, opacity, or line-width preprocessing."
+        ),
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _WATER_FLOW_CANDIDATES_BY_SOURCE_LAYER_KEY),
+            key="source_layer",
+            label=_MARKDOWN_SOURCE_LAYER_LABEL,
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _WATER_FLOW_CANDIDATES_BY_TYPE_KEY),
+            key="type",
+            label=_MARKDOWN_LAYER_TYPE_LABEL,
+        ),
+        "#### Water surface/flow candidates simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _WATER_FLOW_SIMPLIFIED_BY_PROPERTY_KEY)),
+        "#### Water surface/flow candidates QGIS-dependent controls",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _WATER_FLOW_QGIS_DEPENDENT_BY_PROPERTY_KEY)),
+        *_markdown_water_flow_candidate_table(_summary_rows(summary, _WATER_FLOW_CANDIDATES_KEY)),
     ]
 
 
@@ -4331,6 +4466,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_label_density_summary(summary),
         *_markdown_road_trail_hierarchy_summary(summary),
         *_markdown_terrain_landcover_summary(summary),
+        *_markdown_water_flow_summary(summary),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
 

@@ -599,6 +599,105 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("filter<br>paint.fill-opacity", markdown)
         self.assertNotIn("hidden-landcover` |", markdown)
 
+    def test_build_style_audit_reports_water_surface_flow_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "water-depth",
+                        "type": "fill",
+                        "source-layer": "depth",
+                        "maxzoom": 8,
+                        "paint": {
+                            "fill-antialias": True,
+                            "fill-color": ["interpolate", ["linear"], ["get", "min_depth"], 0, "#a8d8f0", 100, "#4f97c2"],
+                            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0.35, 8, 0],
+                        },
+                    },
+                    {
+                        "id": "waterway",
+                        "type": "line",
+                        "source-layer": "waterway",
+                        "minzoom": 8,
+                        "filter": ["match", ["get", "class"], ["river", "canal"], True, False],
+                        "paint": {
+                            "line-color": "#8ec5e8",
+                            "line-opacity": ["match", ["get", "class"], "river", 0.8, 0.45],
+                            "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.5, 14, 4],
+                        },
+                    },
+                    {
+                        "id": "hidden-water",
+                        "type": "fill",
+                        "source-layer": "water",
+                        "layout": {"visibility": "none"},
+                        "paint": {"fill-color": "#a8d8f0"},
+                    },
+                    {
+                        "id": "water-label",
+                        "type": "symbol",
+                        "source-layer": "natural_label",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["water_surface_flow_candidates"]
+        self.assertEqual([candidate["layer"] for candidate in candidates], ["water-depth", "waterway"])
+        fill_candidate, line_candidate = candidates
+        self.assertEqual(fill_candidate["type"], "fill")
+        self.assertEqual(fill_candidate["source_layer"], "depth")
+        self.assertEqual(fill_candidate["zoom_band"], "z<8")
+        self.assertEqual(fill_candidate["filter_operator_signature"], "(none)")
+        self.assertEqual(
+            fill_candidate["water_surface_flow_control_properties"],
+            ["paint.fill-antialias", "paint.fill-color", "paint.fill-opacity"],
+        )
+        self.assertEqual(fill_candidate["qfit_simplified_control_properties"], ["paint.fill-color"])
+        self.assertEqual(fill_candidate["qgis_dependent_control_properties"], ["paint.fill-opacity"])
+        self.assertEqual(line_candidate["type"], "line")
+        self.assertEqual(line_candidate["source_layer"], "waterway")
+        self.assertEqual(line_candidate["zoom_band"], "z≥8")
+        self.assertEqual(line_candidate["filter_operator_signature"], "get, match")
+        self.assertEqual(
+            line_candidate["water_surface_flow_control_properties"],
+            ["filter", "paint.line-color", "paint.line-opacity", "paint.line-width"],
+        )
+        self.assertEqual(line_candidate["qfit_simplified_control_properties"], ["paint.line-width"])
+        self.assertEqual(line_candidate["qgis_dependent_control_properties"], ["filter", "paint.line-opacity"])
+        self.assertEqual(
+            audit["summary"]["water_surface_flow_candidates_by_source_layer"],
+            [{"source_layer": "depth", "count": 1}, {"source_layer": "waterway", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["water_surface_flow_candidates_by_type"],
+            [{"type": "fill", "count": 1}, {"type": "line", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["water_surface_flow_simplified_by_property"],
+            [{"property": "paint.fill-color", "count": 1}, {"property": "paint.line-width", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["water_surface_flow_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 1},
+                {"property": "paint.fill-opacity", "count": 1},
+                {"property": "paint.line-opacity", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Water surface/flow candidates", markdown)
+        self.assertIn("Visible water fill and line layers", markdown)
+        self.assertIn("#### Water surface/flow candidates simplified/substituted by qfit", markdown)
+        self.assertIn("#### Water surface/flow candidates QGIS-dependent controls", markdown)
+        self.assertIn("| `water-depth` | `fill` | `depth` | z<8 | `(none)` |", markdown)
+        self.assertIn("paint.fill-antialias<br>paint.fill-color<br>paint.fill-opacity", markdown)
+        self.assertIn("filter<br>paint.line-opacity", markdown)
+        self.assertNotIn("hidden-water` |", markdown)
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {
