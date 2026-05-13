@@ -472,6 +472,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 {"paint": {"line-opacity": ["case", ["has", "class"], 1, 1]}},
                 {"paint": {"line-opacity": ["coalesce", 1, ["get", "opacity"]]}},
                 {"paint": {"line-opacity": ["step", ["get", "rank"], 1, 10, 1]}},
+                {"minzoom": 14, "paint": {"line-opacity": ["step", ["zoom"], 0, 14, 1]}},
             ]
         }
 
@@ -495,6 +496,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         partial_data_step = ["step", ["get", "rank"], 1, 10, 0.5]
         unresolved_coalesce = ["coalesce", ["get", "opacity"], 1]
         partial_coalesce = ["coalesce", ["get", "opacity"], 0.5, 1]
+        minzoom_before_full_step = ["step", ["zoom"], 0, 14, 1]
+        no_minzoom_full_step = ["step", ["zoom"], 0, 14, 1]
         style = {
             "layers": [
                 {"paint": {"line-opacity": zoom_expression}},
@@ -512,6 +515,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 {"paint": {"line-opacity": unresolved_coalesce}},
                 {"paint": {"line-opacity": partial_coalesce}},
                 {"paint": {"line-opacity": True}},
+                # minzoom is before the full-opacity step, so the partial output is still reachable.
+                {"minzoom": 13, "paint": {"line-opacity": minzoom_before_full_step}},
+                # Without minzoom, the simplifier cannot prove the partial output is hidden.
+                {"paint": {"line-opacity": no_minzoom_full_step}},
             ]
         }
 
@@ -532,6 +539,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][12]["paint"]["line-opacity"], unresolved_coalesce)
         self.assertEqual(result["layers"][13]["paint"]["line-opacity"], partial_coalesce)
         self.assertIs(result["layers"][14]["paint"]["line-opacity"], True)
+        self.assertEqual(result["layers"][15]["paint"]["line-opacity"], minzoom_before_full_step)
+        self.assertEqual(result["layers"][16]["paint"]["line-opacity"], no_minzoom_full_step)
 
     def test_full_fill_opacity_expressions_simplify_to_scalar_default(self):
         style = {
@@ -540,6 +549,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 {"paint": {"fill-opacity": ["step", ["zoom"], 0, 11, 1]}},
                 {"paint": {"fill-opacity": ["match", ["get", "class"], "wetland", 1, 1]}},
                 {"paint": {"fill-opacity": ["case", ["has", "class"], 1, 1]}},
+                {"minzoom": 14, "paint": {"fill-opacity": ["step", ["zoom"], 0, 14, 1]}},
             ]
         }
 
@@ -553,12 +563,18 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         partial_match = ["match", ["get", "class"], "wetland", 0.5, 1]
         partial_case = ["case", ["has", "class"], 0.5, 1]
         property_expression = ["interpolate", ["linear"], ["get", "rank"], 0, 0.5, 10, 1]
+        minzoom_before_full_step = ["step", ["zoom"], 0, 14, 1]
+        no_minzoom_full_step = ["step", ["zoom"], 0, 14, 1]
         style = {
             "layers": [
                 {"paint": {"fill-opacity": partial_zoom_expression}},
                 {"paint": {"fill-opacity": partial_match}},
                 {"paint": {"fill-opacity": partial_case}},
                 {"paint": {"fill-opacity": property_expression}},
+                # minzoom is before the full-opacity step, so the partial output is still reachable.
+                {"minzoom": 13, "paint": {"fill-opacity": minzoom_before_full_step}},
+                # Without minzoom, the simplifier cannot prove the partial output is hidden.
+                {"paint": {"fill-opacity": no_minzoom_full_step}},
             ]
         }
 
@@ -568,6 +584,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][1]["paint"]["fill-opacity"], partial_match)
         self.assertEqual(result["layers"][2]["paint"]["fill-opacity"], partial_case)
         self.assertEqual(result["layers"][3]["paint"]["fill-opacity"], property_expression)
+        self.assertEqual(result["layers"][4]["paint"]["fill-opacity"], minzoom_before_full_step)
+        self.assertEqual(result["layers"][5]["paint"]["fill-opacity"], no_minzoom_full_step)
 
     def test_empty_icon_image_is_removed_but_non_empty_icons_are_preserved(self):
         style = {

@@ -448,6 +448,35 @@ def _representative_opacity_step_output(expr: list[object]) -> object | None:
     return _extract_opacity_from_reachable_outputs(outputs)
 
 
+def _zoom_step_opacity_outputs_from_minzoom(expr: list[object], minzoom: object) -> list[object] | None:
+    if len(expr) < 3 or expr[1] != ["zoom"]:
+        return None
+    if isinstance(minzoom, bool) or not isinstance(minzoom, (int, float)):
+        return None
+
+    visible_minzoom = float(minzoom)
+    current_output = expr[2]
+    outputs: list[object] = []
+    for index in range(3, len(expr) - 1, 2):
+        stop = expr[index]
+        if isinstance(stop, bool) or not isinstance(stop, (int, float)):
+            return None
+        if visible_minzoom < float(stop):
+            outputs.append(current_output)
+        current_output = expr[index + 1]
+    outputs.append(current_output)
+    return outputs
+
+
+def _extract_visible_range_zoom_step_opacity(expr: object, minzoom: object) -> float | None:
+    if not isinstance(expr, list):
+        return None
+    outputs = _zoom_step_opacity_outputs_from_minzoom(expr, minzoom)
+    if outputs is None:
+        return None
+    return _extract_opacity_from_reachable_outputs(outputs)
+
+
 def _extract_opacity_from_reachable_outputs(outputs: list[object]) -> float | None:
     if not outputs:
         return None
@@ -959,6 +988,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         props[prop] = dasharray
                 elif prop in _FULL_OPACITY_PROPS:
                     opacity = _extract_representative_opacity(val)
+                    if opacity is None or opacity <= _FULL_OPACITY - _FULL_OPACITY_EPSILON:
+                        opacity = _extract_visible_range_zoom_step_opacity(val, layer.get("minzoom"))
                     if opacity is not None and opacity > _FULL_OPACITY - _FULL_OPACITY_EPSILON:
                         props[prop] = _FULL_OPACITY
                 elif prop == "text-field":
