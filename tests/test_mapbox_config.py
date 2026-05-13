@@ -533,6 +533,42 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][13]["paint"]["line-opacity"], partial_coalesce)
         self.assertIs(result["layers"][14]["paint"]["line-opacity"], True)
 
+    def test_full_fill_opacity_expressions_simplify_to_scalar_default(self):
+        style = {
+            "layers": [
+                {"paint": {"fill-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1]}},
+                {"paint": {"fill-opacity": ["step", ["zoom"], 0, 11, 1]}},
+                {"paint": {"fill-opacity": ["match", ["get", "class"], "wetland", 1, 1]}},
+                {"paint": {"fill-opacity": ["case", ["has", "class"], 1, 1]}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["fill-opacity"], 1.0)
+
+    def test_non_full_fill_opacity_expressions_are_left_unchanged(self):
+        partial_zoom_expression = ["interpolate", ["linear"], ["zoom"], 15, 0, 16, 1]
+        partial_match = ["match", ["get", "class"], "wetland", 0.5, 1]
+        partial_case = ["case", ["has", "class"], 0.5, 1]
+        property_expression = ["interpolate", ["linear"], ["get", "rank"], 0, 0.5, 10, 1]
+        style = {
+            "layers": [
+                {"paint": {"fill-opacity": partial_zoom_expression}},
+                {"paint": {"fill-opacity": partial_match}},
+                {"paint": {"fill-opacity": partial_case}},
+                {"paint": {"fill-opacity": property_expression}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], partial_zoom_expression)
+        self.assertEqual(result["layers"][1]["paint"]["fill-opacity"], partial_match)
+        self.assertEqual(result["layers"][2]["paint"]["fill-opacity"], partial_case)
+        self.assertEqual(result["layers"][3]["paint"]["fill-opacity"], property_expression)
+
     def test_line_dasharray_expressions_resolve_to_literal_arrays(self):
         style = {
             "layers": [
