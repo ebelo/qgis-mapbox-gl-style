@@ -873,6 +873,102 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "ref"])
 
+    def test_step_text_field_expression_uses_nested_generic_name_reference(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "step",
+                            ["zoom"],
+                            "",
+                            13,
+                            [
+                                "match",
+                                ["get", "mode"],
+                                ["rail", "metro_rail"],
+                                ["coalesce", ["get", "name_en"], ["get", "name"]],
+                                "",
+                            ],
+                            18,
+                            ["coalesce", ["get", "name_en"], ["get", "name"]],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_step_text_field_expression_ignores_input_field_and_uses_label_output(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "step",
+                            ["get", "sizerank"],
+                            [
+                                "case",
+                                ["has", "ref"],
+                                ["concat", ["get", "ref"], " -\n", ["coalesce", ["get", "name_en"], ["get", "name"]]],
+                                ["coalesce", ["get", "name_en"], ["get", "name"]],
+                            ],
+                            15,
+                            ["get", "ref"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "ref"])
+
+    def test_case_text_field_expression_uses_label_output_not_condition(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "case",
+                            ["get", "show_label"],
+                            "",
+                            ["coalesce", ["get", "name_en"], ["get", "name"]],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+
+    def test_match_text_field_expression_keeps_first_reference_without_generic_name(self):
+        style = {
+            "layers": [
+                {
+                    "layout": {
+                        "text-field": [
+                            "match",
+                            ["get", "mode"],
+                            "rail",
+                            ["get", "station_ref"],
+                            ["get", "stop_ref"],
+                        ]
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "station_ref"])
+
     def test_original_style_not_mutated(self):
         expr = ["match", ["get", "class"], "motorway", "hsl(15, 100%, 75%)", "hsl(35, 89%, 75%)"]
         style = {"layers": [{"paint": {"line-color": expr}, "layout": {}}]}

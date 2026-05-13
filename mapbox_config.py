@@ -653,6 +653,33 @@ def _first_coalesced_text_field_reference(expr: list[object]) -> object | None:
     )
 
 
+def _text_field_output_candidates(expr: list[object]) -> list[object]:
+    """Return expression outputs from text-field control-flow operators."""
+    op = expr[0]
+    if op == "step" and len(expr) >= 3:
+        return [expr[2], *expr[4::2]]
+    if op == "case" and len(expr) >= 4:
+        return [*expr[2:-1:2], expr[-1]]
+    if op == "match" and len(expr) >= 5:
+        return [*expr[3:-1:2], expr[-1]]
+    return []
+
+
+def _first_text_field_output_reference(
+    expr: list[object],
+    *,
+    allow_concat: bool,
+    allow_to_string: bool,
+) -> object | None:
+    return _prefer_generic_name_reference(
+        _text_field_references_from_children(
+            _text_field_output_candidates(expr),
+            allow_concat=allow_concat,
+            allow_to_string=allow_to_string,
+        )
+    )
+
+
 def _first_simple_text_field_reference(
     expr: object,
     *,
@@ -683,6 +710,12 @@ def _first_simple_text_field_reference(
             allow_concat=allow_concat,
             allow_to_string=allow_to_string,
         )
+    if op in {"case", "match", "step"}:
+        return _first_text_field_output_reference(
+            expr,
+            allow_concat=allow_concat,
+            allow_to_string=allow_to_string,
+        )
     return None
 
 
@@ -696,7 +729,7 @@ def _simplify_text_field(expr: object) -> object:
     if not isinstance(expr, list) or not expr:
         return expr
     op = expr[0]
-    if op in {"coalesce", "concat", "format", "to-string"}:
+    if op in {"case", "coalesce", "concat", "format", "match", "step", "to-string"}:
         reference = _first_simple_text_field_reference(expr)
         if reference is not None:
             return reference
