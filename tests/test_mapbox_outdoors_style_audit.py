@@ -830,6 +830,174 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("filter<br>layout.icon-image<br>layout.symbol-placement", markdown)
         self.assertNotIn("hidden-icon` |", markdown)
 
+    def test_build_style_audit_reports_route_overlay_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "ferry",
+                        "type": "line",
+                        "source-layer": "road",
+                        "minzoom": 8,
+                        "filter": ["==", ["get", "type"], "ferry"],
+                        "paint": {
+                            "line-color": ["interpolate", ["linear"], ["zoom"], 10, "#79a8e8", 16, "#5978e8"],
+                            "line-dasharray": ["step", ["zoom"], ["literal", [1, 0]], 12, ["literal", [2, 2]]],
+                            "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.5, 14, 2],
+                        },
+                    },
+                    {
+                        "id": "ferry-aerialway-label",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "minzoom": 15,
+                        "filter": ["match", ["get", "class"], ["aerialway", "ferry"], True, False],
+                        "layout": {
+                            "symbol-placement": "line",
+                            "text-field": ["get", "name"],
+                            "text-padding": 2,
+                        },
+                        "paint": {"text-color": "#6670cc"},
+                    },
+                    {
+                        "id": "transit-label",
+                        "type": "symbol",
+                        "source-layer": "transit_stop_label",
+                        "minzoom": 12,
+                        "layout": {"icon-image": ["get", "maki"], "text-field": ["get", "name"]},
+                        "paint": {"icon-opacity": 0.85},
+                    },
+                    {
+                        "id": "ferry-auto",
+                        "type": "line",
+                        "source-layer": "road",
+                        "filter": ["==", ["get", "type"], "ferry_auto"],
+                        "paint": {"line-color": "#79a8e8"},
+                    },
+                    {
+                        "id": "hidden-ferry",
+                        "type": "line",
+                        "source-layer": "road",
+                        "layout": {"visibility": "none"},
+                        "filter": ["==", ["get", "type"], "ferry"],
+                        "paint": {"line-color": "#79a8e8"},
+                    },
+                    {
+                        "id": "ordinary-road",
+                        "type": "line",
+                        "source-layer": "road",
+                        "paint": {"line-color": "#ffffff"},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["route_overlay_candidates"]
+        self.assertEqual(
+            [candidate["layer"] for candidate in candidates],
+            ["ferry-aerialway-label", "ferry", "ferry-auto", "transit-label"],
+        )
+        aerialway_candidate, ferry_candidate, ferry_auto_candidate, transit_candidate = candidates
+        self.assertEqual(aerialway_candidate["route_overlay_marker"], "aerialway, ferry")
+        self.assertEqual(aerialway_candidate["route_overlay_markers"], ["aerialway", "ferry"])
+        self.assertEqual(aerialway_candidate["type"], "symbol")
+        self.assertEqual(aerialway_candidate["group"], "roads/trails")
+        self.assertEqual(aerialway_candidate["filter_operator_signature"], "get, match")
+        self.assertEqual(
+            aerialway_candidate["route_overlay_control_properties"],
+            ["filter", "layout.text-field", "layout.text-padding", "layout.symbol-placement", "paint.text-color"],
+        )
+        self.assertEqual(aerialway_candidate["qfit_simplified_control_properties"], [])
+        self.assertEqual(aerialway_candidate["qgis_dependent_control_properties"], ["filter"])
+        self.assertEqual(ferry_candidate["route_overlay_marker"], "ferry")
+        self.assertEqual(ferry_candidate["type"], "line")
+        self.assertEqual(ferry_candidate["source_layer"], "road")
+        self.assertEqual(ferry_candidate["zoom_band"], "z≥8")
+        self.assertEqual(ferry_candidate["filter_operator_signature"], "==, get")
+        self.assertEqual(
+            ferry_candidate["route_overlay_control_properties"],
+            ["filter", "paint.line-color", "paint.line-dasharray", "paint.line-width"],
+        )
+        self.assertEqual(ferry_candidate["qfit_simplified_control_properties"], ["paint.line-color", "paint.line-width"])
+        self.assertEqual(ferry_candidate["qgis_dependent_control_properties"], ["filter", "paint.line-dasharray"])
+        self.assertEqual(ferry_auto_candidate["route_overlay_marker"], "ferry_auto")
+        self.assertEqual(ferry_auto_candidate["route_overlay_markers"], ["ferry_auto"])
+        self.assertEqual(ferry_auto_candidate["qgis_dependent_control_properties"], ["filter"])
+        self.assertEqual(transit_candidate["route_overlay_marker"], "transit")
+        self.assertEqual(transit_candidate["group"], "pois/labels")
+        self.assertEqual(transit_candidate["filter_operator_signature"], "(none)")
+        self.assertEqual(
+            transit_candidate["route_overlay_control_properties"],
+            ["layout.text-field", "layout.icon-image", "paint.icon-opacity"],
+        )
+        self.assertEqual(transit_candidate["qfit_simplified_control_properties"], [])
+        self.assertEqual(transit_candidate["qgis_dependent_control_properties"], ["layout.icon-image"])
+        self.assertEqual(
+            audit["summary"]["route_overlay_candidates_by_marker"],
+            [
+                {"route_overlay_marker": "ferry", "count": 2},
+                {"route_overlay_marker": "aerialway", "count": 1},
+                {"route_overlay_marker": "ferry_auto", "count": 1},
+                {"route_overlay_marker": "transit", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["route_overlay_candidates_by_layer_group"],
+            [{"group": "roads/trails", "count": 3}, {"group": "pois/labels", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["route_overlay_candidates_by_source_layer"],
+            [{"source_layer": "road", "count": 3}, {"source_layer": "transit_stop_label", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["route_overlay_candidates_by_type"],
+            [{"type": "line", "count": 2}, {"type": "symbol", "count": 2}],
+        )
+        self.assertEqual(
+            audit["summary"]["route_overlay_simplified_by_property"],
+            [{"property": "paint.line-color", "count": 1}, {"property": "paint.line-width", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["route_overlay_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 3},
+                {"property": "layout.icon-image", "count": 1},
+                {"property": "paint.line-dasharray", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Route overlay candidates", markdown)
+        self.assertIn("Visible ferry, ferry_auto, aerialway, piste, ski, golf, and transit line/symbol layers", markdown)
+        self.assertIn("#### Route overlay candidates simplified/substituted by qfit", markdown)
+        self.assertIn("| `aerialway, ferry` | `roads/trails` | `ferry-aerialway-label` | `symbol` | `road` | z≥15 |", markdown)
+        self.assertIn("filter<br>paint.line-dasharray", markdown)
+        self.assertNotIn("hidden-ferry` | `line` |", markdown)
+
+    def test_route_overlay_candidates_search_untruncated_filter_text(self):
+        long_class_list = [f"ordinary-class-{index:02d}" for index in range(30)] + ["piste"]
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "winter-overlay",
+                        "type": "line",
+                        "source-layer": "road",
+                        "filter": ["match", ["get", "type"], long_class_list, True, False],
+                        "paint": {"line-color": "#3979d9"},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["route_overlay_candidates"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["layer"], "winter-overlay")
+        self.assertEqual(candidates[0]["route_overlay_marker"], "piste")
+        self.assertEqual(candidates[0]["route_overlay_markers"], ["piste"])
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {

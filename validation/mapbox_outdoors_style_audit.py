@@ -6,6 +6,7 @@ import datetime as dt
 import html
 import json
 import os
+import re
 import sys
 from collections import Counter
 from dataclasses import dataclass
@@ -67,6 +68,16 @@ _ICON_SPRITE_CANDIDATES_BY_ICON_IMAGE_OPERATOR_SIGNATURE_KEY = (
 _ICON_SPRITE_SIMPLIFIED_BY_PROPERTY_KEY = "icon_sprite_simplified_by_property"
 _ICON_SPRITE_QGIS_DEPENDENT_BY_PROPERTY_KEY = "icon_sprite_qgis_dependent_by_property"
 _ICON_SPRITE_CONTROL_PROPERTIES_KEY = "icon_sprite_control_properties"
+_ROUTE_OVERLAY_CANDIDATES_KEY = "route_overlay_candidates"
+_ROUTE_OVERLAY_CANDIDATES_BY_LAYER_GROUP_KEY = "route_overlay_candidates_by_layer_group"
+_ROUTE_OVERLAY_CANDIDATES_BY_SOURCE_LAYER_KEY = "route_overlay_candidates_by_source_layer"
+_ROUTE_OVERLAY_CANDIDATES_BY_MARKER_KEY = "route_overlay_candidates_by_marker"
+_ROUTE_OVERLAY_CANDIDATES_BY_TYPE_KEY = "route_overlay_candidates_by_type"
+_ROUTE_OVERLAY_SIMPLIFIED_BY_PROPERTY_KEY = "route_overlay_simplified_by_property"
+_ROUTE_OVERLAY_QGIS_DEPENDENT_BY_PROPERTY_KEY = "route_overlay_qgis_dependent_by_property"
+_ROUTE_OVERLAY_CONTROL_PROPERTIES_KEY = "route_overlay_control_properties"
+_ROUTE_OVERLAY_MARKER_KEY = "route_overlay_marker"
+_ROUTE_OVERLAY_MARKERS_KEY = "route_overlay_markers"
 _FILTER_OPERATOR_SIGNATURE_KEY = "filter_operator_signature"
 _ICON_IMAGE_OPERATOR_SIGNATURE_KEY = "icon_image_operator_signature"
 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY = "qfit_simplified_control_properties"
@@ -130,6 +141,15 @@ _ICON_SPRITE_CONTROL_PROPERTIES = (
     "paint.icon-translate",
     "paint.icon-translate-anchor",
 )
+_ROUTE_OVERLAY_MARKERS = (
+    "ferry_auto",
+    "aerialway",
+    "transit",
+    "piste",
+    "ski",
+    "golf",
+    "ferry",
+)
 _ROAD_TRAIL_HIERARCHY_LAYER_TYPES = frozenset({"fill", "line"})
 _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES = (
     "layout.line-cap",
@@ -150,6 +170,22 @@ _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES = (
     "paint.line-pattern",
     "paint.line-translate",
     "paint.line-width",
+)
+_ROUTE_OVERLAY_LAYER_TYPES = frozenset({"line", "symbol"})
+_ROUTE_OVERLAY_TEXT_PAINT_PROPERTIES = (
+    "paint.text-color",
+    "paint.text-halo-blur",
+    "paint.text-halo-color",
+    "paint.text-halo-width",
+    "paint.text-opacity",
+)
+_ROUTE_OVERLAY_CONTROL_PROPERTIES = tuple(
+    dict.fromkeys(
+        _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES
+        + _LABEL_DENSITY_CONTROL_PROPERTIES
+        + _ICON_SPRITE_CONTROL_PROPERTIES
+        + _ROUTE_OVERLAY_TEXT_PAINT_PROPERTIES
+    )
 )
 _TERRAIN_LANDCOVER_LAYER_TYPES = frozenset({"fill", "line"})
 _TERRAIN_LANDCOVER_CONTROL_PROPERTIES = (
@@ -829,6 +865,49 @@ def _icon_image_operator_signature(layer: dict[str, object]) -> str:
     return _operator_signature(layout.get("icon-image"))
 
 
+def _route_overlay_filter_search_text(layer: dict[str, object]) -> str:
+    filter_value = _qgis_filter_value(layer)
+    if filter_value is None:
+        return ""
+    return json.dumps(filter_value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _route_overlay_search_text(layer: dict[str, object]) -> str:
+    return " ".join(
+        (
+            str(layer.get("id") or ""),
+            str(layer.get("source_layer") or ""),
+            _route_overlay_filter_search_text(layer),
+        )
+    ).replace("-", "_").lower()
+
+
+def _route_overlay_markers(layer: dict[str, object]) -> list[str]:
+    search_text = _route_overlay_search_text(layer)
+    markers = [marker for marker in _ROUTE_OVERLAY_MARKERS if marker in search_text]
+    has_standalone_ferry = bool(re.search(r"(?<![a-z0-9_])ferry(?!_auto)(?![a-z0-9_])", search_text))
+    if "ferry_auto" in markers and "ferry" in markers and not has_standalone_ferry:
+        markers.remove("ferry")
+    return markers
+
+
+def _route_overlay_marker(layer: dict[str, object]) -> str:
+    return ", ".join(_route_overlay_markers(layer))
+
+
+def _is_route_overlay_candidate_layer(layer: dict[str, object]) -> bool:
+    return (
+        str(layer.get("type") or "") in _ROUTE_OVERLAY_LAYER_TYPES
+        and bool(_route_overlay_markers(layer))
+        and not _is_source_hidden_layer(layer)
+        and not _is_qfit_hidden_layer(layer)
+    )
+
+
+def _route_overlay_control_properties(layer: dict[str, object]) -> list[str]:
+    return _control_properties(layer, _ROUTE_OVERLAY_CONTROL_PROPERTIES, include_filter=True)
+
+
 def _qfit_simplified_control_properties(layer: dict[str, object], controls: set[str]) -> list[str]:
     simplified = layer.get("qfit_simplifies")
     if not isinstance(simplified, list):
@@ -952,6 +1031,37 @@ def _icon_sprite_candidate_rows(layers: list[dict[str, object]]) -> list[dict[st
             }
         )
     return sorted(rows, key=lambda row: (str(row["group"]), str(row["layer"])))
+
+
+def _route_overlay_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_route_overlay_candidate_layer(layer):
+            continue
+        controls = _route_overlay_control_properties(layer)
+        if not controls:
+            continue
+        control_set = set(controls)
+        markers = _route_overlay_markers(layer)
+        rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "group": str(layer.get("group") or "other"),
+                "type": str(layer.get("type") or ""),
+                "source_layer": str(layer.get("source_layer") or ""),
+                _ROUTE_OVERLAY_MARKER_KEY: ", ".join(markers),
+                _ROUTE_OVERLAY_MARKERS_KEY: markers,
+                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
+                _ROUTE_OVERLAY_CONTROL_PROPERTIES_KEY: controls,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (str(row[_ROUTE_OVERLAY_MARKER_KEY]), str(row["type"]), str(row["layer"])),
+    )
 
 
 def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1344,6 +1454,20 @@ def _count_row_values(rows: list[dict[str, object]], key: str) -> list[dict[str,
         counts.update(str(value) for value in values if value)
     return [
         {"property": name, "count": count}
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        if name
+    ]
+
+
+def _count_route_overlay_markers(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        values = row.get(_ROUTE_OVERLAY_MARKERS_KEY)
+        if not isinstance(values, list):
+            continue
+        counts.update(str(value) for value in values if value)
+    return [
+        {_ROUTE_OVERLAY_MARKER_KEY: name, "count": count}
         for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
         if name
     ]
@@ -2764,6 +2888,7 @@ def build_style_audit(
     terrain_landcover_candidates = _terrain_landcover_candidate_rows(layers)
     water_flow_candidates = _water_flow_candidate_rows(layers)
     icon_sprite_candidates = _icon_sprite_candidate_rows(layers)
+    route_overlay_candidates = _route_overlay_candidate_rows(layers)
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
     audit = {
         "style": {
@@ -2865,6 +2990,28 @@ def build_style_audit(
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
             ),
             _ICON_SPRITE_CANDIDATES_KEY: icon_sprite_candidates,
+            _ROUTE_OVERLAY_CANDIDATES_BY_LAYER_GROUP_KEY: _count_rows_by_key(
+                route_overlay_candidates,
+                "group",
+            ),
+            _ROUTE_OVERLAY_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
+                route_overlay_candidates,
+                "source_layer",
+            ),
+            _ROUTE_OVERLAY_CANDIDATES_BY_MARKER_KEY: _count_route_overlay_markers(route_overlay_candidates),
+            _ROUTE_OVERLAY_CANDIDATES_BY_TYPE_KEY: _count_rows_by_key(
+                route_overlay_candidates,
+                "type",
+            ),
+            _ROUTE_OVERLAY_SIMPLIFIED_BY_PROPERTY_KEY: _count_row_values(
+                route_overlay_candidates,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY,
+            ),
+            _ROUTE_OVERLAY_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                route_overlay_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
+            _ROUTE_OVERLAY_CANDIDATES_KEY: route_overlay_candidates,
         },
         "layers": layers,
     }
@@ -3173,6 +3320,38 @@ def _markdown_icon_sprite_candidate_table(rows: list[dict[str, object]], *, empt
                 filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 icon_image_operators=row.get(_ICON_IMAGE_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get(_ICON_SPRITE_CONTROL_PROPERTIES_KEY) or [])),
+                simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
+                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_route_overlay_candidate_table(rows: list[dict[str, object]], *, empty: str = "—") -> list[str]:
+    if not rows:
+        return [empty, ""]
+    lines = [
+        (
+            "| Route marker | Layer group | Layer | Type | Source layer | Zoom | Filter operators | "
+            "Route controls | Simplified/substituted by qfit | QGIS-dependent controls |"
+        ),
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            (
+                "| `{marker}` | `{group}` | `{layer}` | `{layer_type}` | `{source_layer}` | {zoom} | "
+                "`{filter_operators}` | {controls} | {simplified} | {unresolved} |"
+            ).format(
+                marker=row.get(_ROUTE_OVERLAY_MARKER_KEY, ""),
+                group=row.get("group", ""),
+                layer=row.get("layer", ""),
+                layer_type=row.get("type", ""),
+                source_layer=row.get("source_layer", ""),
+                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
+                controls=_markdown_list(list(row.get(_ROUTE_OVERLAY_CONTROL_PROPERTIES_KEY) or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
             )
@@ -4606,6 +4785,46 @@ def _markdown_icon_sprite_summary(summary: dict[str, object]) -> list[str]:
     ]
 
 
+def _markdown_route_overlay_summary(summary: dict[str, object]) -> list[str]:
+    return [
+        "### Route overlay candidates",
+        "",
+        (
+            "Visible ferry, ferry_auto, aerialway, piste, ski, golf, and transit line/symbol layers. "
+            "Use this diagnostic with live screenshots before changing route overlay filters, dashes, "
+            "labels, icons, or casing."
+        ),
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ROUTE_OVERLAY_CANDIDATES_BY_MARKER_KEY),
+            key=_ROUTE_OVERLAY_MARKER_KEY,
+            label="Route marker",
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ROUTE_OVERLAY_CANDIDATES_BY_LAYER_GROUP_KEY),
+            key="group",
+            label=_MARKDOWN_LAYER_GROUP_LABEL,
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ROUTE_OVERLAY_CANDIDATES_BY_SOURCE_LAYER_KEY),
+            key="source_layer",
+            label=_MARKDOWN_SOURCE_LAYER_LABEL,
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ROUTE_OVERLAY_CANDIDATES_BY_TYPE_KEY),
+            key="type",
+            label=_MARKDOWN_LAYER_TYPE_LABEL,
+        ),
+        "#### Route overlay candidates simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _ROUTE_OVERLAY_SIMPLIFIED_BY_PROPERTY_KEY)),
+        "#### Route overlay candidates QGIS-dependent controls",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _ROUTE_OVERLAY_QGIS_DEPENDENT_BY_PROPERTY_KEY)),
+        *_markdown_route_overlay_candidate_table(_summary_rows(summary, _ROUTE_OVERLAY_CANDIDATES_KEY)),
+    ]
+
+
 def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: object) -> list[str]:
     return [
         "## Summary",
@@ -4640,6 +4859,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_terrain_landcover_summary(summary),
         *_markdown_water_flow_summary(summary),
         *_markdown_icon_sprite_summary(summary),
+        *_markdown_route_overlay_summary(summary),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
 
