@@ -569,6 +569,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][2]["paint"]["fill-opacity"], partial_case)
         self.assertEqual(result["layers"][3]["paint"]["fill-opacity"], property_expression)
 
+    def test_empty_icon_image_is_removed_but_non_empty_icons_are_preserved(self):
+        style = {
+            "layers": [
+                {"layout": {"icon-image": "", "text-field": "Country"}},
+                {"layout": {"icon-image": "marker"}},
+                {"layout": {"icon-image": ["get", "maki"]}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertNotIn("icon-image", result["layers"][0]["layout"])
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], "Country")
+        self.assertEqual(result["layers"][1]["layout"]["icon-image"], "marker")
+        self.assertEqual(result["layers"][2]["layout"]["icon-image"], ["get", "maki"])
+
     def test_line_dasharray_expressions_resolve_to_literal_arrays(self):
         style = {
             "layers": [

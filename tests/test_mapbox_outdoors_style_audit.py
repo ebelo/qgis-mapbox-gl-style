@@ -747,6 +747,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "layout": {"visibility": "none", "icon-image": "park"},
                     },
                     {
+                        "id": "empty-icon-label",
+                        "type": "symbol",
+                        "source-layer": "place_label",
+                        "layout": {"icon-image": "", "text-field": ["get", "name"]},
+                    },
+                    {
                         "id": "text-only-label",
                         "type": "symbol",
                         "source-layer": "place_label",
@@ -757,8 +763,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
 
         candidates = audit["summary"]["icon_sprite_candidates"]
-        self.assertEqual([candidate["layer"] for candidate in candidates], ["poi-label", "road-shield"])
-        poi_candidate, road_candidate = candidates
+        self.assertEqual([candidate["layer"] for candidate in candidates], ["poi-label", "road-shield", "empty-icon-label"])
+        poi_candidate, road_candidate, empty_icon_candidate = candidates
+        self.assertEqual(empty_icon_candidate["source_layer"], "place_label")
+        self.assertEqual(empty_icon_candidate["icon_image_operator_signature"], "(none)")
+        self.assertEqual(empty_icon_candidate["qfit_simplified_control_properties"], ["layout.icon-image"])
+        self.assertEqual(empty_icon_candidate["qgis_dependent_control_properties"], [])
         self.assertEqual(poi_candidate["group"], "pois/labels")
         self.assertEqual(poi_candidate["source_layer"], "poi_label")
         self.assertEqual(poi_candidate["icon_image_operator_signature"], "get")
@@ -800,20 +810,29 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertEqual(
             audit["summary"]["icon_sprite_candidates_by_layer_group"],
-            [{"group": "pois/labels", "count": 1}, {"group": "roads/trails", "count": 1}],
+            [
+                {"group": "pois/labels", "count": 1},
+                {"group": "roads/trails", "count": 1},
+                {"group": "settlements/places", "count": 1},
+            ],
         )
         self.assertEqual(
             audit["summary"]["icon_sprite_candidates_by_source_layer"],
-            [{"source_layer": "poi_label", "count": 1}, {"source_layer": "road", "count": 1}],
+            [
+                {"source_layer": "place_label", "count": 1},
+                {"source_layer": "poi_label", "count": 1},
+                {"source_layer": "road", "count": 1},
+            ],
         )
         self.assertEqual(
             audit["summary"]["icon_sprite_candidates_by_icon_image_operator_signature"],
             [
+                {"icon_image_operator_signature": "(none)", "count": 1},
                 {"icon_image_operator_signature": "concat, get, step, to-string, zoom", "count": 1},
                 {"icon_image_operator_signature": "get", "count": 1},
             ],
         )
-        self.assertEqual(audit["summary"]["icon_sprite_simplified_by_property"], [])
+        self.assertEqual(audit["summary"]["icon_sprite_simplified_by_property"], [{"property": "layout.icon-image", "count": 1}])
         self.assertEqual(
             audit["summary"]["icon_sprite_qgis_dependent_by_property"],
             [
@@ -829,6 +848,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("### Sprite/icon candidates", markdown)
         self.assertIn("Visible symbol layers with sprite-backed icons", markdown)
         self.assertIn("#### Sprite/icon candidates QGIS-dependent controls", markdown)
+        self.assertIn("| `settlements/places` | `empty-icon-label` | `place_label` | all zooms | `(none)` | `(none)` |", markdown)
         self.assertIn("| `pois/labels` | `poi-label` | `poi_label` | all zooms | `(none)` | `get` |", markdown)
         self.assertIn("layout.icon-image<br>layout.icon-rotation-alignment", markdown)
         self.assertIn("filter<br>layout.icon-image<br>layout.symbol-placement", markdown)

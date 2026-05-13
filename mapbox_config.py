@@ -938,6 +938,9 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                 continue
             for prop in list(props.keys()):
                 val = props[prop]
+                if section == "layout" and prop == "icon-image" and val == "":
+                    del props[prop]
+                    continue
                 if not isinstance(val, list):
                     continue
                 if prop in color_props:
