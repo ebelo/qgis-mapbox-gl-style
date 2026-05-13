@@ -450,6 +450,94 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         width = result["layers"][0]["paint"]["line-width"]
         self.assertEqual(width, 3.0)
 
+    def test_line_dasharray_expressions_resolve_to_literal_arrays(self):
+        style = {
+            "layers": [
+                {
+                    "paint": {
+                        "line-dasharray": ["step", ["zoom"], ["literal", [3, 3]], 12, ["literal", [4, 4]]]
+                    },
+                },
+                {
+                    "paint": {
+                        "line-dasharray": [
+                            "interpolate",
+                            ["linear"],
+                            ["zoom"],
+                            10,
+                            ["literal", [1, 2]],
+                            14,
+                            ["literal", [2, 4]],
+                        ]
+                    },
+                },
+                {"paint": {"line-dasharray": ["literal", [2, 1]]}},
+                {"paint": {"line-dasharray": [5, 2]}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["line-dasharray"], [4, 4])
+        self.assertEqual(result["layers"][1]["paint"]["line-dasharray"], [1, 2])
+        self.assertEqual(result["layers"][2]["paint"]["line-dasharray"], [2, 1])
+        self.assertEqual(result["layers"][3]["paint"]["line-dasharray"], [5, 2])
+        self.assertIsInstance(style["layers"][0]["paint"]["line-dasharray"][2], list)
+
+    def test_data_driven_line_dasharray_expressions_use_safe_literal_fallbacks(self):
+        style = {
+            "layers": [
+                {"paint": {"line-dasharray": ["step", ["get", "rank"], ["literal", [1, 1]], 3, ["literal", [3, 3]]]}},
+                {"paint": {"line-dasharray": ["match", ["get", "class"], "ferry", ["literal", [2, 2]], ["literal", [4, 2]]]}},
+                {
+                    "paint": {
+                        "line-dasharray": [
+                            "case",
+                            ["==", ["get", "class"], "trail"],
+                            ["literal", [1, 3]],
+                            ["literal", [6, 2]],
+                        ]
+                    }
+                },
+                {"paint": {"line-dasharray": ["coalesce", ["get", "dash"], ["literal", [2, 4]]]}},
+                {
+                    "paint": {
+                        "line-dasharray": [
+                            "interpolate",
+                            ["linear"],
+                            ["get", "rank"],
+                            0,
+                            ["literal", [1, 2]],
+                            10,
+                            ["literal", [2, 4]],
+                        ]
+                    }
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["line-dasharray"], [1, 1])
+        self.assertEqual(result["layers"][1]["paint"]["line-dasharray"], [4, 2])
+        self.assertEqual(result["layers"][2]["paint"]["line-dasharray"], [6, 2])
+        self.assertEqual(result["layers"][3]["paint"]["line-dasharray"], [2, 4])
+        self.assertEqual(result["layers"][4]["paint"]["line-dasharray"], [1, 2])
+
+    def test_unsupported_line_dasharray_expression_is_left_unchanged(self):
+        expression = ["get", "dash"]
+        style = {
+            "layers": [
+                {"paint": {"line-dasharray": expression}},
+                {"paint": {"line-dasharray": ["literal", [2, -1]]}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["line-dasharray"], expression)
+        self.assertEqual(result["layers"][1]["paint"]["line-dasharray"], ["literal", [2, -1]])
+
     def test_line_cap_step_expression_uses_high_zoom_choice(self):
         style = {
             "layers": [

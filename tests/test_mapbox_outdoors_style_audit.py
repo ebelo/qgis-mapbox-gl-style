@@ -226,24 +226,22 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         }
         self.assertEqual(simplified_counts["layout.text-field"], 2)
         self.assertEqual(simplified_counts["paint.line-width"], 1)
+        self.assertEqual(simplified_counts["paint.line-dasharray"], 1)
         self.assertEqual(simplified_counts["layout.visibility"], 1)
         self.assertEqual(simplified_group_counts[("pois/labels", "layout.text-field")], 1)
         self.assertEqual(simplified_group_counts[("settlements/places", "layout.text-field")], 1)
         self.assertEqual(simplified_group_counts[("roads/trails", "paint.line-width")], 1)
+        self.assertEqual(simplified_group_counts[("roads/trails", "paint.line-dasharray")], 1)
         self.assertEqual(simplified_group_counts[("settlements/places", "layout.visibility")], 1)
         self.assertEqual(unresolved_counts["filter"], 1)
         self.assertEqual(unresolved_counts["layout.icon-image"], 1)
-        self.assertEqual(unresolved_counts["paint.line-dasharray"], 1)
         self.assertEqual(unresolved_group_counts[("pois/labels", "filter")], 1)
         self.assertEqual(unresolved_group_counts[("pois/labels", "layout.icon-image")], 1)
-        self.assertEqual(unresolved_group_counts[("roads/trails", "paint.line-dasharray")], 1)
         self.assertEqual(operator_counts[("filter", "==")], 1)
         self.assertEqual(operator_counts[("filter", "get")], 1)
         self.assertEqual(operator_counts[("layout.icon-image", "get")], 1)
-        self.assertEqual(operator_counts[("paint.line-dasharray", "step")], 1)
         self.assertEqual(operator_group_counts[("pois/labels", "filter", "==")], 1)
         self.assertEqual(operator_group_counts[("pois/labels", "layout.icon-image", "get")], 1)
-        self.assertEqual(operator_group_counts[("roads/trails", "paint.line-dasharray", "step")], 1)
         self.assertEqual(filter_signatures[("pois/labels", "==, get")]["count"], 1)
         self.assertEqual(filter_signatures[("pois/labels", "==, get")]["operators"], ["==", "get"])
         self.assertEqual(filter_signatures[("pois/labels", "==, get")]["example_layers"], ["poi-label"])
@@ -262,8 +260,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         road_unresolved = {item["property"] for item in layers["road-primary"]["qfit_unresolved"]}
         self.assertNotIn("paint.line-dasharray", road_unresolved)
 
+        path_simplified = {change["property"] for change in layers["road-path"]["qfit_simplifies"]}
         path_unresolved = {item["property"] for item in layers["road-path"]["qfit_unresolved"]}
-        self.assertIn("paint.line-dasharray", path_unresolved)
+        self.assertIn("paint.line-dasharray", path_simplified)
+        self.assertNotIn("paint.line-dasharray", path_unresolved)
 
         poi_simplified = {change["property"] for change in layers["poi-label"]["qfit_simplifies"]}
         self.assertIn("layout.text-field", poi_simplified)
@@ -461,11 +461,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertEqual(
             road_candidate["qfit_simplified_control_properties"],
-            ["paint.line-color", "paint.line-width"],
+            ["paint.line-color", "paint.line-dasharray", "paint.line-width"],
         )
         self.assertEqual(
             road_candidate["qgis_dependent_control_properties"],
-            ["filter", "paint.line-dasharray", "paint.line-opacity"],
+            ["filter", "paint.line-opacity"],
         )
         self.assertEqual(audit["summary"]["road_trail_hierarchy_candidates_by_source_layer"], [{"source_layer": "road", "count": 2}])
         self.assertEqual(
@@ -477,6 +477,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [
                 {"property": "paint.fill-color", "count": 1},
                 {"property": "paint.line-color", "count": 1},
+                {"property": "paint.line-dasharray", "count": 1},
                 {"property": "paint.line-width", "count": 1},
             ],
         )
@@ -485,7 +486,6 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [
                 {"property": "filter", "count": 1},
                 {"property": "paint.fill-opacity", "count": 1},
-                {"property": "paint.line-dasharray", "count": 1},
                 {"property": "paint.line-opacity", "count": 1},
             ],
         )
@@ -496,8 +496,8 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("#### Road/trail hierarchy candidates QGIS-dependent controls", markdown)
         self.assertIn("| `paint.line-width` | 1 |", markdown)
         self.assertIn("| `road-primary` | `line` | `road` | z≥5 | `==, get` |", markdown)
-        self.assertIn("paint.line-color<br>paint.line-width", markdown)
-        self.assertIn("filter<br>paint.line-dasharray<br>paint.line-opacity", markdown)
+        self.assertIn("paint.line-color<br>paint.line-dasharray<br>paint.line-width", markdown)
+        self.assertIn("filter<br>paint.line-opacity", markdown)
         self.assertNotIn("hidden-road` |", markdown)
 
     def test_build_style_audit_reports_terrain_landcover_palette_candidates(self):
@@ -919,8 +919,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             ferry_candidate["route_overlay_control_properties"],
             ["filter", "paint.line-color", "paint.line-dasharray", "paint.line-width"],
         )
-        self.assertEqual(ferry_candidate["qfit_simplified_control_properties"], ["paint.line-color", "paint.line-width"])
-        self.assertEqual(ferry_candidate["qgis_dependent_control_properties"], ["filter", "paint.line-dasharray"])
+        self.assertEqual(
+            ferry_candidate["qfit_simplified_control_properties"],
+            ["paint.line-color", "paint.line-dasharray", "paint.line-width"],
+        )
+        self.assertEqual(ferry_candidate["qgis_dependent_control_properties"], ["filter"])
         self.assertEqual(ferry_auto_candidate["route_overlay_marker"], "ferry_auto")
         self.assertEqual(ferry_auto_candidate["route_overlay_markers"], ["ferry_auto"])
         self.assertEqual(ferry_auto_candidate["qgis_dependent_control_properties"], ["filter"])
@@ -956,14 +959,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertEqual(
             audit["summary"]["route_overlay_simplified_by_property"],
-            [{"property": "paint.line-color", "count": 1}, {"property": "paint.line-width", "count": 1}],
+            [
+                {"property": "paint.line-color", "count": 1},
+                {"property": "paint.line-dasharray", "count": 1},
+                {"property": "paint.line-width", "count": 1},
+            ],
         )
         self.assertEqual(
             audit["summary"]["route_overlay_qgis_dependent_by_property"],
             [
                 {"property": "filter", "count": 3},
                 {"property": "layout.icon-image", "count": 1},
-                {"property": "paint.line-dasharray", "count": 1},
             ],
         )
 
@@ -972,7 +978,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("Visible ferry, ferry_auto, aerialway, piste, ski, golf, and transit line/symbol layers", markdown)
         self.assertIn("#### Route overlay candidates simplified/substituted by qfit", markdown)
         self.assertIn("| `aerialway, ferry` | `roads/trails` | `ferry-aerialway-label` | `symbol` | `road` | z≥15 |", markdown)
-        self.assertIn("filter<br>paint.line-dasharray", markdown)
+        self.assertIn("paint.line-color<br>paint.line-dasharray<br>paint.line-width", markdown)
         self.assertNotIn("hidden-ferry` | `line` |", markdown)
 
     def test_route_overlay_candidates_search_untruncated_filter_text(self):
@@ -2997,12 +3003,10 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 "by_property": [
                     {"property": "filter", "count": 1},
                     {"property": "layout.icon-image", "count": 1},
-                    {"property": "paint.line-dasharray", "count": 1},
                 ],
                 "by_layer_group_and_property": [
                     {"group": "pois/labels", "property": "filter", "count": 1},
                     {"group": "pois/labels", "property": "layout.icon-image", "count": 1},
-                    {"group": "roads/trails", "property": "paint.line-dasharray", "count": 1},
                 ],
             },
         )
@@ -3141,20 +3145,19 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("## Summary", markdown)
         self.assertIn("### Simplified/substituted by qfit", markdown)
         self.assertIn("| `paint.line-width` | 1 |", markdown)
+        self.assertIn("| `paint.line-dasharray` | 1 |", markdown)
         self.assertIn("### Simplified/substituted by qfit by layer group", markdown)
         self.assertIn("| `roads/trails` | `paint.line-width` | 1 |", markdown)
+        self.assertIn("| `roads/trails` | `paint.line-dasharray` | 1 |", markdown)
         self.assertIn("### QGIS-dependent / unresolved", markdown)
         self.assertIn("| `filter` | 1 |", markdown)
         self.assertIn("| `layout.icon-image` | 1 |", markdown)
         self.assertIn("### QGIS-dependent / unresolved by layer group", markdown)
         self.assertIn("| `pois/labels` | `filter` | 1 |", markdown)
-        self.assertIn("| `roads/trails` | `paint.line-dasharray` | 1 |", markdown)
         self.assertIn("### Unresolved expression operators", markdown)
         self.assertIn("| `filter` | `==` | 1 |", markdown)
-        self.assertIn("| `paint.line-dasharray` | `step` | 1 |", markdown)
         self.assertIn("### Unresolved expression operators by layer group", markdown)
         self.assertIn("| `pois/labels` | `filter` | `==` | 1 |", markdown)
-        self.assertIn("| `roads/trails` | `paint.line-dasharray` | `step` | 1 |", markdown)
         self.assertIn("### Unresolved filter expression signatures by layer group", markdown)
         self.assertIn("| `pois/labels` | `==, get` | 1 | `poi-label` |", markdown)
         self.assertIn("## Layers", markdown)

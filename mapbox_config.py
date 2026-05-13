@@ -398,6 +398,76 @@ def _extract_midrange_size(expr: object) -> float | None:
     return None
 
 
+def _is_literal_number_array(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(not isinstance(item, bool) and isinstance(item, (int, float)) and item >= 0 for item in value)
+    )
+
+
+def _literal_line_dasharray(value: object) -> list[object] | None:
+    if _is_literal_number_array(value):
+        return list(value)
+    if not isinstance(value, list) or not value:
+        return None
+    if value[0] == "literal" and len(value) == 2 and _is_literal_number_array(value[1]):
+        return list(value[1])
+    return None
+
+
+def _representative_line_dasharray_interpolate_output(expr: list[object]) -> object | None:
+    if len(expr) < 5:
+        return None
+    if expr[2] == ["zoom"]:
+        return _nearest_zoom_stop_value(expr)
+    return expr[4]
+
+
+def _representative_line_dasharray_step_output(expr: list[object]) -> object | None:
+    if len(expr) < 3:
+        return None
+    if expr[1] == ["zoom"]:
+        return _step_zoom_value(expr)
+    return expr[2]
+
+
+def _case_expression_output_candidates(expr: list[object]) -> list[object]:
+    if len(expr) < 4:
+        return []
+    return [expr[-1], *(expr[index] for index in range(len(expr) - 2, 1, -2))]
+
+
+def _first_line_dasharray_literal(candidates: list[object]) -> list[object] | None:
+    for candidate in candidates:
+        literal_dasharray = _extract_line_dasharray_literal(candidate)
+        if literal_dasharray is not None:
+            return literal_dasharray
+    return None
+
+
+def _extract_line_dasharray_literal(expr: object) -> list[object] | None:
+    """Extract a literal QGIS-safe dash pattern from simple Mapbox expressions."""
+    literal_dasharray = _literal_line_dasharray(expr)
+    if literal_dasharray is not None:
+        return literal_dasharray
+    if not isinstance(expr, list) or not expr:
+        return None
+
+    op = expr[0]
+    if op == "interpolate":
+        return _extract_line_dasharray_literal(_representative_line_dasharray_interpolate_output(expr))
+    if op == "step":
+        return _extract_line_dasharray_literal(_representative_line_dasharray_step_output(expr))
+    if op == "match":
+        return _extract_line_dasharray_literal(expr[-1]) if len(expr) >= 5 else None
+    if op == "case":
+        return _first_line_dasharray_literal(_case_expression_output_candidates(expr))
+    if op == "coalesce":
+        return _first_line_dasharray_literal(list(reversed(expr[1:])))
+    return None
+
+
 def _line_layout_choice(expr: object, choices: set[str]) -> str | None:
     if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
         return None
@@ -553,9 +623,11 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literal fallback colors so QGIS' converter does not render them as black.
 
     Also simplifies ``text-field`` coalesce expressions to their first simple
-    ``['get', field]`` reference so QGIS can resolve the label field name, and
-    collapses Mapbox font stacks to a QGIS-safe local fallback to avoid warning
-    spam from proprietary Mapbox font family names.
+    ``['get', field]`` reference so QGIS can resolve the label field name,
+    literalizes simple ``line-dasharray`` expressions so dashed routes and paths
+    survive QGIS conversion, and collapses Mapbox font stacks to a QGIS-safe
+    local fallback to avoid warning spam from proprietary Mapbox font family
+    names.
 
     Only color properties whose values are Mapbox expressions (lists) are
     simplified.  Literal strings (``hsl(...)``, ``#rrggbb``) are kept as-is.
@@ -645,6 +717,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         # Convert px → mm (96 DPI) and clamp to sane range
                         width_mm = width * 25.4 / 96.0
                         props[prop] = max(0.1, min(width_mm, _MAX_LINE_WIDTH_MM))
+                elif prop == "line-dasharray":
+                    dasharray = _extract_line_dasharray_literal(val)
+                    if dasharray is not None:
+                        props[prop] = dasharray
                 elif prop == "text-field":
                     props[prop] = _simplify_text_field(val)
                 elif prop == "text-font" and _is_text_font_stack(val):
