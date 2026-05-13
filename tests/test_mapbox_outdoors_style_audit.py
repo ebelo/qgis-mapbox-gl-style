@@ -698,6 +698,138 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("filter<br>paint.line-opacity", markdown)
         self.assertNotIn("hidden-water` |", markdown)
 
+    def test_build_style_audit_reports_icon_sprite_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "road-shield",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "minzoom": 6,
+                        "filter": ["all", ["has", "reflen"], ["<=", ["get", "reflen"], 6]],
+                        "layout": {
+                            "icon-image": [
+                                "step",
+                                ["zoom"],
+                                "shield-small",
+                                12,
+                                ["concat", ["get", "shield"], "-", ["to-string", ["get", "reflen"]]],
+                            ],
+                            "icon-rotation-alignment": "map",
+                            "symbol-placement": ["step", ["zoom"], "point", 11, "line"],
+                            "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 10, 120, 16, 400],
+                            "text-field": ["get", "ref"],
+                        },
+                        "paint": {"icon-opacity": ["step", ["zoom"], 0, 6, 1]},
+                    },
+                    {
+                        "id": "poi-label",
+                        "type": "symbol",
+                        "source-layer": "poi_label",
+                        "layout": {
+                            "icon-allow-overlap": False,
+                            "icon-image": ["get", "maki"],
+                            "icon-size": 1.0,
+                            "text-field": ["get", "name"],
+                        },
+                        "paint": {"icon-opacity": 0.8},
+                    },
+                    {
+                        "id": "hidden-icon",
+                        "type": "symbol",
+                        "source-layer": "poi_label",
+                        "layout": {"visibility": "none", "icon-image": "park"},
+                    },
+                    {
+                        "id": "text-only-label",
+                        "type": "symbol",
+                        "source-layer": "place_label",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["icon_sprite_candidates"]
+        self.assertEqual([candidate["layer"] for candidate in candidates], ["poi-label", "road-shield"])
+        poi_candidate, road_candidate = candidates
+        self.assertEqual(poi_candidate["group"], "pois/labels")
+        self.assertEqual(poi_candidate["source_layer"], "poi_label")
+        self.assertEqual(poi_candidate["icon_image_operator_signature"], "get")
+        self.assertEqual(
+            poi_candidate["icon_sprite_control_properties"],
+            ["layout.icon-allow-overlap", "layout.icon-image", "layout.icon-size", "paint.icon-opacity"],
+        )
+        self.assertEqual(poi_candidate["qfit_simplified_control_properties"], [])
+        self.assertEqual(poi_candidate["qgis_dependent_control_properties"], ["layout.icon-image"])
+        self.assertEqual(road_candidate["group"], "roads/trails")
+        self.assertEqual(road_candidate["source_layer"], "road")
+        self.assertEqual(road_candidate["zoom_band"], "z≥6")
+        self.assertEqual(road_candidate["filter_operator_signature"], "<=, all, get, has")
+        self.assertEqual(
+            road_candidate["icon_image_operator_signature"],
+            "concat, get, step, to-string, zoom",
+        )
+        self.assertEqual(
+            road_candidate["icon_sprite_control_properties"],
+            [
+                "filter",
+                "layout.icon-image",
+                "layout.icon-rotation-alignment",
+                "layout.symbol-placement",
+                "layout.symbol-spacing",
+                "paint.icon-opacity",
+            ],
+        )
+        self.assertEqual(road_candidate["qfit_simplified_control_properties"], [])
+        self.assertEqual(
+            road_candidate["qgis_dependent_control_properties"],
+            [
+                "filter",
+                "layout.icon-image",
+                "layout.symbol-placement",
+                "layout.symbol-spacing",
+                "paint.icon-opacity",
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["icon_sprite_candidates_by_layer_group"],
+            [{"group": "pois/labels", "count": 1}, {"group": "roads/trails", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["icon_sprite_candidates_by_source_layer"],
+            [{"source_layer": "poi_label", "count": 1}, {"source_layer": "road", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["icon_sprite_candidates_by_icon_image_operator_signature"],
+            [
+                {"icon_image_operator_signature": "concat, get, step, to-string, zoom", "count": 1},
+                {"icon_image_operator_signature": "get", "count": 1},
+            ],
+        )
+        self.assertEqual(audit["summary"]["icon_sprite_simplified_by_property"], [])
+        self.assertEqual(
+            audit["summary"]["icon_sprite_qgis_dependent_by_property"],
+            [
+                {"property": "layout.icon-image", "count": 2},
+                {"property": "filter", "count": 1},
+                {"property": "layout.symbol-placement", "count": 1},
+                {"property": "layout.symbol-spacing", "count": 1},
+                {"property": "paint.icon-opacity", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Sprite/icon candidates", markdown)
+        self.assertIn("Visible symbol layers with sprite-backed icons", markdown)
+        self.assertIn("#### Sprite/icon candidates QGIS-dependent controls", markdown)
+        self.assertIn("| `pois/labels` | `poi-label` | `poi_label` | all zooms | `(none)` | `get` |", markdown)
+        self.assertIn("layout.icon-image<br>layout.icon-rotation-alignment", markdown)
+        self.assertIn("filter<br>layout.icon-image<br>layout.symbol-placement", markdown)
+        self.assertNotIn("hidden-icon` |", markdown)
+
     def test_build_style_audit_can_include_qgis_converter_warning_summary(self):
         warning_report = {
             "raw": {

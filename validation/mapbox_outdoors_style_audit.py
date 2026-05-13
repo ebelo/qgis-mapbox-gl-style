@@ -58,6 +58,17 @@ _WATER_FLOW_CANDIDATES_BY_TYPE_KEY = "water_surface_flow_candidates_by_type"
 _WATER_FLOW_SIMPLIFIED_BY_PROPERTY_KEY = "water_surface_flow_simplified_by_property"
 _WATER_FLOW_QGIS_DEPENDENT_BY_PROPERTY_KEY = "water_surface_flow_qgis_dependent_by_property"
 _WATER_FLOW_CONTROL_PROPERTIES_KEY = "water_surface_flow_control_properties"
+_ICON_SPRITE_CANDIDATES_KEY = "icon_sprite_candidates"
+_ICON_SPRITE_CANDIDATES_BY_LAYER_GROUP_KEY = "icon_sprite_candidates_by_layer_group"
+_ICON_SPRITE_CANDIDATES_BY_SOURCE_LAYER_KEY = "icon_sprite_candidates_by_source_layer"
+_ICON_SPRITE_CANDIDATES_BY_ICON_IMAGE_OPERATOR_SIGNATURE_KEY = (
+    "icon_sprite_candidates_by_icon_image_operator_signature"
+)
+_ICON_SPRITE_SIMPLIFIED_BY_PROPERTY_KEY = "icon_sprite_simplified_by_property"
+_ICON_SPRITE_QGIS_DEPENDENT_BY_PROPERTY_KEY = "icon_sprite_qgis_dependent_by_property"
+_ICON_SPRITE_CONTROL_PROPERTIES_KEY = "icon_sprite_control_properties"
+_FILTER_OPERATOR_SIGNATURE_KEY = "filter_operator_signature"
+_ICON_IMAGE_OPERATOR_SIGNATURE_KEY = "icon_image_operator_signature"
 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY = "qfit_simplified_control_properties"
 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY = "qgis_dependent_control_properties"
 _PROPERTY_REMOVAL_IMPACT_PROBE_KEY = "property_removal_impact_probe"
@@ -73,12 +84,13 @@ _FILTER_PARSE_PART_PARENT_OPERATORS = frozenset({"all", "any", "none"})
 _NO_OPERATOR_SIGNATURE = "(none)"
 _ALL_ZOOMS_BAND = "all zooms"
 _LINE_DASHARRAY_PROPERTY = "paint.line-dasharray"
+_SYMBOL_SPACING_PROPERTY = "layout.symbol-spacing"
 _LABEL_DENSITY_CONTROL_PROPERTIES = (
     "layout.icon-allow-overlap",
     "layout.icon-ignore-placement",
     "layout.icon-optional",
     "layout.symbol-sort-key",
-    "layout.symbol-spacing",
+    _SYMBOL_SPACING_PROPERTY,
     "layout.text-allow-overlap",
     "layout.text-anchor",
     "layout.text-field",
@@ -91,6 +103,32 @@ _LABEL_DENSITY_CONTROL_PROPERTIES = (
     "layout.text-radial-offset",
     "layout.text-size",
     "layout.text-variable-anchor",
+)
+_ICON_SPRITE_CONTROL_PROPERTIES = (
+    "layout.icon-allow-overlap",
+    "layout.icon-anchor",
+    "layout.icon-ignore-placement",
+    "layout.icon-image",
+    "layout.icon-keep-upright",
+    "layout.icon-offset",
+    "layout.icon-optional",
+    "layout.icon-padding",
+    "layout.icon-pitch-alignment",
+    "layout.icon-rotate",
+    "layout.icon-rotation-alignment",
+    "layout.icon-size",
+    "layout.icon-text-fit",
+    "layout.icon-text-fit-padding",
+    "layout.symbol-avoid-edges",
+    "layout.symbol-placement",
+    _SYMBOL_SPACING_PROPERTY,
+    "paint.icon-color",
+    "paint.icon-halo-blur",
+    "paint.icon-halo-color",
+    "paint.icon-halo-width",
+    "paint.icon-opacity",
+    "paint.icon-translate",
+    "paint.icon-translate-anchor",
 )
 _ROAD_TRAIL_HIERARCHY_LAYER_TYPES = frozenset({"fill", "line"})
 _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES = (
@@ -769,6 +807,28 @@ def _water_flow_control_properties(layer: dict[str, object]) -> list[str]:
     return _control_properties(layer, _WATER_FLOW_CONTROL_PROPERTIES, include_filter=True)
 
 
+def _is_icon_sprite_candidate_layer(layer: dict[str, object]) -> bool:
+    layout = layer.get("layout")
+    return (
+        str(layer.get("type") or "") == "symbol"
+        and isinstance(layout, dict)
+        and "icon-image" in layout
+        and not _is_source_hidden_layer(layer)
+        and not _is_qfit_hidden_layer(layer)
+    )
+
+
+def _icon_sprite_control_properties(layer: dict[str, object]) -> list[str]:
+    return _control_properties(layer, _ICON_SPRITE_CONTROL_PROPERTIES, include_filter=True)
+
+
+def _icon_image_operator_signature(layer: dict[str, object]) -> str:
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return _NO_OPERATOR_SIGNATURE
+    return _operator_signature(layout.get("icon-image"))
+
+
 def _qfit_simplified_control_properties(layer: dict[str, object], controls: set[str]) -> list[str]:
     simplified = layer.get("qfit_simplifies")
     if not isinstance(simplified, list):
@@ -806,7 +866,7 @@ def _road_trail_hierarchy_candidate_rows(layers: list[dict[str, object]]) -> lis
                 "type": str(layer.get("type") or ""),
                 "source_layer": str(layer.get("source_layer") or ""),
                 "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
-                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
                 _ROAD_TRAIL_CONTROL_PROPERTIES_KEY: controls,
                 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
@@ -830,7 +890,7 @@ def _terrain_landcover_candidate_rows(layers: list[dict[str, object]]) -> list[d
                 "type": str(layer.get("type") or ""),
                 "source_layer": str(layer.get("source_layer") or ""),
                 "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
-                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
                 _TERRAIN_LANDCOVER_CONTROL_PROPERTIES_KEY: controls,
                 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(
                     layer,
@@ -860,13 +920,38 @@ def _water_flow_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str
                 "type": str(layer.get("type") or ""),
                 "source_layer": str(layer.get("source_layer") or ""),
                 "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
-                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
                 _WATER_FLOW_CONTROL_PROPERTIES_KEY: controls,
                 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
             }
         )
     return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
+
+
+def _icon_sprite_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_icon_sprite_candidate_layer(layer):
+            continue
+        controls = _icon_sprite_control_properties(layer)
+        if not controls:
+            continue
+        control_set = set(controls)
+        rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "group": str(layer.get("group") or "other"),
+                "source_layer": str(layer.get("source_layer") or ""),
+                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
+                _ICON_IMAGE_OPERATOR_SIGNATURE_KEY: _icon_image_operator_signature(layer),
+                _ICON_SPRITE_CONTROL_PROPERTIES_KEY: controls,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
+            }
+        )
+    return sorted(rows, key=lambda row: (str(row["group"]), str(row["layer"])))
 
 
 def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -880,7 +965,7 @@ def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[
                 "group": str(layer.get("group") or "other"),
                 "source_layer": str(layer.get("source_layer") or ""),
                 "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
-                "filter_operator_signature": _operator_signature(_qgis_filter_value(layer)),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
                 "label_control_properties": _label_density_control_properties(layer),
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _label_density_unresolved_controls(layer),
             }
@@ -1966,7 +2051,7 @@ def _annotate_qgis_warning_group_summaries(
         symbol_spacing_probe,
         layers,
         exclude_properties_by_layer={
-            layer_id: {"layout.symbol-spacing"} for layer_id in symbol_spacing_replaced_layers
+            layer_id: {_SYMBOL_SPACING_PROPERTY} for layer_id in symbol_spacing_replaced_layers
         },
     )
     sprite_context_probe = (
@@ -2678,6 +2763,7 @@ def build_style_audit(
     road_trail_hierarchy_candidates = _road_trail_hierarchy_candidate_rows(layers)
     terrain_landcover_candidates = _terrain_landcover_candidate_rows(layers)
     water_flow_candidates = _water_flow_candidate_rows(layers)
+    icon_sprite_candidates = _icon_sprite_candidate_rows(layers)
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
     audit = {
         "style": {
@@ -2758,6 +2844,27 @@ def build_style_audit(
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
             ),
             _WATER_FLOW_CANDIDATES_KEY: water_flow_candidates,
+            _ICON_SPRITE_CANDIDATES_BY_LAYER_GROUP_KEY: _count_rows_by_key(
+                icon_sprite_candidates,
+                "group",
+            ),
+            _ICON_SPRITE_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
+                icon_sprite_candidates,
+                "source_layer",
+            ),
+            _ICON_SPRITE_CANDIDATES_BY_ICON_IMAGE_OPERATOR_SIGNATURE_KEY: _count_rows_by_key(
+                icon_sprite_candidates,
+                _ICON_IMAGE_OPERATOR_SIGNATURE_KEY,
+            ),
+            _ICON_SPRITE_SIMPLIFIED_BY_PROPERTY_KEY: _count_row_values(
+                icon_sprite_candidates,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY,
+            ),
+            _ICON_SPRITE_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                icon_sprite_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
+            _ICON_SPRITE_CANDIDATES_KEY: icon_sprite_candidates,
         },
         "layers": layers,
     }
@@ -2932,7 +3039,7 @@ def _markdown_label_density_candidate_table(rows: list[dict[str, object]], *, em
                 layer=row.get("layer", ""),
                 source_layer=row.get("source_layer", ""),
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
-                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get("label_control_properties") or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
             )
@@ -2965,7 +3072,7 @@ def _markdown_road_trail_hierarchy_candidate_table(
                 layer_type=row.get("type", ""),
                 source_layer=row.get("source_layer", ""),
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
-                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get(_ROAD_TRAIL_CONTROL_PROPERTIES_KEY) or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
@@ -2999,7 +3106,7 @@ def _markdown_terrain_landcover_candidate_table(
                 layer_type=row.get("type", ""),
                 source_layer=row.get("source_layer", ""),
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
-                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get(_TERRAIN_LANDCOVER_CONTROL_PROPERTIES_KEY) or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
@@ -3033,8 +3140,39 @@ def _markdown_water_flow_candidate_table(
                 layer_type=row.get("type", ""),
                 source_layer=row.get("source_layer", ""),
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
-                filter_operators=row.get("filter_operator_signature", _NO_OPERATOR_SIGNATURE),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get(_WATER_FLOW_CONTROL_PROPERTIES_KEY) or [])),
+                simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
+                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_icon_sprite_candidate_table(rows: list[dict[str, object]], *, empty: str = "—") -> list[str]:
+    if not rows:
+        return [empty, ""]
+    lines = [
+        (
+            "| Layer group | Layer | Source layer | Zoom | Filter operators | Icon-image operators | "
+            "Sprite/icon controls | Simplified/substituted by qfit | QGIS-dependent controls |"
+        ),
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append(
+            (
+                "| `{group}` | `{layer}` | `{source_layer}` | {zoom} | `{filter_operators}` | "
+                "`{icon_image_operators}` | {controls} | {simplified} | {unresolved} |"
+            ).format(
+                group=row.get("group", ""),
+                layer=row.get("layer", ""),
+                source_layer=row.get("source_layer", ""),
+                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
+                icon_image_operators=row.get(_ICON_IMAGE_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
+                controls=_markdown_list(list(row.get(_ICON_SPRITE_CONTROL_PROPERTIES_KEY) or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
             )
@@ -4434,6 +4572,40 @@ def _markdown_water_flow_summary(summary: dict[str, object]) -> list[str]:
     ]
 
 
+def _markdown_icon_sprite_summary(summary: dict[str, object]) -> list[str]:
+    return [
+        "### Sprite/icon candidates",
+        "",
+        (
+            "Visible symbol layers with sprite-backed icons. Use this diagnostic with live screenshots before "
+            "changing sprite, icon-image, shield, POI, one-way arrow, or icon placement preprocessing."
+        ),
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ICON_SPRITE_CANDIDATES_BY_LAYER_GROUP_KEY),
+            key="group",
+            label=_MARKDOWN_LAYER_GROUP_LABEL,
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ICON_SPRITE_CANDIDATES_BY_SOURCE_LAYER_KEY),
+            key="source_layer",
+            label=_MARKDOWN_SOURCE_LAYER_LABEL,
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _ICON_SPRITE_CANDIDATES_BY_ICON_IMAGE_OPERATOR_SIGNATURE_KEY),
+            key=_ICON_IMAGE_OPERATOR_SIGNATURE_KEY,
+            label="Icon-image operators",
+        ),
+        "#### Sprite/icon candidates simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _ICON_SPRITE_SIMPLIFIED_BY_PROPERTY_KEY)),
+        "#### Sprite/icon candidates QGIS-dependent controls",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _ICON_SPRITE_QGIS_DEPENDENT_BY_PROPERTY_KEY)),
+        *_markdown_icon_sprite_candidate_table(_summary_rows(summary, _ICON_SPRITE_CANDIDATES_KEY)),
+    ]
+
+
 def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: object) -> list[str]:
     return [
         "## Summary",
@@ -4467,6 +4639,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_road_trail_hierarchy_summary(summary),
         *_markdown_terrain_landcover_summary(summary),
         *_markdown_water_flow_summary(summary),
+        *_markdown_icon_sprite_summary(summary),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
 
