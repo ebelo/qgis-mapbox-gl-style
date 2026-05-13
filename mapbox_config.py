@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from urllib.parse import parse_qsl, quote, urlencode, unquote, urlparse, urlunparse
@@ -468,6 +469,95 @@ def _extract_line_dasharray_literal(expr: object) -> list[object] | None:
     return None
 
 
+_FILTER_SIMPLIFICATION_NOT_AVAILABLE = object()
+
+
+def _inverted_boolean_match_filter(value: object) -> object:
+    if not isinstance(value, list) or len(value) != 2 or value[0] != "!":
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    match_expression = value[1]
+    if (
+        not isinstance(match_expression, list)
+        or len(match_expression) < 5
+        or (len(match_expression) - 3) % 2 != 0
+        or match_expression[0] != "match"
+    ):
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+    normalized = ["match", copy.deepcopy(match_expression[1])]
+    for output_index in range(3, len(match_expression) - 1, 2):
+        output_value = match_expression[output_index]
+        if not isinstance(output_value, bool):
+            return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+        normalized.extend([copy.deepcopy(match_expression[output_index - 1]), not output_value])
+    default_value = match_expression[-1]
+    if not isinstance(default_value, bool):
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    normalized.append(not default_value)
+    return normalized
+
+
+def _simple_case_filter(value: object) -> object:
+    if not isinstance(value, list) or len(value) != 4 or value[0] != "case":
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+    condition = _simplify_filter_expression_for_qgis(value[1], root=True)
+    predicate = _simplify_filter_expression_for_qgis(value[2], root=True)
+    default = value[3]
+    if value[2] is True and default is False:
+        return condition
+    if value[2] is False and default is True:
+        return ["!", condition]
+    if default is True:
+        return ["any", ["!", condition], predicate]
+    if default is False:
+        return ["all", condition, predicate]
+    return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+
+def _is_numeric_zero(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0
+
+
+def _additive_identity_filter(value: list[object], *, root: bool) -> object:
+    if len(value) != 3:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    left, right = value[1], value[2]
+    if value[0] == "+":
+        if _is_numeric_zero(left):
+            return _simplify_filter_expression_for_qgis(right, root=root)
+        if _is_numeric_zero(right):
+            return _simplify_filter_expression_for_qgis(left, root=root)
+    if value[0] == "-" and _is_numeric_zero(right):
+        return _simplify_filter_expression_for_qgis(left, root=root)
+    return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+
+def _simplify_filter_expression_for_qgis(value: object, *, root: bool = True) -> object:
+    """Apply semantics-preserving filter rewrites that QGIS parses more reliably."""
+    if isinstance(value, bool):
+        if root:
+            return ["==", 1, 1 if value else 0]
+        return value
+    if not isinstance(value, list) or not value:
+        return value
+
+    operator = value[0]
+    if operator == "literal":
+        return value
+    inverted_match = _inverted_boolean_match_filter(value)
+    if inverted_match is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+        return inverted_match
+    case_filter = _simple_case_filter(value)
+    if case_filter is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+        return case_filter
+    if operator in {"+", "-"}:
+        additive_identity = _additive_identity_filter(value, root=root)
+        if additive_identity is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+            return additive_identity
+    return [operator, *[_simplify_filter_expression_for_qgis(item, root=False) for item in value[1:]]]
+
+
 def _line_layout_choice(expr: object, choices: set[str]) -> str | None:
     if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
         return None
@@ -625,14 +715,14 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     Also simplifies ``text-field`` coalesce expressions to their first simple
     ``['get', field]`` reference so QGIS can resolve the label field name,
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
-    survive QGIS conversion, and collapses Mapbox font stacks to a QGIS-safe
-    local fallback to avoid warning spam from proprietary Mapbox font family
-    names.
+    survive QGIS conversion, rewrites a few semantics-preserving filter shapes
+    that QGIS parses more reliably, and collapses Mapbox font stacks to a
+    QGIS-safe local fallback to avoid warning spam from proprietary Mapbox font
+    family names.
 
     Only color properties whose values are Mapbox expressions (lists) are
     simplified.  Literal strings (``hsl(...)``, ``#rrggbb``) are kept as-is.
     """
-    import copy
     style = copy.deepcopy(style_definition)
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
@@ -698,6 +788,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     layer["filter"] = ["all", existing_filter, settlement_filter]
                 else:
                     layer["filter"] = settlement_filter
+
+        filter_value = layer.get("filter")
+        if isinstance(filter_value, (bool, list)):
+            layer["filter"] = _simplify_filter_expression_for_qgis(filter_value)
 
         for section in ("paint", "layout"):
             props = layer.get(section)

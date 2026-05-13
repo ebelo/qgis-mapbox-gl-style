@@ -538,6 +538,58 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][0]["paint"]["line-dasharray"], expression)
         self.assertEqual(result["layers"][1]["paint"]["line-dasharray"], ["literal", [2, -1]])
 
+    def test_filter_expressions_use_parser_friendly_equivalents(self):
+        style = {
+            "layers": [
+                {
+                    "filter": ["!", ["match", ["get", "type"], ["steps", "sidewalk"], True, False]],
+                },
+                {
+                    "filter": ["case", ["has", "layer"], [">=", ["get", "layer"], 0], True],
+                },
+                {
+                    "filter": ["case", ["==", ["get", "class"], "park"], True, False],
+                },
+                {
+                    "filter": ["case", ["==", ["get", "class"], "park"], False, True],
+                },
+                {
+                    "filter": ["<=", ["+", ["get", "filterrank"], 0], ["-", 12, 0]],
+                },
+                {"filter": True},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            ["match", ["get", "type"], ["steps", "sidewalk"], False, True],
+        )
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["any", ["!", ["has", "layer"]], [">=", ["get", "layer"], 0]],
+        )
+        self.assertEqual(result["layers"][2]["filter"], ["==", ["get", "class"], "park"])
+        self.assertEqual(result["layers"][3]["filter"], ["!", ["==", ["get", "class"], "park"]])
+        self.assertEqual(result["layers"][4]["filter"], ["<=", ["get", "filterrank"], 12])
+        self.assertEqual(result["layers"][5]["filter"], ["==", 1, 1])
+        self.assertEqual(style["layers"][0]["filter"][0], "!")
+
+    def test_filter_simplification_preserves_zoom_dependent_filters(self):
+        filter_expression = [
+            "step",
+            ["zoom"],
+            ["match", ["get", "class"], ["primary", "secondary"], True, False],
+            14,
+            True,
+        ]
+        style = {"layers": [{"filter": filter_expression}]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["filter"], filter_expression)
+
     def test_line_cap_step_expression_uses_high_zoom_choice(self):
         style = {
             "layers": [
