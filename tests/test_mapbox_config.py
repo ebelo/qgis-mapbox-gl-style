@@ -450,6 +450,89 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         width = result["layers"][0]["paint"]["line-width"]
         self.assertEqual(width, 3.0)
 
+    def test_full_line_opacity_expressions_simplify_to_scalar_default(self):
+        style = {
+            "layers": [
+                {
+                    "paint": {
+                        "line-opacity": [
+                            "interpolate",
+                            ["linear"],
+                            ["zoom"],
+                            10,
+                            0,
+                            11,
+                            1,
+                        ]
+                    },
+                },
+                {"paint": {"line-opacity": ["step", ["zoom"], 0, 11, 1]}},
+                {"paint": {"line-opacity": ["match", ["get", "class"], "gate", 1, 1]}},
+                {"paint": {"line-opacity": ["interpolate", ["linear"], ["zoom"], 13, 1, 14, 0.5]}},
+                {"paint": {"line-opacity": ["case", ["has", "class"], 1, 1]}},
+                {"paint": {"line-opacity": ["coalesce", 1, ["get", "opacity"]]}},
+                {"paint": {"line-opacity": ["step", ["get", "rank"], 1, 10, 1]}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["line-opacity"], 1.0)
+
+    def test_non_full_line_opacity_expressions_are_left_unchanged(self):
+        zoom_expression = ["interpolate", ["linear"], ["zoom"], 10, 0.4, 16, 0.7]
+        ramping_zoom_expression = ["interpolate", ["linear"], ["zoom"], 8, 0, 14, 1]
+        property_expression = ["interpolate", ["linear"], ["get", "rank"], 0, 0.5, 10, 1]
+        short_interpolate = ["interpolate", ["linear"]]
+        unsupported_interpolate = ["interpolate", ["linear"], ["zoom"], "low", 1]
+        short_step = ["step"]
+        unknown_expression = ["get", "opacity"]
+        empty_expression = []
+        short_match = ["match", ["get", "class"]]
+        partial_match = ["match", ["get", "class"], "gate", 0.5, 1]
+        partial_case = ["case", ["has", "class"], 0.5, 1]
+        partial_data_step = ["step", ["get", "rank"], 1, 10, 0.5]
+        unresolved_coalesce = ["coalesce", ["get", "opacity"], 1]
+        partial_coalesce = ["coalesce", ["get", "opacity"], 0.5, 1]
+        style = {
+            "layers": [
+                {"paint": {"line-opacity": zoom_expression}},
+                {"paint": {"line-opacity": ramping_zoom_expression}},
+                {"paint": {"line-opacity": property_expression}},
+                {"paint": {"line-opacity": short_interpolate}},
+                {"paint": {"line-opacity": unsupported_interpolate}},
+                {"paint": {"line-opacity": short_step}},
+                {"paint": {"line-opacity": unknown_expression}},
+                {"paint": {"line-opacity": empty_expression}},
+                {"paint": {"line-opacity": short_match}},
+                {"paint": {"line-opacity": partial_match}},
+                {"paint": {"line-opacity": partial_case}},
+                {"paint": {"line-opacity": partial_data_step}},
+                {"paint": {"line-opacity": unresolved_coalesce}},
+                {"paint": {"line-opacity": partial_coalesce}},
+                {"paint": {"line-opacity": True}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["line-opacity"], zoom_expression)
+        self.assertEqual(result["layers"][1]["paint"]["line-opacity"], ramping_zoom_expression)
+        self.assertEqual(result["layers"][2]["paint"]["line-opacity"], property_expression)
+        self.assertEqual(result["layers"][3]["paint"]["line-opacity"], short_interpolate)
+        self.assertEqual(result["layers"][4]["paint"]["line-opacity"], unsupported_interpolate)
+        self.assertEqual(result["layers"][5]["paint"]["line-opacity"], short_step)
+        self.assertEqual(result["layers"][6]["paint"]["line-opacity"], unknown_expression)
+        self.assertEqual(result["layers"][7]["paint"]["line-opacity"], empty_expression)
+        self.assertEqual(result["layers"][8]["paint"]["line-opacity"], short_match)
+        self.assertEqual(result["layers"][9]["paint"]["line-opacity"], partial_match)
+        self.assertEqual(result["layers"][10]["paint"]["line-opacity"], partial_case)
+        self.assertEqual(result["layers"][11]["paint"]["line-opacity"], partial_data_step)
+        self.assertEqual(result["layers"][12]["paint"]["line-opacity"], unresolved_coalesce)
+        self.assertEqual(result["layers"][13]["paint"]["line-opacity"], partial_coalesce)
+        self.assertIs(result["layers"][14]["paint"]["line-opacity"], True)
+
     def test_line_dasharray_expressions_resolve_to_literal_arrays(self):
         style = {
             "layers": [

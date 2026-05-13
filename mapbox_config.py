@@ -265,6 +265,8 @@ def fetch_mapbox_style_definition(
 
 
 _REPRESENTATIVE_STYLE_ZOOM = 12.0
+_FULL_LINE_OPACITY = 1.0
+_FULL_LINE_OPACITY_EPSILON = 1e-9
 
 
 def _is_literal_color(value: object) -> bool:
@@ -396,6 +398,109 @@ def _extract_midrange_size(expr: object) -> float | None:
         val = _extract_midrange_size(item)
         if val is not None:
             return val
+    return None
+
+
+def _clamp_opacity_value(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return max(0.0, min(float(value), 1.0))
+
+
+def _representative_line_opacity_interpolate_output(expr: list[object]) -> object | None:
+    if len(expr) < 5:
+        return None
+    if expr[2] != ["zoom"]:
+        return None
+
+    numeric_stops: list[tuple[float, float]] = []
+    for index in range(3, len(expr) - 1, 2):
+        stop = expr[index]
+        output = expr[index + 1]
+        if (
+            isinstance(stop, bool)
+            or not isinstance(stop, (int, float))
+            or isinstance(output, bool)
+            or not isinstance(output, (int, float))
+        ):
+            return None
+        numeric_stops.append((float(stop), float(output)))
+
+    target_zoom = _REPRESENTATIVE_STYLE_ZOOM
+    previous_zoom, previous_output = numeric_stops[0]
+    if target_zoom <= previous_zoom:
+        return previous_output
+    for stop_zoom, stop_output in numeric_stops[1:]:
+        if target_zoom <= stop_zoom:
+            progress = (target_zoom - previous_zoom) / (stop_zoom - previous_zoom)
+            return previous_output + ((stop_output - previous_output) * progress)
+        previous_zoom, previous_output = stop_zoom, stop_output
+    return previous_output
+
+
+def _representative_line_opacity_step_output(expr: list[object]) -> object | None:
+    if len(expr) < 3:
+        return None
+    if expr[1] == ["zoom"]:
+        return _step_zoom_value(expr)
+    outputs = [expr[2], *[expr[index] for index in range(4, len(expr), 2)]]
+    return _extract_line_opacity_from_reachable_outputs(outputs)
+
+
+def _extract_line_opacity_from_reachable_outputs(outputs: list[object]) -> float | None:
+    if not outputs:
+        return None
+    for output in outputs:
+        opacity = _extract_representative_line_opacity(output)
+        if opacity is None:
+            return None
+        if opacity <= _FULL_LINE_OPACITY - _FULL_LINE_OPACITY_EPSILON:
+            return opacity
+    return _FULL_LINE_OPACITY
+
+
+def _extract_match_line_opacity(expr: list[object]) -> float | None:
+    if len(expr) < 4:
+        return None
+    outputs = [expr[index] for index in range(3, len(expr) - 1, 2)]
+    outputs.append(expr[-1])
+    return _extract_line_opacity_from_reachable_outputs(outputs)
+
+
+def _extract_case_line_opacity(expr: list[object]) -> float | None:
+    if len(expr) < 4:
+        return None
+    outputs = [expr[index] for index in range(2, len(expr) - 1, 2)]
+    outputs.append(expr[-1])
+    return _extract_line_opacity_from_reachable_outputs(outputs)
+
+
+def _extract_coalesce_line_opacity(expr: list[object]) -> float | None:
+    if len(expr) < 2:
+        return None
+    return _extract_representative_line_opacity(expr[1])
+
+
+def _extract_representative_line_opacity(expr: object) -> float | None:
+    scalar = _clamp_opacity_value(expr)
+    if scalar is not None:
+        return scalar
+    if not isinstance(expr, list) or not expr:
+        return None
+
+    op = expr[0]
+    if op == "interpolate":
+        representative = _representative_line_opacity_interpolate_output(expr)
+        return _extract_representative_line_opacity(representative)
+    if op == "step":
+        representative = _representative_line_opacity_step_output(expr)
+        return _extract_representative_line_opacity(representative)
+    if op == "match":
+        return _extract_match_line_opacity(expr)
+    if op == "case":
+        return _extract_case_line_opacity(expr)
+    if op == "coalesce":
+        return _extract_coalesce_line_opacity(expr)
     return None
 
 
@@ -848,6 +953,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     dasharray = _extract_line_dasharray_literal(val)
                     if dasharray is not None:
                         props[prop] = dasharray
+                elif prop == "line-opacity":
+                    opacity = _extract_representative_line_opacity(val)
+                    if opacity is not None and opacity > _FULL_LINE_OPACITY - _FULL_LINE_OPACITY_EPSILON:
+                        props[prop] = _FULL_LINE_OPACITY
                 elif prop == "text-field":
                     props[prop] = _simplify_text_field(val)
                 elif prop == "text-font" and _is_text_font_stack(val):

@@ -461,11 +461,11 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertEqual(
             road_candidate["qfit_simplified_control_properties"],
-            ["paint.line-color", "paint.line-dasharray", "paint.line-width"],
+            ["paint.line-color", "paint.line-dasharray", "paint.line-opacity", "paint.line-width"],
         )
         self.assertEqual(
             road_candidate["qgis_dependent_control_properties"],
-            ["filter", "paint.line-opacity"],
+            ["filter"],
         )
         self.assertEqual(audit["summary"]["road_trail_hierarchy_candidates_by_source_layer"], [{"source_layer": "road", "count": 2}])
         self.assertEqual(
@@ -478,6 +478,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                 {"property": "paint.fill-color", "count": 1},
                 {"property": "paint.line-color", "count": 1},
                 {"property": "paint.line-dasharray", "count": 1},
+                {"property": "paint.line-opacity", "count": 1},
                 {"property": "paint.line-width", "count": 1},
             ],
         )
@@ -486,7 +487,6 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [
                 {"property": "filter", "count": 1},
                 {"property": "paint.fill-opacity", "count": 1},
-                {"property": "paint.line-opacity", "count": 1},
             ],
         )
 
@@ -496,8 +496,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("#### Road/trail hierarchy candidates QGIS-dependent controls", markdown)
         self.assertIn("| `paint.line-width` | 1 |", markdown)
         self.assertIn("| `road-primary` | `line` | `road` | z≥5 | `==, get` |", markdown)
-        self.assertIn("paint.line-color<br>paint.line-dasharray<br>paint.line-width", markdown)
-        self.assertIn("filter<br>paint.line-opacity", markdown)
+        self.assertIn(
+            "paint.line-color<br>paint.line-dasharray<br>paint.line-opacity<br>paint.line-width",
+            markdown,
+        )
+        self.assertIn("filter", markdown)
+        self.assertNotIn("filter<br>paint.line-opacity", markdown)
         self.assertNotIn("hidden-road` |", markdown)
 
     def test_build_style_audit_reports_terrain_landcover_palette_candidates(self):
