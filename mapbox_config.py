@@ -265,6 +265,7 @@ def fetch_mapbox_style_definition(
 
 
 _REPRESENTATIVE_STYLE_ZOOM = 12.0
+_ZOOM_BOUND_EPSILON = 1e-9
 _FULL_OPACITY = 1.0
 _FULL_OPACITY_EPSILON = 1e-9
 _FULL_OPACITY_PROPS = {"fill-opacity", "line-opacity"}
@@ -325,6 +326,48 @@ def _step_zoom_value(expr: list[object], target_zoom: float = _REPRESENTATIVE_ST
             break
         value = expr[index + 1]
     return value
+
+
+def _numeric_zoom_bound(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _representative_zoom_in_layer_range(minzoom: object, maxzoom: object) -> float | None:
+    target_zoom = _REPRESENTATIVE_STYLE_ZOOM
+    minimum_zoom = _numeric_zoom_bound(minzoom)
+    maximum_zoom = _numeric_zoom_bound(maxzoom)
+    if minimum_zoom is not None and maximum_zoom is not None and minimum_zoom >= maximum_zoom:
+        return None
+    if minimum_zoom is not None and target_zoom < minimum_zoom:
+        target_zoom = minimum_zoom
+    if maximum_zoom is not None and target_zoom >= maximum_zoom:
+        target_zoom = maximum_zoom - _ZOOM_BOUND_EPSILON
+    if minimum_zoom is not None and target_zoom < minimum_zoom:
+        return None
+    return target_zoom
+
+
+def _literal_step_icon_image(expr: object, *, minzoom: object = None, maxzoom: object = None) -> str | None:
+    if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
+        return None
+    if not isinstance(expr[2], str) or not expr[2]:
+        return None
+    for index in range(3, len(expr) - 1, 2):
+        threshold = expr[index]
+        output = expr[index + 1]
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
+            return None
+        if not isinstance(output, str) or not output:
+            return None
+    target_zoom = _representative_zoom_in_layer_range(minzoom, maxzoom)
+    if target_zoom is None:
+        return None
+    representative = _step_zoom_value(expr, target_zoom=target_zoom)
+    if isinstance(representative, str) and representative:
+        return representative
+    return None
 
 
 def _extract_fallback_color(expr: object) -> str | None:
@@ -967,9 +1010,18 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                 continue
             for prop in list(props.keys()):
                 val = props[prop]
-                if section == "layout" and prop == "icon-image" and val == "":
-                    del props[prop]
-                    continue
+                if section == "layout" and prop == "icon-image":
+                    if val == "":
+                        del props[prop]
+                        continue
+                    icon_image = _literal_step_icon_image(
+                        val,
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if icon_image is not None:
+                        props[prop] = icon_image
+                        continue
                 if not isinstance(val, list):
                     continue
                 if prop in color_props:
