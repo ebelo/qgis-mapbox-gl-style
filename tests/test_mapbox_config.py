@@ -751,6 +751,48 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(result["layers"][1]["layout"]["icon-image"], network_icon)
 
+    def test_road_exit_shield_concat_icon_uses_reflen_sprite_match_fallback(self):
+        exit_icon = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
+        other_concat_icon = ["concat", "motorway-exit-", ["get", "reflen"]]
+        style = {
+            "layers": [
+                {"id": "road-exit-shield", "layout": {"icon-image": exit_icon}},
+                {"id": "road-number-shield", "layout": {"icon-image": exit_icon}},
+                {"id": "road-exit-shield", "layout": {"icon-image": other_concat_icon}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["layout"]["icon-image"],
+            [
+                "match",
+                ["get", "reflen"],
+                1,
+                "motorway-exit-1",
+                2,
+                "motorway-exit-2",
+                3,
+                "motorway-exit-3",
+                4,
+                "motorway-exit-4",
+                5,
+                "motorway-exit-5",
+                6,
+                "motorway-exit-6",
+                7,
+                "motorway-exit-7",
+                8,
+                "motorway-exit-8",
+                9,
+                "motorway-exit-9",
+                "motorway-exit-1",
+            ],
+        )
+        self.assertEqual(result["layers"][1]["layout"]["icon-image"], exit_icon)
+        self.assertEqual(result["layers"][2]["layout"]["icon-image"], other_concat_icon)
+
     def test_road_number_shield_icon_case_expands_to_reflen_sprite_matches(self):
         shield_icon = [
             "case",

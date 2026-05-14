@@ -76,6 +76,8 @@ _ICON_IMAGE_GET_MATCH_FALLBACKS_BY_LAYER_FIELD = {
 }
 
 _ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
+_ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
+_ROAD_EXIT_SHIELD_ICON_IMAGE = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
 _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN = {
     2: (
         "al-motorway",
@@ -545,6 +547,23 @@ def _icon_image_get_fallback(layer_id: object, expr: object) -> object:
     fallback = match_fallback["fallback"]
     input_expr = match_fallback.get("input", expr)
     return ["match", copy.deepcopy(input_expr), *(item for value in values for item in (value, value)), fallback]
+
+
+def _road_exit_shield_icon_fallback(layer_id: object, expr: object) -> object:
+    """Replace Mapbox Outdoors road-exit shield concat sprites with a finite match."""
+    if str(layer_id or "") != _ROAD_EXIT_SHIELD_LAYER_ID or expr != _ROAD_EXIT_SHIELD_ICON_IMAGE:
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    # QGIS validates the match fallback against the loaded sprite sheet up front,
+    # even though audited road-exit features use reflen values in the 1..9 range.
+    # Keep the fallback on an existing sprite instead of a missing sentinel so this
+    # replacement does not reintroduce a sprite-retrieval warning. Malformed or
+    # out-of-range reflen values therefore fall back to the one-character shield.
+    return [
+        "match",
+        ["get", "reflen"],
+        *(item for reflen in range(1, 10) for item in (reflen, f"motorway-exit-{reflen}")),
+        "motorway-exit-1",
+    ]
 
 
 def _expression_references_get_field(expr: object, field_name: str) -> bool:
@@ -1610,6 +1629,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         props[prop] = icon_image
                         continue
                     icon_image = _icon_image_get_fallback(layer_id, val)
+                    if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
+                        props[prop] = icon_image
+                        continue
+                    icon_image = _road_exit_shield_icon_fallback(layer_id, val)
                     if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
                         props[prop] = icon_image
                         continue
