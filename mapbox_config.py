@@ -63,6 +63,12 @@ _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE = object()
 _ICON_IMAGE_EMPTY_MATCH_FALLBACKS_BY_LAYER = {
     "gate-label": "gate",
 }
+_ICON_IMAGE_GET_MATCH_FALLBACKS_BY_LAYER_FIELD = {
+    ("airport-label", "maki"): {
+        "fallback": "airport",
+        "values": ("airport", "airfield", "heliport", "rocket"),
+    },
+}
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -453,6 +459,18 @@ def _icon_image_empty_match_fallback(layer_id: object, expr: object) -> object:
         updated[-1] = fallback
         return updated
     return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+
+
+def _icon_image_get_fallback(layer_id: object, expr: object) -> object:
+    """Replace audited icon-image get expressions with literal sprite match fallbacks."""
+    if not isinstance(expr, list) or len(expr) != 2 or expr[0] != "get" or not isinstance(expr[1], str):
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    match_fallback = _ICON_IMAGE_GET_MATCH_FALLBACKS_BY_LAYER_FIELD.get((str(layer_id or ""), expr[1]))
+    if match_fallback is None:
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    values = match_fallback["values"]
+    fallback = match_fallback["fallback"]
+    return ["match", copy.deepcopy(expr), *(item for value in values for item in (value, value)), fallback]
 
 
 def _extract_fallback_color(expr: object) -> str | None:
@@ -1407,6 +1425,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                             del props[prop]
                         continue
                     icon_image = _icon_image_empty_match_fallback(layer_id, val)
+                    if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
+                        props[prop] = icon_image
+                        continue
+                    icon_image = _icon_image_get_fallback(layer_id, val)
                     if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
                         props[prop] = icon_image
                         continue

@@ -684,6 +684,38 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][1]["layout"]["icon-image"], generic_empty_fallback)
         self.assertEqual(result["layers"][2]["layout"]["icon-image"], mixed_output_fallback)
 
+    def test_airport_label_icon_get_uses_existing_sprite_match_fallback(self):
+        maki_icon = ["get", "maki"]
+        other_field_icon = ["get", "network"]
+        style = {
+            "layers": [
+                {"id": "airport-label", "layout": {"icon-image": maki_icon}},
+                {"id": "natural-point-label", "layout": {"icon-image": maki_icon}},
+                {"id": "airport-label", "layout": {"icon-image": other_field_icon}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["layout"]["icon-image"],
+            [
+                "match",
+                ["get", "maki"],
+                "airport",
+                "airport",
+                "airfield",
+                "airfield",
+                "heliport",
+                "heliport",
+                "rocket",
+                "rocket",
+                "airport",
+            ],
+        )
+        self.assertEqual(result["layers"][1]["layout"]["icon-image"], maki_icon)
+        self.assertEqual(result["layers"][2]["layout"]["icon-image"], other_field_icon)
+
     def test_zoom_only_icon_size_expressions_resolve_to_scalars(self):
         zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1.5]
         single_stop_zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 14, 1.25]
