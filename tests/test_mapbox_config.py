@@ -851,6 +851,45 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(style["layers"][0]["filter"], filter_expression)
 
+    def test_filter_simplification_snapshots_settlement_label_filters(self):
+        major_filter = [
+            "all",
+            ["<=", ["get", "filterrank"], 3],
+            ["step", ["zoom"], False, 12, ["<", ["get", "symbolrank"], 15]],
+        ]
+        minor_filter = [
+            "all",
+            ["<=", ["get", "filterrank"], 3],
+            ["step", ["zoom"], [">", ["get", "symbolrank"], 6], 12, [">=", ["get", "symbolrank"], 15]],
+        ]
+        style = {
+            "layers": [
+                {"id": "settlement-major-label", "type": "symbol", "filter": major_filter},
+                {"id": "settlement-minor-label", "type": "symbol", "filter": minor_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            [
+                "all",
+                ["all", ["<=", ["get", "filterrank"], 3], ["<", ["get", "symbolrank"], 15]],
+                ["match", ["get", "type"], ["city"], True, False],
+            ],
+        )
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            [
+                "all",
+                ["all", ["<=", ["get", "filterrank"], 3], [">=", ["get", "symbolrank"], 15]],
+                ["match", ["get", "type"], ["town"], True, False],
+            ],
+        )
+        self.assertEqual(style["layers"][0]["filter"], major_filter)
+        self.assertEqual(style["layers"][1]["filter"], minor_filter)
+
     def test_filter_simplification_normalizes_nested_zoom_arithmetic(self):
         style = {
             "layers": [

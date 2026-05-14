@@ -278,6 +278,8 @@ _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS = {
     "path-pedestrian-label",
     "road-label",
     "road-number-shield",
+    "settlement-major-label",
+    "settlement-minor-label",
     "transit-label",
 }
 
