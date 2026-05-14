@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass
+from typing import Iterable
 from urllib.parse import parse_qsl, quote, urlencode, unquote, urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -269,6 +270,12 @@ _ZOOM_BOUND_EPSILON = 1e-9
 _FULL_OPACITY = 1.0
 _FULL_OPACITY_EPSILON = 1e-9
 _FULL_OPACITY_PROPS = {"fill-opacity", "line-opacity"}
+_ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS = {
+    "path-pedestrian-label",
+    "road-label",
+    "road-number-shield",
+    "transit-label",
+}
 
 
 def _is_literal_color(value: object) -> bool:
@@ -776,6 +783,220 @@ def _simplify_filter_expression_for_qgis(value: object, *, root: bool = True) ->
     return [operator, *[_simplify_filter_expression_for_qgis(item, root=False) for item in value[1:]]]
 
 
+def _numeric_expression_value(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _filter_expression_depends_on_zoom(value: object) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    operator = value[0]
+    if operator == "zoom" and len(value) == 1:
+        return True
+    children: Iterable[object]
+    if operator == "literal":
+        children = []
+    elif operator == "match":
+        children = []
+        if len(value) > 1:
+            children = [value[1]]
+        match_outputs = [value[index] for index in range(3, len(value) - 1, 2)]
+        if len(value) > 2:
+            match_outputs.append(value[-1])
+        children = [*children, *match_outputs]
+    else:
+        children = value[1:]
+    return any(_filter_expression_depends_on_zoom(child) for child in children)
+
+
+def _arithmetic_filter_value_at_zoom(operator: str, values: list[object]) -> object | None:
+    numeric_values = [_numeric_expression_value(value) for value in values]
+    if not numeric_values or any(value is None for value in numeric_values):
+        return None
+    numbers = [value for value in numeric_values if value is not None]
+    if operator == "+":
+        return sum(numbers)
+    if operator == "-":
+        return -numbers[0] if len(numbers) == 1 else numbers[0] - sum(numbers[1:])
+    if operator == "*":
+        result = 1.0
+        for number in numbers:
+            result *= number
+        return result
+    if operator == "/" and len(numbers) == 2 and numbers[1] != 0:
+        return numbers[0] / numbers[1]
+    return None
+
+
+def _step_filter_value_at_zoom(expression: list[object], zoom: float) -> object | None:
+    if len(expression) < 4:
+        return None
+    input_value = _numeric_expression_value(_filter_expression_value_at_zoom(expression[1], zoom))
+    if input_value is None:
+        return None
+    selected_value = expression[2]
+    for index in range(3, len(expression) - 1, 2):
+        stop = _numeric_expression_value(expression[index])
+        if stop is None or input_value < stop:
+            break
+        selected_value = expression[index + 1]
+    return _filter_expression_value_at_zoom(selected_value, zoom)
+
+
+def _interpolate_filter_factor(
+    interpolation_type: object,
+    input_value: float,
+    lower_stop: float,
+    upper_stop: float,
+) -> float | None:
+    if upper_stop == lower_stop:
+        return None
+    linear_factor = (input_value - lower_stop) / (upper_stop - lower_stop)
+    if interpolation_type == ["linear"]:
+        return linear_factor
+    if (
+        isinstance(interpolation_type, list)
+        and len(interpolation_type) == 2
+        and interpolation_type[0] == "exponential"
+    ):
+        base = _numeric_expression_value(interpolation_type[1])
+        if base is None or base <= 0:
+            return None
+        if abs(base - 1.0) <= _ZOOM_BOUND_EPSILON:
+            return linear_factor
+        # Match Mapbox GL JS' exponentialInterpolation: the exponent uses raw
+        # stop distance, not the normalized 0..1 progress fraction.
+        denominator = (base ** (upper_stop - lower_stop)) - 1.0
+        if denominator == 0:
+            return None
+        return ((base ** (input_value - lower_stop)) - 1.0) / denominator
+    return None
+
+
+def _interpolate_filter_stops(expression: list[object], zoom: float) -> list[tuple[float, object]]:
+    stops: list[tuple[float, object]] = []
+    for index in range(3, len(expression) - 1, 2):
+        stop = _numeric_expression_value(expression[index])
+        if stop is not None:
+            stops.append((stop, _filter_expression_value_at_zoom(expression[index + 1], zoom)))
+    return stops
+
+
+def _interpolate_filter_output_between_stops(
+    interpolation_type: object,
+    input_value: float,
+    lower_stop: float,
+    lower_value: object,
+    upper_stop: float,
+    upper_value: object,
+) -> object | None:
+    lower_numeric = _numeric_expression_value(lower_value)
+    upper_numeric = _numeric_expression_value(upper_value)
+    if lower_numeric is None or upper_numeric is None:
+        return lower_value
+    fraction = _interpolate_filter_factor(interpolation_type, input_value, lower_stop, upper_stop)
+    if fraction is None:
+        return None
+    return lower_numeric + ((upper_numeric - lower_numeric) * fraction)
+
+
+def _interpolate_filter_value_at_zoom(expression: list[object], zoom: float) -> object | None:
+    if len(expression) < 5:
+        return None
+    input_value = _numeric_expression_value(_filter_expression_value_at_zoom(expression[2], zoom))
+    if input_value is None:
+        return None
+    stops = _interpolate_filter_stops(expression, zoom)
+    if not stops:
+        return None
+    if input_value <= stops[0][0]:
+        return stops[0][1]
+    for (lower_stop, lower_value), (upper_stop, upper_value) in zip(stops, stops[1:]):
+        if input_value <= upper_stop:
+            return _interpolate_filter_output_between_stops(
+                expression[1], input_value, lower_stop, lower_value, upper_stop, upper_value
+            )
+    return stops[-1][1]
+
+
+def _match_filter_value_at_zoom(expression: list[object], zoom: float) -> object:
+    if len(expression) < 5 or (len(expression) - 3) % 2 != 0:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    normalized = ["match", _filter_expression_value_at_zoom(expression[1], zoom)]
+    for label_index in range(2, len(expression) - 1, 2):
+        normalized.extend(
+            [
+                copy.deepcopy(expression[label_index]),
+                _filter_expression_value_at_zoom(expression[label_index + 1], zoom),
+            ]
+        )
+    normalized.append(_filter_expression_value_at_zoom(expression[-1], zoom))
+    return normalized
+
+
+def _operator_filter_value_at_zoom(operator: object, expression: list[object], zoom: float) -> object:
+    if operator == "zoom" and len(expression) == 1:
+        return zoom
+    if operator == "step":
+        step_value = _step_filter_value_at_zoom(expression, zoom)
+        return step_value if step_value is not None else expression
+    if operator == "interpolate":
+        interpolate_value = _interpolate_filter_value_at_zoom(expression, zoom)
+        return interpolate_value if interpolate_value is not None else expression
+    if operator == "match":
+        return _match_filter_value_at_zoom(expression, zoom)
+    return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+
+def _arithmetic_filter_expression_value_at_zoom(operator: object, expression: list[object], zoom: float) -> object:
+    if not isinstance(operator, str) or operator not in {"+", "-", "*", "/"}:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    if not _filter_expression_depends_on_zoom(expression):
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    arithmetic_value = _arithmetic_filter_value_at_zoom(
+        operator,
+        [_filter_expression_value_at_zoom(item, zoom) for item in expression[1:]],
+    )
+    if arithmetic_value is None:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    return arithmetic_value
+
+
+def _filter_expression_value_at_zoom(value: object, zoom: float) -> object:
+    """Collapse Mapbox filter zoom expressions to a QGIS-parser-friendly snapshot."""
+    if not isinstance(value, list) or not value:
+        return value
+    operator = value[0]
+    if operator == "literal":
+        return value
+    operator_value = _operator_filter_value_at_zoom(operator, value, zoom)
+    if operator_value is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+        return operator_value
+    arithmetic_value = _arithmetic_filter_expression_value_at_zoom(operator, value, zoom)
+    if arithmetic_value is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+        return arithmetic_value
+    return [_filter_expression_value_at_zoom(item, zoom) for item in value]
+
+
+def _zoom_normalized_filter_expression_for_qgis(layer: dict[str, object], value: object) -> object:
+    target_zoom = _representative_zoom_in_layer_range(layer.get("minzoom"), layer.get("maxzoom"))
+    if target_zoom is None:
+        target_zoom = _REPRESENTATIVE_STYLE_ZOOM
+    return _filter_expression_value_at_zoom(value, target_zoom)
+
+
+def _should_zoom_normalize_filter_for_qgis(layer: dict[str, object]) -> bool:
+    # QGIS' Mapbox converter rejects zoom-dependent filters. Restrict static
+    # zoom snapshots to the high-signal label layers from #949 visual audits:
+    # repeated road labels, pedestrian path label noise, ferry/transit label
+    # leakage, and road shields. Applying the same approximation broadly can hide
+    # high-zoom road/path geometry or over-suppress POIs/places, so keep this
+    # deliberately small.
+    return layer.get("type") == "symbol" and layer.get("id") in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS
+
+
 def _line_layout_choice(expr: object, choices: set[str]) -> str | None:
     if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
         return None
@@ -966,9 +1187,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     Also simplifies ``text-field`` coalesce expressions to their first simple
     ``['get', field]`` reference so QGIS can resolve the label field name,
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
-    survive QGIS conversion, rewrites a few semantics-preserving filter shapes
-    that QGIS parses more reliably, and collapses Mapbox font stacks to a
-    QGIS-safe local fallback to avoid warning spam from proprietary Mapbox font
+    survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
+    snapshots selected zoom-dependent filters at a representative layer zoom that
+    QGIS can parse, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
+    warning spam from proprietary Mapbox font
     family names.
 
     Only color properties whose values are Mapbox expressions (lists) are
@@ -1042,6 +1264,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
 
         filter_value = layer.get("filter")
         if isinstance(filter_value, (bool, list)):
+            if _should_zoom_normalize_filter_for_qgis(layer):
+                filter_value = _zoom_normalized_filter_expression_for_qgis(layer, filter_value)
             layer["filter"] = _simplify_filter_expression_for_qgis(filter_value)
 
         for section in ("paint", "layout"):

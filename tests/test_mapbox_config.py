@@ -767,19 +767,228 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][5]["filter"], ["==", 1, 1])
         self.assertEqual(style["layers"][0]["filter"][0], "!")
 
-    def test_filter_simplification_preserves_zoom_dependent_filters(self):
+    def test_filter_simplification_snapshots_zoom_dependent_filters(self):
         filter_expression = [
             "step",
             ["zoom"],
             ["match", ["get", "class"], ["primary", "secondary"], True, False],
             14,
-            True,
+            ["match", ["get", "class"], ["primary", "secondary", "service"], True, False],
         ]
-        style = {"layers": [{"filter": filter_expression}]}
+        style = {"layers": [{"id": "road-label", "type": "symbol", "minzoom": 16, "filter": filter_expression}]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            ["match", ["get", "class"], ["primary", "secondary", "service"], True, False],
+        )
+        self.assertEqual(style["layers"][0]["filter"], filter_expression)
+
+    def test_filter_simplification_normalizes_nested_zoom_arithmetic(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-number-shield",
+                    "type": "symbol",
+                    "filter": [
+                        "<=",
+                        ["-", ["to-number", ["get", "sizerank"]], ["interpolate", ["linear"], ["zoom"], 12, 0, 18, 14]],
+                        14,
+                    ]
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            ["<=", ["to-number", ["get", "sizerank"]], 14],
+        )
+
+    def test_filter_simplification_normalizes_zoom_arithmetic_operators(self):
+        style = {
+            "layers": [
+                {"id": "road-label", "type": "symbol", "filter": ["==", ["+", ["zoom"], 2], 14]},
+                {"id": "road-label", "type": "symbol", "filter": ["==", ["-", ["zoom"], 2], 10]},
+                {"id": "road-label", "type": "symbol", "filter": ["==", ["*", ["zoom"], 2], 24]},
+                {"id": "road-label", "type": "symbol", "filter": ["==", ["/", ["zoom"], 2], 6]},
+                {"id": "road-label", "type": "symbol", "filter": ["==", ["/", ["zoom"], 0], 0]},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["filter"], ["==", 14.0, 14])
+        self.assertEqual(result["layers"][1]["filter"], ["==", 10.0, 10])
+        self.assertEqual(result["layers"][2]["filter"], ["==", 24.0, 24])
+        self.assertEqual(result["layers"][3]["filter"], ["==", 6.0, 6])
+        self.assertEqual(result["layers"][4]["filter"], ["==", ["/", 12.0, 0], 0])
+
+    def test_filter_simplification_normalizes_zoom_inside_literal_and_match_outputs(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["+", ["literal", [["zoom"]]], 2], 0],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["+", ["match", ["get", "class"], "primary", ["zoom"], 0], 2], 14],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": [
+                        "match",
+                        ["get", "class"],
+                        ["zoom"],
+                        ["==", ["step", ["zoom"], "low", 14, "high"], "low"],
+                        False,
+                    ],
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["filter"], ["==", ["+", ["literal", [["zoom"]]], 2], 0])
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["==", ["+", ["match", ["get", "class"], "primary", 12.0, 0], 2], 14],
+        )
+        self.assertEqual(
+            result["layers"][2]["filter"],
+            ["match", ["get", "class"], ["zoom"], ["==", "low", "low"], False],
+        )
+
+    def test_filter_simplification_handles_unsupported_zoom_step_shapes(self):
+        style = {
+            "layers": [
+                {"id": "road-label", "type": "symbol", "filter": ["==", ["step", ["zoom"], "low"], "low"]},
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["step", ["get", "rank"], "low", 14, "high"], "low"],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["step", ["zoom"], "low", 14, "high"], "low"],
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["filter"], ["==", ["step", ["zoom"], "low"], "low"])
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["==", ["step", ["get", "rank"], "low", 14, "high"], "low"],
+        )
+        self.assertEqual(result["layers"][2]["filter"], ["==", "low", "low"])
+
+    def test_filter_simplification_handles_zoom_interpolate_edge_cases(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["interpolate", ["linear"], ["zoom"], 12, 0], 0],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["interpolate", ["linear"], ["get", "rank"], 0, 0, 10, 10], 0],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": ["==", ["interpolate", ["linear"], ["zoom"], "low", 0, "high", 10], 0],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "minzoom": 15,
+                    "filter": ["==", ["interpolate", ["linear"], ["zoom"], 12, 0, 18, 12], 6],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "minzoom": 15,
+                    "filter": ["==", ["interpolate", ["linear"], ["zoom"], 12, "low", 18, "high"], "low"],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "minzoom": 20,
+                    "filter": ["==", ["interpolate", ["linear"], ["zoom"], 12, 0, 18, 12], 12],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "minzoom": 15,
+                    "filter": ["==", ["interpolate", ["exponential", 2], ["zoom"], 12, 0, 18, 12], 0],
+                },
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "minzoom": 15,
+                    "filter": ["==", ["interpolate", ["cubic-bezier", 0, 0, 1, 1], ["zoom"], 12, 0, 18, 12], 0],
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["filter"], ["==", 0, 0])
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["==", ["interpolate", ["linear"], ["get", "rank"], 0, 0, 10, 10], 0],
+        )
+        self.assertEqual(
+            result["layers"][2]["filter"],
+            ["==", ["interpolate", ["linear"], ["zoom"], "low", 0, "high", 10], 0],
+        )
+        self.assertEqual(result["layers"][3]["filter"], ["==", 6.0, 6])
+        self.assertEqual(result["layers"][4]["filter"], ["==", "low", "low"])
+        self.assertEqual(result["layers"][5]["filter"], ["==", 12, 12])
+        self.assertEqual(result["layers"][6]["filter"][0], "==")
+        self.assertAlmostEqual(result["layers"][6]["filter"][1], 1.3333333333333333)
+        self.assertEqual(result["layers"][6]["filter"][2], 0)
+        self.assertEqual(
+            result["layers"][7]["filter"],
+            ["==", ["interpolate", ["cubic-bezier", 0, 0, 1, 1], ["zoom"], 12, 0, 18, 12], 0],
+        )
+
+    def test_filter_simplification_preserves_zoom_dependent_geometry_filters(self):
+        filter_expression = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            ["step", ["zoom"], ["match", ["get", "type"], ["steps", "sidewalk"], False, True], 16, True],
+        ]
+        style = {"layers": [{"type": "line", "filter": filter_expression}]}
 
         result = simplify_mapbox_style_expressions(style)
 
         self.assertEqual(result["layers"][0]["filter"], filter_expression)
+
+    def test_filter_simplification_preserves_non_target_symbol_zoom_filters(self):
+        filter_expression = ["<=", ["get", "filterrank"], ["step", ["zoom"], 0, 16, 2]]
+        style = {
+            "layers": [
+                {"id": "poi-label", "type": "symbol", "filter": filter_expression},
+                {"id": "natural-point-label", "type": "symbol", "filter": filter_expression},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["filter"], filter_expression)
+        self.assertEqual(result["layers"][1]["filter"], filter_expression)
 
     def test_line_cap_step_expression_uses_high_zoom_choice(self):
         style = {
