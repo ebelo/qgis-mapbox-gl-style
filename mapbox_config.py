@@ -275,11 +275,14 @@ _FULL_OPACITY = 1.0
 _FULL_OPACITY_EPSILON = 1e-9
 _FULL_OPACITY_PROPS = {"fill-opacity", "line-opacity"}
 _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS = {
+    "bridge-oneway-arrow-blue",
     "path-pedestrian-label",
     "road-label",
     "road-number-shield",
+    "road-oneway-arrow-blue",
     "settlement-major-label",
     "settlement-minor-label",
+    "tunnel-oneway-arrow-blue",
     "transit-label",
 }
 _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS = {
@@ -1064,10 +1067,10 @@ def _should_zoom_normalize_filter_for_qgis(layer: dict[str, object]) -> bool:
     # QGIS' Mapbox converter rejects zoom-dependent filters. Restrict static
     # zoom snapshots to the high-signal label layers from #949 visual audits:
     # repeated road labels, pedestrian path label noise, ferry/transit label
-    # leakage, road shields, and terrain/landcover layers whose normalized
-    # filters are QGIS-parser-friendly. Applying the same approximation broadly
-    # can hide high-zoom road/path geometry or over-suppress POIs/places, so keep
-    # this deliberately small.
+    # leakage, road shields/one-way arrows, and terrain/landcover layers whose
+    # normalized filters are QGIS-parser-friendly. Applying the same
+    # approximation broadly can hide high-zoom road/path geometry or
+    # over-suppress POIs/places, so keep this deliberately small.
     layer_id = layer.get("id")
     return (
         layer.get("type") == "symbol" and layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS
