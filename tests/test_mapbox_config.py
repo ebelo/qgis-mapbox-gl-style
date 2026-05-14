@@ -997,6 +997,49 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         for layer in style["layers"]:
             self.assertEqual(layer["filter"], original_arrow_filter)
 
+    def test_filter_simplification_snapshots_motorway_trunk_line_filters(self):
+        motorway_filter = [
+            "all",
+            [
+                "step",
+                ["zoom"],
+                ["match", ["get", "class"], ["motorway", "trunk"], True, False],
+                5,
+                [
+                    "all",
+                    ["match", ["get", "class"], ["motorway", "trunk"], True, False],
+                    ["match", ["get", "structure"], ["none", "ford"], True, False],
+                ],
+            ],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        original_motorway_filter = copy.deepcopy(motorway_filter)
+        style = {
+            "layers": [
+                {"id": "road-motorway-trunk", "type": "line", "filter": motorway_filter},
+                {"id": "road-motorway-trunk-case", "type": "line", "filter": motorway_filter},
+                {"id": "road-primary", "type": "line", "filter": motorway_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        expected_filter = [
+            "all",
+            [
+                "all",
+                ["match", ["get", "class"], ["motorway", "trunk"], True, False],
+                ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        self.assertEqual(result["layers"][0]["filter"], expected_filter)
+        self.assertEqual(result["layers"][1]["filter"], expected_filter)
+        self.assertEqual(result["layers"][2]["filter"], original_motorway_filter)
+        self.assertEqual(motorway_filter, original_motorway_filter)
+        for layer in style["layers"]:
+            self.assertEqual(layer["filter"], original_motorway_filter)
+
     def test_filter_simplification_normalizes_nested_zoom_arithmetic(self):
         style = {
             "layers": [
