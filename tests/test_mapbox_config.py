@@ -1040,6 +1040,72 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         for layer in style["layers"]:
             self.assertEqual(layer["filter"], original_motorway_filter)
 
+    def test_filter_simplification_snapshots_minor_line_filters_at_service_zoom(self):
+        minor_filter = [
+            "all",
+            [
+                "match",
+                ["get", "class"],
+                ["track"],
+                True,
+                "service",
+                ["step", ["zoom"], False, 14, True],
+                False,
+            ],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        original_minor_filter = copy.deepcopy(minor_filter)
+        style = {
+            "layers": [
+                {"id": "road-minor", "type": "line", "minzoom": 13, "filter": minor_filter},
+                {"id": "road-minor-case", "type": "line", "minzoom": 13, "filter": minor_filter},
+                {"id": "bridge-minor", "type": "line", "minzoom": 13, "filter": minor_filter},
+                {"id": "bridge-minor-case", "type": "line", "minzoom": 13, "filter": minor_filter},
+                {"id": "tunnel-minor", "type": "line", "minzoom": 13, "filter": minor_filter},
+                {"id": "tunnel-minor-case", "type": "line", "minzoom": 13, "filter": minor_filter},
+                {"id": "road-path", "type": "line", "minzoom": 13, "filter": minor_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        expected_filter = [
+            "all",
+            ["match", ["get", "class"], ["track"], True, "service", True, False],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        for layer in result["layers"][:-1]:
+            self.assertEqual(layer["filter"], expected_filter)
+        self.assertEqual(result["layers"][-1]["filter"], original_minor_filter)
+        self.assertEqual(minor_filter, original_minor_filter)
+        for layer in style["layers"]:
+            self.assertEqual(layer["filter"], original_minor_filter)
+
+    def test_filter_simplification_clamps_minor_line_zoom_override_to_layer_bounds(self):
+        minor_filter = [
+            "match",
+            ["get", "class"],
+            ["track"],
+            True,
+            "service",
+            ["step", ["zoom"], False, 14, True],
+            False,
+        ]
+        style = {
+            "layers": [
+                {"id": "road-minor", "type": "line", "minzoom": 13, "maxzoom": 14, "filter": minor_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            ["match", ["get", "class"], ["track"], True, "service", False, False],
+        )
+
     def test_filter_simplification_normalizes_nested_zoom_arithmetic(self):
         style = {
             "layers": [

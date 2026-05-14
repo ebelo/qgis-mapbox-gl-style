@@ -290,9 +290,26 @@ _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS = {
     "landuse",
 }
 _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS = {
+    "bridge-minor",
+    "bridge-minor-case",
     "road-motorway-trunk",
     "road-motorway-trunk-case",
+    "road-minor",
+    "road-minor-case",
+    "tunnel-minor",
+    "tunnel-minor-case",
 }
+_FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
+    "bridge-minor": 14.0,
+    "bridge-minor-case": 14.0,
+    "road-minor": 14.0,
+    "road-minor-case": 14.0,
+    "tunnel-minor": 14.0,
+    "tunnel-minor-case": 14.0,
+}
+assert set(_FILTER_NORMALIZATION_ZOOM_OVERRIDES).issubset(_ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS), (
+    "Filter zoom overrides must also be present in the line filter normalization allowlist."
+)
 
 
 def _is_literal_color(value: object) -> bool:
@@ -358,8 +375,7 @@ def _numeric_zoom_bound(value: object) -> float | None:
     return float(value)
 
 
-def _representative_zoom_in_layer_range(minzoom: object, maxzoom: object) -> float | None:
-    target_zoom = _REPRESENTATIVE_STYLE_ZOOM
+def _zoom_in_layer_range(target_zoom: float, minzoom: object, maxzoom: object) -> float | None:
     minimum_zoom = _numeric_zoom_bound(minzoom)
     maximum_zoom = _numeric_zoom_bound(maxzoom)
     if minimum_zoom is not None and maximum_zoom is not None and minimum_zoom >= maximum_zoom:
@@ -371,6 +387,10 @@ def _representative_zoom_in_layer_range(minzoom: object, maxzoom: object) -> flo
     if minimum_zoom is not None and target_zoom < minimum_zoom:
         return None
     return target_zoom
+
+
+def _representative_zoom_in_layer_range(minzoom: object, maxzoom: object) -> float | None:
+    return _zoom_in_layer_range(_REPRESENTATIVE_STYLE_ZOOM, minzoom, maxzoom)
 
 
 def _has_valid_zoom_step_thresholds(expr: list[object]) -> bool:
@@ -1061,7 +1081,17 @@ def _filter_expression_value_at_zoom(value: object, zoom: float) -> object:
 
 
 def _zoom_normalized_filter_expression_for_qgis(layer: dict[str, object], value: object) -> object:
-    target_zoom = _representative_zoom_in_layer_range(layer.get("minzoom"), layer.get("maxzoom"))
+    # Some Mapbox Outdoors road layers begin just below their high-detail filter
+    # branch. Snapshot those layers at the branch threshold instead of the layer
+    # minzoom so QGIS keeps service-road detail in high-zoom renders.
+    override_zoom = _FILTER_NORMALIZATION_ZOOM_OVERRIDES.get(str(layer.get("id") or ""))
+    target_zoom = (
+        _zoom_in_layer_range(override_zoom, layer.get("minzoom"), layer.get("maxzoom"))
+        if override_zoom is not None
+        else None
+    )
+    if target_zoom is None:
+        target_zoom = _representative_zoom_in_layer_range(layer.get("minzoom"), layer.get("maxzoom"))
     if target_zoom is None:
         target_zoom = _REPRESENTATIVE_STYLE_ZOOM
     return _filter_expression_value_at_zoom(value, target_zoom)
@@ -1072,15 +1102,15 @@ def _should_zoom_normalize_filter_for_qgis(layer: dict[str, object]) -> bool:
     # zoom snapshots to the high-signal label layers from #949 visual audits:
     # repeated road labels, pedestrian path label noise, ferry/transit label
     # leakage, road shields/one-way arrows, terrain/landcover layers, and the
-    # motorway/trunk line filters whose normalized branch is stable at the
-    # representative zoom. Applying the same approximation broadly can hide
-    # high-zoom road/path geometry or over-suppress POIs/places, so keep this
-    # deliberately small.
+    # road line filters whose normalized branches improved #949 visual audits.
+    # Applying the same approximation broadly can hide high-zoom path geometry
+    # or over-suppress POIs/places, so keep this deliberately small.
     layer_id = layer.get("id")
+    layer_type = layer.get("type")
     return (
-        layer.get("type") == "symbol" and layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS
-    ) or (layer.get("type") == "fill" and layer_id in _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS) or (
-        layer.get("type") == "line" and layer_id in _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS
+        (layer_type == "symbol" and layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS)
+        or (layer_type == "fill" and layer_id in _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS)
+        or (layer_type == "line" and layer_id in _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS)
     )
 
 
