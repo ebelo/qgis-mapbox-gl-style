@@ -474,6 +474,28 @@ def _extract_midrange_size(expr: object) -> float | None:
     return None
 
 
+def _extract_zoom_scalar_size(expr: object, *, minzoom: object = None, maxzoom: object = None) -> float | None:
+    """Resolve zoom-only size expressions to a representative scalar for QGIS.
+
+    Keep data-driven sizes intact; QGIS may be able to apply them in contexts
+    where a static snapshot would lose feature-specific emphasis.
+    """
+    if not isinstance(expr, list) or len(expr) < 4:
+        return None
+    target_zoom = _representative_zoom_in_layer_range(minzoom, maxzoom)
+    if target_zoom is None:
+        return None
+    if expr[0] == "step" and expr[1] == ["zoom"]:
+        outputs = _step_outputs(expr)
+        if all(_numeric_expression_value(output) is not None for output in outputs):
+            return _numeric_expression_value(_step_zoom_value(expr, target_zoom=target_zoom))
+    if expr[0] == "interpolate" and len(expr) >= 5 and expr[2] == ["zoom"]:
+        outputs = [expr[index] for index in range(4, len(expr), 2)]
+        if all(_numeric_expression_value(output) is not None for output in outputs):
+            return _numeric_expression_value(_interpolate_filter_value_at_zoom(expr, target_zoom))
+    return None
+
+
 def _clamp_opacity_value(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -1354,6 +1376,14 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         size = _extract_midrange_size(val)
                         if size is not None:
                             props[prop] = size
+                elif prop == "icon-size":
+                    size = _extract_zoom_scalar_size(
+                        val,
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if size is not None:
+                        props[prop] = size
                 elif prop in _LINE_LAYOUT_CHOICES:
                     choice = _line_layout_choice(val, _LINE_LAYOUT_CHOICES[prop])
                     if choice is not None:

@@ -662,6 +662,30 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][9]["layout"]["icon-image"], data_driven_high_zoom_step)
         self.assertEqual(result["layers"][10]["layout"]["icon-image"], empty_then_data_driven_high_zoom_step)
 
+    def test_zoom_only_icon_size_expressions_resolve_to_scalars(self):
+        zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1.5]
+        single_stop_zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 14, 1.25]
+        zoom_step = ["step", ["zoom"], 0.1, 18, 0.2, 20, 1.0]
+        property_interpolate = ["interpolate", ["linear"], ["get", "rank"], 0, 0.5, 10, 1.5]
+        data_driven_zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 10, ["get", "size"], 14, 1.5]
+        style = {
+            "layers": [
+                {"layout": {"icon-size": zoom_interpolate}},
+                {"layout": {"icon-size": single_stop_zoom_interpolate}},
+                {"minzoom": 18, "layout": {"icon-size": zoom_step}},
+                {"layout": {"icon-size": property_interpolate}},
+                {"layout": {"icon-size": data_driven_zoom_interpolate}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertAlmostEqual(result["layers"][0]["layout"]["icon-size"], 1.0)
+        self.assertAlmostEqual(result["layers"][1]["layout"]["icon-size"], 1.25)
+        self.assertAlmostEqual(result["layers"][2]["layout"]["icon-size"], 0.2)
+        self.assertEqual(result["layers"][3]["layout"]["icon-size"], property_interpolate)
+        self.assertEqual(result["layers"][4]["layout"]["icon-size"], data_driven_zoom_interpolate)
+
     def test_line_dasharray_expressions_resolve_to_literal_arrays(self):
         style = {
             "layers": [
