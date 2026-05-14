@@ -75,6 +75,74 @@ _ICON_IMAGE_GET_MATCH_FALLBACKS_BY_LAYER_FIELD = {
     },
 }
 
+_ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
+_ROAD_SHIELD_SPRITE_BASES_BY_REFLEN = {
+    2: (
+        "al-motorway",
+        "ch-motorway",
+        "cy-motorway",
+        "de-motorway",
+        "default",
+        "hu-motorway",
+        "it-motorway",
+        "pk-motorway",
+        "rectangle-blue",
+        "rectangle-green",
+        "rectangle-red",
+        "rectangle-white",
+        "rectangle-yellow",
+        "si-motorway",
+        "th-motorway",
+        "th-motorway-toll",
+    ),
+    3: (
+        "ch-motorway",
+        "cy-motorway",
+        "de-motorway",
+        "default",
+        "gr-motorway",
+        "hr-motorway",
+        "hu-motorway",
+        "it-motorway",
+        "pk-motorway",
+        "rectangle-blue",
+        "rectangle-green",
+        "rectangle-red",
+        "rectangle-white",
+        "rectangle-yellow",
+        "tr-motorway",
+    ),
+    4: (
+        "default",
+        "gr-motorway",
+        "hr-motorway",
+        "rectangle-blue",
+        "rectangle-green",
+        "rectangle-red",
+        "rectangle-white",
+        "rectangle-yellow",
+        "tr-motorway",
+    ),
+    5: (
+        "default",
+        "rectangle-blue",
+        "rectangle-green",
+        "rectangle-red",
+        "rectangle-white",
+        "rectangle-yellow",
+        "tr-motorway",
+    ),
+    6: (
+        "default",
+        "rectangle-blue",
+        "rectangle-green",
+        "rectangle-red",
+        "rectangle-white",
+        "rectangle-yellow",
+        "tr-motorway",
+    ),
+}
+
 _BACKGROUND_PRESETS = {
     "Outdoor": {
         "style_owner": "mapbox",
@@ -477,6 +545,95 @@ def _icon_image_get_fallback(layer_id: object, expr: object) -> object:
     fallback = match_fallback["fallback"]
     input_expr = match_fallback.get("input", expr)
     return ["match", copy.deepcopy(input_expr), *(item for value in values for item in (value, value)), fallback]
+
+
+def _expression_references_get_field(expr: object, field_name: str) -> bool:
+    if isinstance(expr, list):
+        if expr == ["get", field_name]:
+            return True
+        return any(_expression_references_get_field(item, field_name) for item in expr[1:])
+    return False
+
+
+def _is_road_number_shield_icon_image(expr: object) -> bool:
+    return (
+        isinstance(expr, list)
+        and len(expr) == 4
+        and expr[0] == "case"
+        and expr[1] == ["has", "shield_beta"]
+        and _expression_references_get_field(expr, "reflen")
+        and _expression_references_get_field(expr, "shield")
+        and _expression_references_get_field(expr, "shield_beta")
+    )
+
+
+def _road_shield_icon_match(field_name: str, reflen: int) -> list[object]:
+    fallback = f"default-{reflen}"
+    values = _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[reflen]
+    return [
+        "match",
+        ["get", field_name],
+        *(item for value in values for item in (value, f"{value}-{reflen}")),
+        fallback,
+    ]
+
+
+def _with_additional_filter_clauses(filter_value: object, *clauses: object) -> object:
+    filter_copy = copy.deepcopy(filter_value)
+    if isinstance(filter_copy, list) and filter_copy[:1] == ["all"]:
+        return [*filter_copy, *(copy.deepcopy(clause) for clause in clauses)]
+    if isinstance(filter_copy, list):
+        return ["all", filter_copy, *(copy.deepcopy(clause) for clause in clauses)]
+    return ["all", *(copy.deepcopy(clause) for clause in clauses)]
+
+
+def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    if str(layer.get("id") or "") != _ROAD_NUMBER_SHIELD_LAYER_ID:
+        return None
+    layout = layer.get("layout")
+    if not isinstance(layout, dict) or not _is_road_number_shield_icon_image(layout.get("icon-image")):
+        return None
+
+    variants: list[dict[str, object]] = []
+    for reflen in sorted(_ROAD_SHIELD_SPRITE_BASES_BY_REFLEN):
+        beta_layer = copy.deepcopy(layer)
+        beta_layer["id"] = f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-{reflen}-beta"
+        beta_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["==", ["get", "reflen"], reflen],
+            ["has", "shield_beta"],
+        )
+        beta_layer["layout"]["icon-image"] = _road_shield_icon_match("shield_beta", reflen)
+        variants.append(beta_layer)
+
+        shield_layer = copy.deepcopy(layer)
+        shield_layer["id"] = f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-{reflen}"
+        shield_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["==", ["get", "reflen"], reflen],
+            ["!", ["has", "shield_beta"]],
+        )
+        shield_layer["layout"]["icon-image"] = _road_shield_icon_match("shield", reflen)
+        variants.append(shield_layer)
+    return variants
+
+
+def _is_road_number_shield_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _ROAD_NUMBER_SHIELD_LAYER_ID or normalized.startswith(f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-")
+
+
+def _expand_road_number_shield_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _road_number_shield_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _extract_fallback_color(expr: object) -> str | None:
@@ -1130,11 +1287,12 @@ def _should_zoom_normalize_filter_for_qgis(layer: dict[str, object]) -> bool:
     # Applying the same approximation broadly can hide high-zoom path geometry
     # or over-suppress POIs/places, so keep this deliberately small.
     layer_id = layer.get("id")
+    normalized_layer_id = _ROAD_NUMBER_SHIELD_LAYER_ID if _is_road_number_shield_layer_id(layer_id) else layer_id
     layer_type = layer.get("type")
     return (
-        (layer_type == "symbol" and layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS)
-        or (layer_type == "fill" and layer_id in _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS)
-        or (layer_type == "line" and layer_id in _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS)
+        (layer_type == "symbol" and normalized_layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS)
+        or (layer_type == "fill" and normalized_layer_id in _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS)
+        or (layer_type == "line" and normalized_layer_id in _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS)
     )
 
 
@@ -1142,6 +1300,22 @@ def _line_layout_choice(expr: object, choices: set[str]) -> str | None:
     if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
         return None
     output = expr[-1] if len(expr) >= 5 else expr[2]
+    return output if isinstance(output, str) and output in choices else None
+
+
+def _zoom_step_layout_choice(
+    expr: object,
+    choices: set[str],
+    *,
+    minzoom: object = None,
+    maxzoom: object = None,
+) -> str | None:
+    if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
+        return None
+    target_zoom = _representative_zoom_in_layer_range(minzoom, maxzoom)
+    if target_zoom is None:
+        return None
+    output = _step_zoom_value(expr, target_zoom=target_zoom)
     return output if isinstance(output, str) and output in choices else None
 
 
@@ -1338,6 +1512,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     simplified.  Literal strings (``hsl(...)``, ``#rrggbb``) are kept as-is.
     """
     style = copy.deepcopy(style_definition)
+    style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",
@@ -1489,6 +1664,23 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     )
                     if size is not None:
                         props[prop] = size
+                elif prop == "symbol-spacing" and _is_road_number_shield_layer_id(layer_id):
+                    spacing = _extract_zoom_scalar_size(
+                        val,
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if spacing is not None:
+                        props[prop] = spacing
+                elif prop == "symbol-placement" and _is_road_number_shield_layer_id(layer_id):
+                    placement = _zoom_step_layout_choice(
+                        val,
+                        {"line", "point"},
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if placement is not None:
+                        props[prop] = placement
                 elif prop in _LINE_LAYOUT_CHOICES:
                     choice = _line_layout_choice(val, _LINE_LAYOUT_CHOICES[prop])
                     if choice is not None:
