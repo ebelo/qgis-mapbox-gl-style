@@ -282,6 +282,10 @@ _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS = {
     "settlement-minor-label",
     "transit-label",
 }
+_ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS = {
+    "hillshade",
+    "landuse",
+}
 
 
 def _is_literal_color(value: object) -> bool:
@@ -1060,10 +1064,14 @@ def _should_zoom_normalize_filter_for_qgis(layer: dict[str, object]) -> bool:
     # QGIS' Mapbox converter rejects zoom-dependent filters. Restrict static
     # zoom snapshots to the high-signal label layers from #949 visual audits:
     # repeated road labels, pedestrian path label noise, ferry/transit label
-    # leakage, and road shields. Applying the same approximation broadly can hide
-    # high-zoom road/path geometry or over-suppress POIs/places, so keep this
-    # deliberately small.
-    return layer.get("type") == "symbol" and layer.get("id") in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS
+    # leakage, road shields, and terrain/landcover layers whose normalized
+    # filters are QGIS-parser-friendly. Applying the same approximation broadly
+    # can hide high-zoom road/path geometry or over-suppress POIs/places, so keep
+    # this deliberately small.
+    layer_id = layer.get("id")
+    return (
+        layer.get("type") == "symbol" and layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS
+    ) or (layer.get("type") == "fill" and layer_id in _ZOOM_NORMALIZED_FILL_FILTER_LAYER_IDS)
 
 
 def _line_layout_choice(expr: object, choices: set[str]) -> str | None:

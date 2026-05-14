@@ -890,6 +890,61 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(style["layers"][0]["filter"], major_filter)
         self.assertEqual(style["layers"][1]["filter"], minor_filter)
 
+    def test_filter_simplification_snapshots_terrain_fill_filters(self):
+        landuse_filter = [
+            "all",
+            [">=", ["to-number", ["get", "sizerank"]], 0],
+            [
+                "match",
+                ["get", "class"],
+                "residential",
+                ["step", ["zoom"], True, 10, False],
+                "park",
+                ["step", ["zoom"], False, 8, ["==", ["get", "sizerank"], 1], 10, True],
+                False,
+            ],
+            [
+                "<=",
+                [
+                    "-",
+                    ["to-number", ["get", "sizerank"]],
+                    ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0, 18, 14],
+                ],
+                14,
+            ],
+        ]
+        hillshade_filter = [
+            "all",
+            ["step", ["zoom"], ["==", ["get", "class"], "shadow"], 11, True],
+            ["match", ["get", "level"], 89, True, 78, ["step", ["zoom"], False, 5, True], False],
+        ]
+        style = {
+            "layers": [
+                {"id": "landuse", "type": "fill", "filter": landuse_filter},
+                {"id": "hillshade", "type": "fill", "filter": hillshade_filter},
+                {"id": "water", "type": "fill", "filter": hillshade_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            [
+                "all",
+                [">=", ["to-number", ["get", "sizerank"]], 0],
+                ["match", ["get", "class"], "residential", False, "park", True, False],
+                ["<=", ["to-number", ["get", "sizerank"]], 14],
+            ],
+        )
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["all", True, ["match", ["get", "level"], 89, True, 78, True, False]],
+        )
+        self.assertEqual(result["layers"][2]["filter"], hillshade_filter)
+        self.assertEqual(style["layers"][0]["filter"], landuse_filter)
+        self.assertEqual(style["layers"][1]["filter"], hillshade_filter)
+
     def test_filter_simplification_normalizes_nested_zoom_arithmetic(self):
         style = {
             "layers": [
