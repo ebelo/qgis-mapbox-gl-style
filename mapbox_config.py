@@ -520,6 +520,46 @@ def _extract_visible_range_zoom_step_opacity(expr: object, minzoom: object) -> f
     return _extract_opacity_from_reachable_outputs(outputs)
 
 
+def _zoom_step_full_opacity_minzoom(expr: object, minzoom: object, maxzoom: object) -> float | None:
+    if not isinstance(expr, list) or len(expr) < 5 or expr[0] != "step" or expr[1] != ["zoom"]:
+        return None
+    existing_minzoom = _numeric_zoom_bound(minzoom)
+    existing_maxzoom = _numeric_zoom_bound(maxzoom)
+    if minzoom is not None and existing_minzoom is None:
+        return None
+    if maxzoom is not None and existing_maxzoom is None:
+        return None
+
+    hidden_until_zoom: float | None = None
+    current_output = expr[2]
+    for index in range(3, len(expr) - 1, 2):
+        stop = expr[index]
+        if isinstance(stop, bool) or not isinstance(stop, (int, float)):
+            return None
+        current_opacity = _extract_representative_opacity(current_output)
+        next_opacity = _extract_representative_opacity(expr[index + 1])
+        if current_opacity is None or next_opacity is None:
+            return None
+        if hidden_until_zoom is None:
+            if current_opacity > _FULL_OPACITY_EPSILON:
+                return None
+            if next_opacity > _FULL_OPACITY - _FULL_OPACITY_EPSILON:
+                hidden_until_zoom = float(stop)
+            elif next_opacity > _FULL_OPACITY_EPSILON:
+                return None
+        elif next_opacity <= _FULL_OPACITY - _FULL_OPACITY_EPSILON:
+            return None
+        current_output = expr[index + 1]
+
+    if hidden_until_zoom is None:
+        return None
+    if existing_minzoom is not None and existing_minzoom >= hidden_until_zoom:
+        return None
+    if existing_maxzoom is not None and hidden_until_zoom >= existing_maxzoom:
+        return None
+    return hidden_until_zoom
+
+
 def _extract_opacity_from_reachable_outputs(outputs: list[object]) -> float | None:
     if not outputs:
         return None
@@ -1039,6 +1079,15 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if dasharray is not None:
                         props[prop] = dasharray
                 elif prop in _FULL_OPACITY_PROPS:
+                    visibility_minzoom = _zoom_step_full_opacity_minzoom(
+                        val,
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if visibility_minzoom is not None:
+                        layer["minzoom"] = visibility_minzoom
+                        del props[prop]
+                        continue
                     opacity = _extract_representative_opacity(val)
                     if opacity is None or opacity <= _FULL_OPACITY - _FULL_OPACITY_EPSILON:
                         opacity = _extract_visible_range_zoom_step_opacity(val, layer.get("minzoom"))
