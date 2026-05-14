@@ -68,6 +68,11 @@ _ICON_IMAGE_GET_MATCH_FALLBACKS_BY_LAYER_FIELD = {
         "fallback": "airport",
         "values": ("airport", "airfield", "heliport", "rocket"),
     },
+    ("transit-label", "network"): {
+        "fallback": "rail",
+        "input": ["get", "maki"],
+        "values": ("bicycle-share", "bus", "entrance", "ferry", "rail", "rail-light", "rail-metro"),
+    },
 }
 
 _BACKGROUND_PRESETS = {
@@ -470,7 +475,8 @@ def _icon_image_get_fallback(layer_id: object, expr: object) -> object:
         return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
     values = match_fallback["values"]
     fallback = match_fallback["fallback"]
-    return ["match", copy.deepcopy(expr), *(item for value in values for item in (value, value)), fallback]
+    input_expr = match_fallback.get("input", expr)
+    return ["match", copy.deepcopy(input_expr), *(item for value in values for item in (value, value)), fallback]
 
 
 def _extract_fallback_color(expr: object) -> str | None:
