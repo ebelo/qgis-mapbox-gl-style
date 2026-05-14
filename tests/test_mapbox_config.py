@@ -662,6 +662,27 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][9]["layout"]["icon-image"], data_driven_high_zoom_step)
         self.assertEqual(result["layers"][10]["layout"]["icon-image"], empty_then_data_driven_high_zoom_step)
 
+    def test_gate_label_icon_match_uses_existing_sprite_fallback(self):
+        gate_icon = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
+        generic_empty_fallback = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
+        mixed_output_fallback = ["match", ["get", "type"], "gate", ["get", "maki"], "lift_gate", "lift-gate", ""]
+        style = {
+            "layers": [
+                {"id": "gate-label", "layout": {"icon-image": gate_icon}},
+                {"id": "other-label", "layout": {"icon-image": generic_empty_fallback}},
+                {"id": "gate-label", "layout": {"icon-image": mixed_output_fallback}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            result["layers"][0]["layout"]["icon-image"],
+            ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", "gate"],
+        )
+        self.assertEqual(result["layers"][1]["layout"]["icon-image"], generic_empty_fallback)
+        self.assertEqual(result["layers"][2]["layout"]["icon-image"], mixed_output_fallback)
+
     def test_zoom_only_icon_size_expressions_resolve_to_scalars(self):
         zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1.5]
         single_stop_zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 14, 1.25]

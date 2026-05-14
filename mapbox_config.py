@@ -60,6 +60,9 @@ DEFAULT_MAPBOX_MIN_ZOOM = 0
 DEFAULT_MAPBOX_MAX_ZOOM = 22
 QGIS_TEXT_FONT_FALLBACK = "Noto Sans"
 _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE = object()
+_ICON_IMAGE_EMPTY_MATCH_FALLBACKS_BY_LAYER = {
+    "gate-label": "gate",
+}
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -396,6 +399,26 @@ def _literal_step_icon_image(expr: object, *, minzoom: object = None, maxzoom: o
         return representative
     if _step_has_only_non_empty_literal_outputs(expr):
         return representative
+    return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+
+
+def _icon_image_empty_match_fallback(layer_id: object, expr: object) -> object:
+    """Replace known empty icon-image match fallbacks with existing sprites.
+
+    Mapbox uses an empty fallback on the Outdoors gate-label layer, but QGIS'
+    converter still tries to retrieve a sprite named ``""``. Limit this to
+    audited layers whose other match outputs are literal sprite names.
+    """
+    fallback = _ICON_IMAGE_EMPTY_MATCH_FALLBACKS_BY_LAYER.get(str(layer_id or ""))
+    if fallback is None or not isinstance(expr, list) or len(expr) < 5 or expr[0] != "match":
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    if expr[-1] != "":
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    outputs = [expr[index] for index in range(3, len(expr) - 1, 2)]
+    if outputs and all(isinstance(output, str) and output for output in outputs):
+        updated = copy.deepcopy(expr)
+        updated[-1] = fallback
+        return updated
     return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
 
 
@@ -1332,6 +1355,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                             props[prop] = icon_image
                         else:
                             del props[prop]
+                        continue
+                    icon_image = _icon_image_empty_match_fallback(layer_id, val)
+                    if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
+                        props[prop] = icon_image
                         continue
                 if not isinstance(val, list):
                     continue
