@@ -609,11 +609,26 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
     def test_icon_image_placeholders_and_literal_zoom_steps_are_simplified(self):
         empty_output_step = ["step", ["zoom"], "dot-11", 8, ""]
+        empty_representative_step = ["step", ["zoom"], ["case", ["==", ["get", "capital"], 2], "dot-11", "dot-9"], 8, ""]
         data_driven_step = [
             "step",
             ["zoom"],
             "shield-small",
             12,
+            ["concat", ["get", "shield"], "-", ["to-string", ["get", "reflen"]]],
+        ]
+        data_driven_high_zoom_step = [
+            "step",
+            ["zoom"],
+            "shield-small",
+            13,
+            ["concat", ["get", "shield"], "-", ["to-string", ["get", "reflen"]]],
+        ]
+        empty_then_data_driven_high_zoom_step = [
+            "step",
+            ["zoom"],
+            "",
+            13,
             ["concat", ["get", "shield"], "-", ["to-string", ["get", "reflen"]]],
         ]
         style = {
@@ -625,7 +640,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 {"minzoom": 14, "layout": {"icon-image": ["step", ["zoom"], "oneway-small", 13, "oneway-large"]}},
                 {"maxzoom": 11, "layout": {"icon-image": ["step", ["zoom"], "zoom-low", 10, "zoom-mid", 12, "zoom-high"]}},
                 {"layout": {"icon-image": empty_output_step}},
+                {"layout": {"icon-image": empty_representative_step}},
                 {"layout": {"icon-image": data_driven_step}},
+                {"layout": {"icon-image": data_driven_high_zoom_step}},
+                {"layout": {"icon-image": empty_then_data_driven_high_zoom_step}},
             ]
         }
 
@@ -638,8 +656,11 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][3]["layout"]["icon-image"], "oneway-small")
         self.assertEqual(result["layers"][4]["layout"]["icon-image"], "oneway-large")
         self.assertEqual(result["layers"][5]["layout"]["icon-image"], "zoom-mid")
-        self.assertEqual(result["layers"][6]["layout"]["icon-image"], empty_output_step)
-        self.assertEqual(result["layers"][7]["layout"]["icon-image"], data_driven_step)
+        self.assertNotIn("icon-image", result["layers"][6]["layout"])
+        self.assertNotIn("icon-image", result["layers"][7]["layout"])
+        self.assertEqual(result["layers"][8]["layout"]["icon-image"], data_driven_step)
+        self.assertEqual(result["layers"][9]["layout"]["icon-image"], data_driven_high_zoom_step)
+        self.assertEqual(result["layers"][10]["layout"]["icon-image"], empty_then_data_driven_high_zoom_step)
 
     def test_line_dasharray_expressions_resolve_to_literal_arrays(self):
         style = {

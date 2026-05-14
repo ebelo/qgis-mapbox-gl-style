@@ -59,6 +59,7 @@ WEB_MERCATOR_WORLD_WIDTH_M = 40075016.685578488
 DEFAULT_MAPBOX_MIN_ZOOM = 0
 DEFAULT_MAPBOX_MAX_ZOOM = 22
 QGIS_TEXT_FONT_FALLBACK = "Noto Sans"
+_ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE = object()
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -356,25 +357,46 @@ def _representative_zoom_in_layer_range(minzoom: object, maxzoom: object) -> flo
     return target_zoom
 
 
-def _literal_step_icon_image(expr: object, *, minzoom: object = None, maxzoom: object = None) -> str | None:
+def _has_valid_zoom_step_thresholds(expr: list[object]) -> bool:
+    return all(
+        not isinstance(expr[index], bool) and isinstance(expr[index], (int, float))
+        for index in range(3, len(expr) - 1, 2)
+    )
+
+
+def _step_outputs(expr: list[object]) -> list[object]:
+    return [expr[2], *(expr[index + 1] for index in range(3, len(expr) - 1, 2))]
+
+
+def _step_has_only_non_empty_literal_outputs(expr: list[object]) -> bool:
+    return all(isinstance(output, str) and output for output in _step_outputs(expr))
+
+
+def _step_has_future_icon_outputs(expr: list[object], target_zoom: float) -> bool:
+    return any(
+        float(expr[index]) > target_zoom and expr[index + 1] != ""
+        for index in range(3, len(expr) - 1, 2)
+    )
+
+
+def _literal_step_icon_image(expr: object, *, minzoom: object = None, maxzoom: object = None) -> object:
     if not isinstance(expr, list) or len(expr) < 3 or expr[0] != "step" or expr[1] != ["zoom"]:
-        return None
-    if not isinstance(expr[2], str) or not expr[2]:
-        return None
-    for index in range(3, len(expr) - 1, 2):
-        threshold = expr[index]
-        output = expr[index + 1]
-        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
-            return None
-        if not isinstance(output, str) or not output:
-            return None
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    if not _has_valid_zoom_step_thresholds(expr):
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
     target_zoom = _representative_zoom_in_layer_range(minzoom, maxzoom)
     if target_zoom is None:
-        return None
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
     representative = _step_zoom_value(expr, target_zoom=target_zoom)
-    if isinstance(representative, str) and representative:
+    if not isinstance(representative, str):
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    if not representative:
+        if _step_has_future_icon_outputs(expr, target_zoom):
+            return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
         return representative
-    return None
+    if _step_has_only_non_empty_literal_outputs(expr):
+        return representative
+    return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
 
 
 def _extract_fallback_color(expr: object) -> str | None:
@@ -1283,8 +1305,11 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         minzoom=layer.get("minzoom"),
                         maxzoom=layer.get("maxzoom"),
                     )
-                    if icon_image is not None:
-                        props[prop] = icon_image
+                    if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
+                        if icon_image:
+                            props[prop] = icon_image
+                        else:
+                            del props[prop]
                         continue
                 if not isinstance(val, list):
                     continue
