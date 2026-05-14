@@ -101,6 +101,18 @@ CAMERAS: dict[str, MapboxComparisonCamera] = {
         width=1280,
         height=900,
     ),
+    "geneva-airport-motorway-z14-outdoors": MapboxComparisonCamera(
+        name="geneva-airport-motorway-z14-outdoors",
+        description=(
+            "z14 motorway/urban detail around Geneva airport for road-exit shields, "
+            "motorway junction labels, urban POIs, and dense road hierarchy."
+        ),
+        longitude=6.103,
+        latitude=46.225,
+        zoom=14.25,
+        width=1280,
+        height=900,
+    ),
     "chamonix-trails-z14-outdoors": MapboxComparisonCamera(
         name="chamonix-trails-z14-outdoors",
         description=(

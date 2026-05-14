@@ -35,6 +35,7 @@ Recommended z5-z18 inspection matrix:
 | `switzerland-alps-z5-outdoors` | z5 | Country-wide Switzerland/Alps context: landcover, terrain/water balance, major roads, label density. |
 | `valais-geneva-outdoors` | z7-z8 | Regional qfit map context: terrain/outdoor features, main road hierarchy, settlement visibility. |
 | `lausanne-lavaux-z10-outdoors` | z9-z11 | Primary qfit activity-area target: road/trail hierarchy, labels, feature density, color/width balance. |
+| `geneva-airport-motorway-z14-outdoors` | z14 | Motorway/urban detail around Geneva airport: road-exit shields, junction labels, urban POIs, dense road hierarchy. |
 | `chamonix-trails-z14-outdoors` | z13-z14 | Local outdoor detail: paths/trails, minor roads, POIs, label emphasis. |
 | `zermatt-trails-z18-outdoors` | z18 | Street/trail-level stress test: casing, widths, local labels, POIs, high-detail symbols. |
 
