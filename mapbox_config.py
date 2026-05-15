@@ -195,6 +195,7 @@ _POI_LABEL_MAKI_ICON_VALUES = (
 _ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
 _ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
 _ROAD_EXIT_SHIELD_ICON_IMAGE = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
+_AIRPORT_LABEL_LAYER_ID = "airport-label"
 _TRANSIT_LABEL_LAYER_ID = "transit-label"
 _TRANSIT_LABEL_STOP_TYPE_EXCLUSION = ["!=", ["get", "stop_type"], "entrance"]
 _TRANSIT_LABEL_ENTRANCE_TEXT_ANCHOR = ["match", ["get", "stop_type"], "entrance", "left", "top"]
@@ -2268,6 +2269,29 @@ def _prefer_generic_name_reference(references: list[object]) -> object | None:
     return references[0] if references else None
 
 
+def _prefer_airport_name_reference(references: list[object]) -> object | None:
+    for reference in references:
+        if _text_field_reference_name(reference) == "name":
+            return reference
+    for reference in references:
+        if _is_localized_name_reference(reference):
+            return reference
+    return None
+
+
+def _all_simple_text_field_references(expr: object) -> list[object]:
+    if isinstance(expr, dict):
+        return []
+    if _is_simple_text_field_reference(expr):
+        return [expr]
+    if not isinstance(expr, list):
+        return []
+    references: list[object] = []
+    for child in expr[1:]:
+        references.extend(_all_simple_text_field_references(child))
+    return references
+
+
 def _text_field_references_from_children(
     children: list[object],
     *,
@@ -2391,6 +2415,24 @@ def _simplify_text_field(expr: object) -> object:
             if isinstance(item, str) and item:
                 return item
     return expr
+
+
+def _simplify_airport_label_text_field(base_layer_id: str, expr: object) -> object | None:
+    """Keep airport labels name-first instead of collapsing to the short ref code."""
+    if (
+        base_layer_id != _AIRPORT_LABEL_LAYER_ID
+        or not isinstance(expr, list)
+        or len(expr) < 3
+        or expr[0] != "step"
+        or expr[1] != ["get", "sizerank"]
+    ):
+        return None
+    references: list[object] = []
+    for output in _text_field_output_candidates(expr):
+        references.extend(_all_simple_text_field_references(output))
+    if not any(_text_field_reference_name(reference) == "ref" for reference in references):
+        return None
+    return copy.deepcopy(_prefer_airport_name_reference(references))
 
 
 def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> dict[str, object]:
@@ -2582,7 +2624,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if opacity is not None and opacity > _FULL_OPACITY - _FULL_OPACITY_EPSILON:
                         props[prop] = _FULL_OPACITY
                 elif prop == "text-field":
-                    props[prop] = _simplify_text_field(val)
+                    airport_text_field = _simplify_airport_label_text_field(base_layer_id, val)
+                    props[prop] = airport_text_field if airport_text_field is not None else _simplify_text_field(val)
                 elif prop == "text-font" and _is_text_font_stack(val):
                     props[prop] = [QGIS_TEXT_FONT_FALLBACK]
                 elif prop == "text-size":

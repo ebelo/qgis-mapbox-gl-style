@@ -2627,6 +2627,38 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "ref"])
 
+    def test_airport_label_text_field_prefers_name_over_ref_code(self):
+        airport_text_field = [
+            "step",
+            ["get", "sizerank"],
+            [
+                "case",
+                ["has", "ref"],
+                ["concat", ["get", "ref"], " -\n", ["coalesce", ["get", "name_en"], ["get", "name"]]],
+                ["coalesce", ["get", "name_en"], ["get", "name"]],
+            ],
+            15,
+            ["get", "ref"],
+        ]
+        updated_threshold_text_field = copy.deepcopy(airport_text_field)
+        updated_threshold_text_field[3] = 16
+        ref_only_text_field = ["step", ["get", "sizerank"], ["get", "ref"], 15, ["get", "ref"]]
+        style = {
+            "layers": [
+                {"id": "airport-label", "layout": {"text-field": airport_text_field}},
+                {"id": "airport-label", "layout": {"text-field": updated_threshold_text_field}},
+                {"id": "airport-label", "layout": {"text-field": ref_only_text_field}},
+                {"id": "poi-label", "layout": {"text-field": copy.deepcopy(airport_text_field)}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "name"])
+        self.assertEqual(result["layers"][1]["layout"]["text-field"], ["get", "name"])
+        self.assertEqual(result["layers"][2]["layout"]["text-field"], ["get", "ref"])
+        self.assertEqual(result["layers"][3]["layout"]["text-field"], ["get", "ref"])
+
     def test_case_text_field_expression_uses_label_output_not_condition(self):
         style = {
             "layers": [
