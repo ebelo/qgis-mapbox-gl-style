@@ -2111,6 +2111,68 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "wetland-z10-to-z10_5")
         self.assertEqual(result[3]["id"], "wetland-z10_5-plus")
 
+    def _road_pedestrian_polygon_pattern_layer(self, fill_opacity=None):
+        if fill_opacity is None:
+            fill_opacity = ["interpolate", ["linear"], ["zoom"], 16, 0, 17, 1]
+        return {
+            "id": "road-pedestrian-polygon-pattern",
+            "type": "fill",
+            "minzoom": 16,
+            "source-layer": "road",
+            "filter": ["==", ["geometry-type"], "Polygon"],
+            "paint": {
+                "fill-pattern": "pedestrian-polygon",
+                "fill-opacity": fill_opacity,
+            },
+        }
+
+    def test_road_pedestrian_polygon_pattern_fill_opacity_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._road_pedestrian_polygon_pattern_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 2)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        fade_layer = by_id["road-pedestrian-polygon-pattern-z16-to-z17"]
+        full_layer = by_id["road-pedestrian-polygon-pattern-z17-plus"]
+        self.assertEqual(fade_layer["minzoom"], 16)
+        self.assertEqual(fade_layer["maxzoom"], 17.0)
+        self.assertEqual(full_layer["minzoom"], 17.0)
+        self.assertNotIn("maxzoom", full_layer)
+        self.assertAlmostEqual(fade_layer["paint"]["fill-opacity"], 0.5)
+        self.assertAlmostEqual(full_layer["paint"]["fill-opacity"], 1.0)
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["fill-pattern"], "pedestrian-polygon")
+            self.assertEqual(layer["filter"], ["==", ["geometry-type"], "Polygon"])
+
+    def test_road_pedestrian_polygon_pattern_fill_opacity_is_not_split_when_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._road_pedestrian_polygon_pattern_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "road-pedestrian-polygon-pattern")
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+
+    def test_road_pedestrian_polygon_pattern_fill_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._road_pedestrian_polygon_pattern_layer()]
+
+        self.assertIs(
+            mapbox_config._split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(
+                unchanged_layers
+            ),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(
+            mixed_layers
+        )
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "road-pedestrian-polygon-pattern-z16-to-z17")
+        self.assertEqual(result[2]["id"], "road-pedestrian-polygon-pattern-z17-plus")
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",

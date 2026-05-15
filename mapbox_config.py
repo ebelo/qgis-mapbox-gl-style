@@ -751,6 +751,14 @@ _WETLAND_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], 
     ("z10-to-z10_5", 10.0, 10.5),
     ("z10_5-plus", 10.5, None),
 )
+_ROAD_PEDESTRIAN_POLYGON_PATTERN_LAYER_ID = "road-pedestrian-polygon-pattern"
+_ROAD_PEDESTRIAN_POLYGON_PATTERN_FILL_OPACITY_EXPRESSIONS = {
+    _ROAD_PEDESTRIAN_POLYGON_PATTERN_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 16, 0, 17, 1],
+}
+_ROAD_PEDESTRIAN_POLYGON_PATTERN_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z16-to-z17", 16.0, 17.0),
+    ("z17-plus", 17.0, None),
+)
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -1875,6 +1883,32 @@ def _split_wetland_fill_opacity_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _road_pedestrian_polygon_pattern_fill_opacity_layer_variants(
+    layer: dict[str, object],
+) -> list[dict[str, object]] | None:
+    """Split audited pedestrian polygon pattern opacity fade into static QGIS zoom bands."""
+    return _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="fill",
+        paint_property="fill-opacity",
+        expressions_by_layer_id=_ROAD_PEDESTRIAN_POLYGON_PATTERN_FILL_OPACITY_EXPRESSIONS,
+        zoom_bands=_ROAD_PEDESTRIAN_POLYGON_PATTERN_FILL_OPACITY_ZOOM_BANDS,
+    )
+
+
+def _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _road_pedestrian_polygon_pattern_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _has_label_icon_visibility_expression(layer: dict[str, object]) -> bool:
     base_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
     layout = layer.get("layout")
@@ -2972,6 +3006,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",
