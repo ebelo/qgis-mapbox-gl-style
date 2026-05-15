@@ -723,6 +723,15 @@ _BUILDING_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None],
     ("z15-to-z16", 15.0, 16.0),
     ("z16-plus", 16.0, None),
 )
+_LANDCOVER_LAYER_ID = "landcover"
+_LANDCOVER_FILL_OPACITY_EXPRESSIONS = {
+    _LANDCOVER_LAYER_ID: ["interpolate", ["exponential", 1.5], ["zoom"], 8, 0.8, 12, 0],
+}
+_LANDCOVER_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("below-z8", None, 8.0),
+    ("z8-to-z10", 8.0, 10.0),
+    ("z10-to-z12", 10.0, 12.0),
+)
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -1710,20 +1719,26 @@ def _split_cliff_line_pattern_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
-def _building_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
-    """Split audited building fill opacity fades into static QGIS zoom bands."""
+def _zoom_expression_opacity_layer_variants(
+    layer: dict[str, object],
+    *,
+    layer_type: str,
+    paint_property: str,
+    expressions_by_layer_id: dict[str, list[object]],
+    zoom_bands: tuple[tuple[str, float | None, float | None], ...],
+) -> list[dict[str, object]] | None:
     layer_id = str(layer.get("id") or "")
-    expected_expression = _BUILDING_FILL_OPACITY_EXPRESSIONS.get(layer_id)
+    expected_expression = expressions_by_layer_id.get(layer_id)
     paint = layer.get("paint")
-    if layer.get("type") != "fill" or expected_expression is None or not isinstance(paint, dict):
+    if layer.get("type") != layer_type or expected_expression is None or not isinstance(paint, dict):
         return None
-    if paint.get("fill-opacity") != expected_expression:
+    if paint.get(paint_property) != expected_expression:
         return None
 
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
     variants: list[dict[str, object]] = []
-    for suffix, band_minzoom, band_maxzoom in _BUILDING_FILL_OPACITY_ZOOM_BANDS:
+    for suffix, band_minzoom, band_maxzoom in zoom_bands:
         effective_zoom_band = _effective_zoom_band(
             existing_minzoom,
             existing_maxzoom,
@@ -1740,9 +1755,20 @@ def _building_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict
         variant["id"] = f"{layer_id}-{suffix}"
         variant_paint = variant["paint"]
         assert isinstance(variant_paint, dict)
-        variant_paint["fill-opacity"] = fill_opacity
+        variant_paint[paint_property] = fill_opacity
         variants.append(variant)
     return variants or None
+
+
+def _building_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited building fill opacity fades into static QGIS zoom bands."""
+    return _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="fill",
+        paint_property="fill-opacity",
+        expressions_by_layer_id=_BUILDING_FILL_OPACITY_EXPRESSIONS,
+        zoom_bands=_BUILDING_FILL_OPACITY_ZOOM_BANDS,
+    )
 
 
 def _split_building_fill_opacity_layers_for_qgis(layers: object) -> object:
@@ -1754,6 +1780,30 @@ def _split_building_fill_opacity_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _building_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _landcover_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited landcover fill opacity fade-out into static QGIS zoom bands."""
+    return _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="fill",
+        paint_property="fill-opacity",
+        expressions_by_layer_id=_LANDCOVER_FILL_OPACITY_EXPRESSIONS,
+        zoom_bands=_LANDCOVER_FILL_OPACITY_ZOOM_BANDS,
+    )
+
+
+def _split_landcover_fill_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _landcover_fill_opacity_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -2852,6 +2902,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_continent_label_text_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_cliff_line_pattern_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",

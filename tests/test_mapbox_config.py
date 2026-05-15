@@ -1913,6 +1913,70 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "building-z15-to-z16")
         self.assertEqual(result[2]["id"], "building-z16-plus")
 
+    def _landcover_layer(self, fill_opacity=None):
+        if fill_opacity is None:
+            fill_opacity = ["interpolate", ["exponential", 1.5], ["zoom"], 8, 0.8, 12, 0]
+        return {
+            "id": "landcover",
+            "type": "fill",
+            "minzoom": 0,
+            "maxzoom": 12,
+            "source-layer": "landcover",
+            "paint": {
+                "fill-antialias": False,
+                "fill-color": "hsl(98, 48%, 67%)",
+                "fill-opacity": fill_opacity,
+            },
+        }
+
+    def test_landcover_fill_opacity_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._landcover_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 3)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["landcover-below-z8"]
+        mid_layer = by_id["landcover-z8-to-z10"]
+        high_layer = by_id["landcover-z10-to-z12"]
+        self.assertEqual(low_layer["minzoom"], 0)
+        self.assertEqual(low_layer["maxzoom"], 8.0)
+        self.assertEqual(mid_layer["minzoom"], 8.0)
+        self.assertEqual(mid_layer["maxzoom"], 10.0)
+        self.assertEqual(high_layer["minzoom"], 10.0)
+        self.assertEqual(high_layer["maxzoom"], 12)
+        self.assertAlmostEqual(low_layer["paint"]["fill-opacity"], 0.8)
+        self.assertAlmostEqual(mid_layer["paint"]["fill-opacity"], 0.7015384615384616)
+        self.assertAlmostEqual(high_layer["paint"]["fill-opacity"], 0.3323076923076923)
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["fill-color"], "hsl(98, 48%, 67%)")
+            self.assertFalse(layer["paint"]["fill-antialias"])
+
+    def test_landcover_fill_opacity_is_not_split_when_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._landcover_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "landcover")
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+
+    def test_landcover_fill_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._landcover_layer()]
+
+        self.assertIs(
+            mapbox_config._split_landcover_fill_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_landcover_fill_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "landcover-below-z8")
+        self.assertEqual(result[2]["id"], "landcover-z8-to-z10")
+        self.assertEqual(result[3]["id"], "landcover-z10-to-z12")
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",
