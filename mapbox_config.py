@@ -563,6 +563,7 @@ _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
 _PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
 _NATURAL_POINT_LABEL_LAYER_ID = "natural-point-label"
 _POI_LABEL_LAYER_ID = "poi-label"
+_CONTINENT_LABEL_LAYER_ID = "continent-label"
 _COUNTRY_LABEL_LAYER_ID = "country-label"
 _SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
 _SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
@@ -679,6 +680,22 @@ _COUNTRY_LABEL_LAYOUT_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, f
     ("below-z7", None, 7.0, None),
     ("z7-to-z8", 7.0, 8.0, 0.6),
     ("z8-plus", 8.0, None, 0.0),
+)
+_CONTINENT_LABEL_TEXT_OPACITY_EXPRESSION = [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    0,
+    0.8,
+    1.5,
+    0.5,
+    2.5,
+    0,
+]
+_CONTINENT_LABEL_TEXT_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("below-z1_5", None, 1.5),
+    ("z1_5-to-z2_5", 1.5, 2.5),
+    ("z2_5-plus", 2.5, None),
 )
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
@@ -1186,6 +1203,11 @@ def _is_natural_point_label_layer_id(layer_id: object) -> bool:
     return normalized == _NATURAL_POINT_LABEL_LAYER_ID or normalized.startswith(f"{_NATURAL_POINT_LABEL_LAYER_ID}-")
 
 
+def _is_continent_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _CONTINENT_LABEL_LAYER_ID or normalized.startswith(f"{_CONTINENT_LABEL_LAYER_ID}-")
+
+
 def _is_country_label_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _COUNTRY_LABEL_LAYER_ID or normalized.startswith(f"{_COUNTRY_LABEL_LAYER_ID}-")
@@ -1223,6 +1245,8 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         return _POI_LABEL_LAYER_ID
     if _is_natural_point_label_layer_id(layer_id):
         return _NATURAL_POINT_LABEL_LAYER_ID
+    if _is_continent_label_layer_id(layer_id):
+        return _CONTINENT_LABEL_LAYER_ID
     if _is_country_label_layer_id(layer_id):
         return _COUNTRY_LABEL_LAYER_ID
     if _is_settlement_major_label_layer_id(layer_id):
@@ -1483,6 +1507,84 @@ def _split_country_label_layout_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _country_label_layout_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _has_continent_label_text_opacity_expression(layer: dict[str, object]) -> bool:
+    paint = layer.get("paint")
+    return (
+        base_mapbox_style_layer_id_for_qfit(layer.get("id")) == _CONTINENT_LABEL_LAYER_ID
+        and layer.get("type") == "symbol"
+        and isinstance(paint, dict)
+        and paint.get("text-opacity") == _CONTINENT_LABEL_TEXT_OPACITY_EXPRESSION
+    )
+
+
+def _zoom_band_representative_zoom(minzoom: float | None, maxzoom: float | None) -> float:
+    if minzoom is not None and maxzoom is not None:
+        return (minzoom + maxzoom) / 2.0
+    if minzoom is not None:
+        return minzoom
+    if maxzoom is not None:
+        return max(0.0, maxzoom - _ZOOM_BOUND_EPSILON)
+    return _REPRESENTATIVE_STYLE_ZOOM
+
+
+def _continent_label_text_opacity_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> float | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    opacity = _interpolate_filter_value_at_zoom(_CONTINENT_LABEL_TEXT_OPACITY_EXPRESSION, representative_zoom)
+    return _clamp_opacity_value(opacity)
+
+
+def _continent_label_text_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split continent-label opacity fade into static zoom bands for QGIS."""
+    if not _has_continent_label_text_opacity_expression(layer):
+        return None
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    layer_id = str(layer.get("id") or _CONTINENT_LABEL_LAYER_ID)
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom in _CONTINENT_LABEL_TEXT_OPACITY_ZOOM_BANDS:
+        text_opacity = _continent_label_text_opacity_for_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if text_opacity is None:
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["text-opacity"] = text_opacity
+        variants.append(variant)
+    return variants or None
+
+
+def _split_continent_label_text_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _continent_label_text_opacity_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -2578,6 +2680,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_settlement_dot_icon_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_country_label_layout_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_continent_label_text_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",

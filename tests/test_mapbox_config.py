@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import tests._path  # noqa: F401,E402
 
+import mapbox_config  # noqa: E402
 from mapbox_config import (  # noqa: E402
     DEFAULT_MAPBOX_RETINA,
     DEFAULT_MAPBOX_TILE_PIXEL_RATIO,
@@ -1687,6 +1688,93 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(len(result["layers"]), 1)
         self.assertEqual(result["layers"][0]["id"], "country-label")
         self.assertEqual(result["layers"][0]["layout"]["text-radial-offset"], ["get", "offset"])
+
+    def _continent_label_layer(self, text_opacity=None):
+        if text_opacity is None:
+            text_opacity = ["interpolate", ["linear"], ["zoom"], 0, 0.8, 1.5, 0.5, 2.5, 0]
+        return {
+            "id": "continent-label",
+            "type": "symbol",
+            "minzoom": 0.75,
+            "maxzoom": 3,
+            "filter": ["==", ["get", "class"], "continent"],
+            "layout": {
+                "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
+                "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+                "text-size": ["interpolate", ["exponential", 0.5], ["zoom"], 0, 10, 2.5, 15],
+            },
+            "paint": {
+                "text-color": "hsl(230, 29%, 0%)",
+                "text-opacity": text_opacity,
+            },
+        }
+
+    def test_continent_label_text_opacity_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._continent_label_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 3)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["continent-label-below-z1_5"]
+        mid_layer = by_id["continent-label-z1_5-to-z2_5"]
+        high_layer = by_id["continent-label-z2_5-plus"]
+        self.assertEqual(low_layer["minzoom"], 0.75)
+        self.assertEqual(low_layer["maxzoom"], 1.5)
+        self.assertEqual(mid_layer["minzoom"], 1.5)
+        self.assertEqual(mid_layer["maxzoom"], 2.5)
+        self.assertEqual(high_layer["minzoom"], 2.5)
+        self.assertEqual(high_layer["maxzoom"], 3)
+        self.assertAlmostEqual(low_layer["paint"]["text-opacity"], 0.575)
+        self.assertAlmostEqual(mid_layer["paint"]["text-opacity"], 0.25)
+        self.assertAlmostEqual(high_layer["paint"]["text-opacity"], 0.0)
+        self.assertEqual({layer["layout"]["text-size"] for layer in result["layers"]}, {16.0})
+
+    def test_continent_label_text_opacity_uses_effective_open_zoom_bounds(self):
+        max_only_layer = self._continent_label_layer()
+        max_only_layer.pop("minzoom")
+        max_only_layer["maxzoom"] = 1.0
+        min_only_layer = self._continent_label_layer()
+        min_only_layer["id"] = "continent-label-min-only"
+        min_only_layer["minzoom"] = 2.75
+        min_only_layer.pop("maxzoom")
+        style = {"layers": [max_only_layer, min_only_layer]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        max_only_variant = by_id["continent-label-below-z1_5"]
+        min_only_variant = by_id["continent-label-min-only-z2_5-plus"]
+        self.assertNotIn("minzoom", max_only_variant)
+        self.assertEqual(max_only_variant["maxzoom"], 1.0)
+        self.assertAlmostEqual(max_only_variant["paint"]["text-opacity"], 0.6)
+        self.assertEqual(min_only_variant["minzoom"], 2.75)
+        self.assertNotIn("maxzoom", min_only_variant)
+        self.assertAlmostEqual(min_only_variant["paint"]["text-opacity"], 0.0)
+
+    def test_continent_label_text_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._continent_label_layer()]
+
+        self.assertEqual(mapbox_config._zoom_band_representative_zoom(None, None), 12.0)
+        self.assertIs(
+            mapbox_config._split_continent_label_text_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_continent_label_text_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "continent-label-below-z1_5")
+
+    def test_continent_label_text_opacity_is_not_split_when_shape_changes(self):
+        text_opacity = ["get", "opacity"]
+        style = {"layers": [self._continent_label_layer(text_opacity=text_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "continent-label")
+        self.assertEqual(result["layers"][0]["paint"]["text-opacity"], text_opacity)
 
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
