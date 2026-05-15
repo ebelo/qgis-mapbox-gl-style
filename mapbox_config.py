@@ -210,10 +210,12 @@ _TRANSIT_LABEL_ENTRANCE_TEXT_OFFSET = [
     ["literal", [1, 0]],
     ["literal", [0, 0.8]],
 ]
+_TRANSIT_LABEL_ENTRANCE_TEXT_MAX_WIDTH = ["match", ["get", "stop_type"], "entrance", 15, 9]
 _TRANSIT_LABEL_NON_ENTRANCE_LAYOUT_VALUES = {
     "text-anchor": (_TRANSIT_LABEL_ENTRANCE_TEXT_ANCHOR, "top"),
     "text-justify": (_TRANSIT_LABEL_ENTRANCE_TEXT_JUSTIFY, "center"),
     "text-offset": (_TRANSIT_LABEL_ENTRANCE_TEXT_OFFSET, [0, 0.8]),
+    "text-max-width": (_TRANSIT_LABEL_ENTRANCE_TEXT_MAX_WIDTH, 9.0),
 }
 _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN = {
     2: (

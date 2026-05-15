@@ -1095,6 +1095,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ["literal", [1, 0]],
             ["literal", [0, 0.8]],
         ]
+        text_max_width = ["match", ["get", "stop_type"], "entrance", 15, 9]
         style = {
             "layers": [
                 {
@@ -1104,6 +1105,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                         "text-anchor": text_anchor,
                         "text-justify": text_justify,
                         "text-offset": text_offset,
+                        "text-max-width": text_max_width,
                     },
                 },
                 {
@@ -1112,6 +1114,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                         "text-anchor": copy.deepcopy(text_anchor),
                         "text-justify": copy.deepcopy(text_justify),
                         "text-offset": copy.deepcopy(text_offset),
+                        "text-max-width": copy.deepcopy(text_max_width),
                     },
                 },
                 {
@@ -1128,9 +1131,11 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(transit_layout["text-anchor"], "top")
         self.assertEqual(transit_layout["text-justify"], "center")
         self.assertEqual(transit_layout["text-offset"], [0, 0.8])
+        self.assertEqual(transit_layout["text-max-width"], 9.0)
         self.assertEqual(result["layers"][1]["layout"]["text-anchor"], text_anchor)
         self.assertEqual(result["layers"][1]["layout"]["text-justify"], text_justify)
         self.assertEqual(result["layers"][1]["layout"]["text-offset"], text_offset)
+        self.assertEqual(result["layers"][1]["layout"]["text-max-width"], text_max_width)
         self.assertEqual(result["layers"][2]["layout"]["text-anchor"], text_anchor)
 
     def test_road_exit_shield_concat_icon_uses_reflen_sprite_match_fallback(self):
