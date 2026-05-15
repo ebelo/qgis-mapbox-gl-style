@@ -850,6 +850,28 @@ _WATER_SHADOW_TRANSLATE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z13-to-z16", 13.0, 16.0),
     ("z16-plus", 16.0, None),
 )
+_TURNING_FEATURE_LAYER_ID = "turning-feature"
+_TURNING_FEATURE_OUTLINE_LAYER_ID = "turning-feature-outline"
+_TURNING_FEATURE_CIRCLE_RADIUS_EXPRESSION = [
+    "interpolate",
+    ["exponential", 1.5],
+    ["zoom"],
+    15,
+    4.5,
+    16,
+    8,
+    18,
+    20,
+    22,
+    200,
+]
+_TURNING_FEATURE_CIRCLE_STROKE_WIDTH_EXPRESSION = ["interpolate", ["linear"], ["zoom"], 15, 0.8, 16, 1.2, 18, 2]
+_TURNING_FEATURE_CIRCLE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z15-to-z16", 15.0, 16.0),
+    ("z16-to-z18", 16.0, 18.0),
+    ("z18-to-z22", 18.0, 22.0),
+    ("z22-plus", 22.0, None),
+)
 _CONTOUR_LINE_LAYER_ID = "contour-line"
 _CONTOUR_LINE_OPACITY_EXPRESSION = [
     "interpolate",
@@ -2273,6 +2295,111 @@ def _split_water_shadow_translate_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _circle_size_value(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    return float(value)
+
+
+def _turning_feature_circle_size_for_zoom_band(
+    expression: list[object],
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> float | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    return _circle_size_value(_interpolate_filter_value_at_zoom(expression, representative_zoom))
+
+
+def _turning_feature_circle_layer_match(layer: dict[str, object]) -> tuple[str, bool] | None:
+    layer_id = str(layer.get("id") or "")
+    if layer_id not in {_TURNING_FEATURE_LAYER_ID, _TURNING_FEATURE_OUTLINE_LAYER_ID} or layer.get("type") != "circle":
+        return None
+    paint = layer.get("paint")
+    if not isinstance(paint, dict) or paint.get("circle-radius") != _TURNING_FEATURE_CIRCLE_RADIUS_EXPRESSION:
+        return None
+    has_stroke_width = layer_id == _TURNING_FEATURE_OUTLINE_LAYER_ID
+    if has_stroke_width and paint.get("circle-stroke-width") != _TURNING_FEATURE_CIRCLE_STROKE_WIDTH_EXPRESSION:
+        return None
+    return layer_id, has_stroke_width
+
+
+def _turning_feature_circle_stroke_width_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> float | None:
+    return _turning_feature_circle_size_for_zoom_band(
+        _TURNING_FEATURE_CIRCLE_STROKE_WIDTH_EXPRESSION,
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+
+
+def _turning_feature_circle_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited turning circle radii/strokes into static QGIS zoom bands."""
+    layer_match = _turning_feature_circle_layer_match(layer)
+    if layer_match is None:
+        return None
+    layer_id, has_stroke_width = layer_match
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom in _TURNING_FEATURE_CIRCLE_ZOOM_BANDS:
+        circle_radius = _turning_feature_circle_size_for_zoom_band(
+            _TURNING_FEATURE_CIRCLE_RADIUS_EXPRESSION,
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if circle_radius is None:
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["circle-radius"] = circle_radius
+        if has_stroke_width:
+            circle_stroke_width = _turning_feature_circle_stroke_width_for_zoom_band(
+                existing_minzoom,
+                existing_maxzoom,
+                band_minzoom,
+                band_maxzoom,
+            )
+            if circle_stroke_width is None:
+                return None
+            variant_paint["circle-stroke-width"] = circle_stroke_width
+        variants.append(variant)
+    return variants or None
+
+
+def _split_turning_feature_circle_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _turning_feature_circle_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _contour_line_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited contour index opacity expressions into static QGIS zoom bands."""
     layer_id = str(layer.get("id") or "")
@@ -3413,6 +3540,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_rail_track_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_fence_hedge_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_water_shadow_translate_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_turning_feature_circle_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_contour_line_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",

@@ -2564,6 +2564,104 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "water-shadow-z13-to-z16")
         self.assertEqual(result[3]["id"], "water-shadow-z16-plus")
 
+    def _turning_feature_circle_radius_expression(self):
+        return ["interpolate", ["exponential", 1.5], ["zoom"], 15, 4.5, 16, 8, 18, 20, 22, 200]
+
+    def _turning_feature_circle_stroke_width_expression(self):
+        return ["interpolate", ["linear"], ["zoom"], 15, 0.8, 16, 1.2, 18, 2]
+
+    def _turning_feature_outline_layer(self, circle_radius=None, circle_stroke_width=None):
+        if circle_radius is None:
+            circle_radius = self._turning_feature_circle_radius_expression()
+        if circle_stroke_width is None:
+            circle_stroke_width = self._turning_feature_circle_stroke_width_expression()
+        return {
+            "id": "turning-feature-outline",
+            "type": "circle",
+            "minzoom": 15,
+            "source-layer": "road",
+            "filter": ["all", ["match", ["get", "class"], ["turning_circle", "turning_loop"], True, False]],
+            "paint": {
+                "circle-radius": circle_radius,
+                "circle-color": "hsl(0, 0%, 95%)",
+                "circle-stroke-width": circle_stroke_width,
+                "circle-stroke-color": "hsl(60, 10%, 70%)",
+                "circle-pitch-alignment": "map",
+            },
+        }
+
+    def _turning_feature_layer(self, circle_radius=None):
+        if circle_radius is None:
+            circle_radius = self._turning_feature_circle_radius_expression()
+        return {
+            "id": "turning-feature",
+            "type": "circle",
+            "minzoom": 15,
+            "source-layer": "road",
+            "filter": ["all", ["match", ["get", "class"], ["turning_circle", "turning_loop"], True, False]],
+            "paint": {
+                "circle-radius": circle_radius,
+                "circle-color": "hsl(0, 0%, 95%)",
+                "circle-pitch-alignment": "map",
+            },
+        }
+
+    def test_turning_feature_circle_properties_split_to_static_zoom_bands(self):
+        style = {"layers": [self._turning_feature_outline_layer(), self._turning_feature_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 8)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        for layer_prefix in ("turning-feature-outline", "turning-feature"):
+            low_layer = by_id[f"{layer_prefix}-z15-to-z16"]
+            mid_layer = by_id[f"{layer_prefix}-z16-to-z18"]
+            high_layer = by_id[f"{layer_prefix}-z18-to-z22"]
+            top_layer = by_id[f"{layer_prefix}-z22-plus"]
+            self.assertEqual(low_layer["minzoom"], 15)
+            self.assertEqual(low_layer["maxzoom"], 16.0)
+            self.assertEqual(mid_layer["minzoom"], 16.0)
+            self.assertEqual(mid_layer["maxzoom"], 18.0)
+            self.assertEqual(high_layer["minzoom"], 18.0)
+            self.assertEqual(high_layer["maxzoom"], 22.0)
+            self.assertEqual(top_layer["minzoom"], 22.0)
+            self.assertNotIn("maxzoom", top_layer)
+            self.assertAlmostEqual(low_layer["paint"]["circle-radius"], 6.073214099741122)
+            self.assertAlmostEqual(mid_layer["paint"]["circle-radius"], 12.8)
+            self.assertAlmostEqual(high_layer["paint"]["circle-radius"], 75.38461538461539)
+            self.assertEqual(top_layer["paint"]["circle-radius"], 200.0)
+        outline_prefix = "turning-feature-outline"
+        self.assertEqual(by_id[f"{outline_prefix}-z15-to-z16"]["paint"]["circle-stroke-width"], 1.0)
+        self.assertEqual(by_id[f"{outline_prefix}-z16-to-z18"]["paint"]["circle-stroke-width"], 1.6)
+        self.assertEqual(by_id[f"{outline_prefix}-z18-to-z22"]["paint"]["circle-stroke-width"], 2.0)
+        self.assertEqual(by_id[f"{outline_prefix}-z22-plus"]["paint"]["circle-stroke-width"], 2.0)
+
+    def test_turning_feature_circle_split_is_exact_shape_gated(self):
+        circle_radius = ["interpolate", ["linear"], ["zoom"], 15, 5, 16, 8]
+        style = {"layers": [self._turning_feature_layer(circle_radius=circle_radius)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "turning-feature")
+        self.assertEqual(result["layers"][0]["paint"]["circle-radius"], circle_radius)
+
+    def test_turning_feature_circle_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._turning_feature_layer()]
+
+        self.assertIs(
+            mapbox_config._split_turning_feature_circle_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_turning_feature_circle_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "turning-feature-z15-to-z16")
+        self.assertEqual(result[2]["id"], "turning-feature-z16-to-z18")
+        self.assertEqual(result[3]["id"], "turning-feature-z18-to-z22")
+        self.assertEqual(result[4]["id"], "turning-feature-z22-plus")
+
     def _contour_line_layer(self, line_opacity=None, minzoom=11):
         if line_opacity is None:
             line_opacity = [
