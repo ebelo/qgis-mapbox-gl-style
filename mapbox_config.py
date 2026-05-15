@@ -662,15 +662,18 @@ _SETTLEMENT_DOT_ICON_VARIANTS: tuple[tuple[str, object, str, float], ...] = (
     ),
     ("dot-9", ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 11]], "dot-9", 0.55),
 )
+_COUNTRY_LABEL_LEFT_TEXT_ANCHORS = ["left", "bottom-left", "top-left"]
+_COUNTRY_LABEL_RIGHT_TEXT_ANCHORS = ["right", "bottom-right", "top-right"]
+_COUNTRY_LABEL_SIDE_TEXT_ANCHORS = [*_COUNTRY_LABEL_LEFT_TEXT_ANCHORS, *_COUNTRY_LABEL_RIGHT_TEXT_ANCHORS]
 _COUNTRY_LABEL_LAYOUT_TEXT_JUSTIFY_EXPRESSION = [
     "step",
     ["zoom"],
     [
         "match",
         ["get", "text_anchor"],
-        ["left", "bottom-left", "top-left"],
+        _COUNTRY_LABEL_LEFT_TEXT_ANCHORS,
         "left",
-        ["right", "bottom-right", "top-right"],
+        _COUNTRY_LABEL_RIGHT_TEXT_ANCHORS,
         "right",
         "center",
     ],
@@ -678,10 +681,28 @@ _COUNTRY_LABEL_LAYOUT_TEXT_JUSTIFY_EXPRESSION = [
     "auto",
 ]
 _COUNTRY_LABEL_LAYOUT_TEXT_RADIAL_OFFSET_EXPRESSION = ["step", ["zoom"], 0.6, 8, 0]
+_COUNTRY_LABEL_BELOW_Z7_BAND_SUFFIX = "below-z7"
 _COUNTRY_LABEL_LAYOUT_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, str | None, float | None], ...] = (
-    ("below-z7", None, 7.0, None, 0.6),
+    (_COUNTRY_LABEL_BELOW_Z7_BAND_SUFFIX, None, 7.0, None, 0.6),
     ("z7-to-z8", 7.0, 8.0, "auto", 0.6),
     ("z8-plus", 8.0, None, "auto", 0.0),
+)
+_COUNTRY_LABEL_LOW_ZOOM_TEXT_JUSTIFY_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    (
+        "left",
+        ["match", ["get", "text_anchor"], _COUNTRY_LABEL_LEFT_TEXT_ANCHORS, True, False],
+        "left",
+    ),
+    (
+        "right",
+        ["match", ["get", "text_anchor"], _COUNTRY_LABEL_RIGHT_TEXT_ANCHORS, True, False],
+        "right",
+    ),
+    (
+        "center",
+        ["match", ["get", "text_anchor"], _COUNTRY_LABEL_SIDE_TEXT_ANCHORS, False, True],
+        "center",
+    ),
 )
 _CONTINENT_LABEL_TEXT_OPACITY_EXPRESSION = [
     "interpolate",
@@ -1784,8 +1805,28 @@ def _set_country_label_static_layout(
         layout["text-radial-offset"] = text_radial_offset
 
 
+def _country_label_low_zoom_text_justify_variants(
+    layer: dict[str, object],
+    *,
+    layer_id: str,
+    text_radial_offset: float | None,
+) -> list[dict[str, object]]:
+    variants: list[dict[str, object]] = []
+    for suffix, filter_clause, text_justify in _COUNTRY_LABEL_LOW_ZOOM_TEXT_JUSTIFY_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(variant.get("filter"), filter_clause)
+        _set_country_label_static_layout(
+            variant,
+            text_justify=text_justify,
+            text_radial_offset=text_radial_offset,
+        )
+        variants.append(variant)
+    return variants
+
+
 def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
-    """Split country labels where zoom-only layout ramps become literal at z7+."""
+    """Split audited country-label zoom/layout expressions into QGIS-safe static variants."""
     if not _has_country_label_layout_expression(layer):
         return None
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
@@ -1798,6 +1839,16 @@ def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[
             continue
         variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
         variant["id"] = f"{layer_id}-{suffix}"
+        if suffix == _COUNTRY_LABEL_BELOW_Z7_BAND_SUFFIX and text_justify is None:
+            variants.extend(
+                _country_label_low_zoom_text_justify_variants(
+                    variant,
+                    layer_id=str(variant["id"]),
+                    text_radial_offset=text_radial_offset,
+                )
+            )
+            has_static_variant = True
+            continue
         if text_justify is not None or text_radial_offset is not None:
             _set_country_label_static_layout(
                 variant,
