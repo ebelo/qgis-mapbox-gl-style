@@ -887,6 +887,53 @@ _WATERWAY_LABEL_SYMBOL_SPACING_ZOOM_BANDS: tuple[tuple[str, float | None, float 
     ("z15-to-z17", 15.0, 17.0),
     ("z17-plus", 17.0, None),
 )
+_WATER_LINE_LABEL_LAYER_ID = "water-line-label"
+_WATER_POINT_LABEL_LAYER_ID = "water-point-label"
+_WATER_LABEL_TYPOGRAPHY_LAYER_IDS = (
+    _WATER_LINE_LABEL_LAYER_ID,
+    _WATER_POINT_LABEL_LAYER_ID,
+)
+_WATER_LINE_LABEL_TEXT_LETTER_SPACING_EXPRESSION = [
+    "match",
+    ["get", "class"],
+    "ocean",
+    0.25,
+    ["sea", "bay"],
+    0.15,
+    0,
+]
+_WATER_POINT_LABEL_TEXT_LETTER_SPACING_EXPRESSION = [
+    "match",
+    ["get", "class"],
+    "ocean",
+    0.25,
+    ["bay", "sea"],
+    0.15,
+    0.01,
+]
+_WATER_POINT_LABEL_TEXT_MAX_WIDTH_EXPRESSION = [
+    "match",
+    ["get", "class"],
+    "ocean",
+    4,
+    "sea",
+    5,
+    ["bay", "water"],
+    7,
+    10,
+]
+_WATER_LINE_LABEL_TYPOGRAPHY_VARIANTS: tuple[tuple[str, object, float], ...] = (
+    ("ocean", ["match", ["get", "class"], ["ocean"], True, False], 0.25),
+    ("sea-bay", ["match", ["get", "class"], ["sea", "bay"], True, False], 0.15),
+    ("other", ["match", ["get", "class"], ["ocean", "sea", "bay"], False, True], 0.0),
+)
+_WATER_POINT_LABEL_TYPOGRAPHY_VARIANTS: tuple[tuple[str, object, float, float], ...] = (
+    ("ocean", ["match", ["get", "class"], ["ocean"], True, False], 0.25, 4.0),
+    ("sea", ["match", ["get", "class"], ["sea"], True, False], 0.15, 5.0),
+    ("bay", ["match", ["get", "class"], ["bay"], True, False], 0.15, 7.0),
+    ("water", ["match", ["get", "class"], ["water"], True, False], 0.01, 7.0),
+    ("other", ["match", ["get", "class"], ["ocean", "sea", "bay", "water"], False, True], 0.01, 10.0),
+)
 _CONTOUR_LINE_LAYER_ID = "contour-line"
 _CONTOUR_LINE_OPACITY_EXPRESSION = [
     "interpolate",
@@ -1460,10 +1507,21 @@ def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    for base_layer_id in _WATER_LABEL_TYPOGRAPHY_LAYER_IDS:
+        if normalized == base_layer_id or normalized.startswith(f"{base_layer_id}-"):
+            return base_layer_id
+    return None
+
+
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
     if _is_waterway_label_layer_id(layer_id):
         return _WATERWAY_LABEL_LAYER_ID
+    water_label_layer_id = _water_label_typography_base_layer_id(layer_id)
+    if water_label_layer_id is not None:
+        return water_label_layer_id
     regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
     if regional_road_layer_id is not None:
         return regional_road_layer_id
@@ -2506,6 +2564,74 @@ def _split_waterway_label_symbol_spacing_layers_for_qgis(layers: object) -> obje
             expanded_layers.append(layer)
             continue
         variants = _waterway_label_symbol_spacing_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _water_line_label_typography_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited water line label class spacing into static QGIS layers."""
+    if str(layer.get("id") or "") != _WATER_LINE_LABEL_LAYER_ID or layer.get("type") != "symbol":
+        return None
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return None
+    if layout.get("text-letter-spacing") != _WATER_LINE_LABEL_TEXT_LETTER_SPACING_EXPRESSION:
+        return None
+
+    variants: list[dict[str, object]] = []
+    for suffix, class_filter, text_letter_spacing in _WATER_LINE_LABEL_TYPOGRAPHY_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{_WATER_LINE_LABEL_LAYER_ID}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+        variant_layout = variant["layout"]
+        assert isinstance(variant_layout, dict)
+        variant_layout["text-letter-spacing"] = text_letter_spacing
+        variants.append(variant)
+    return variants
+
+
+def _water_point_label_typography_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited water point label class typography into static QGIS layers."""
+    if str(layer.get("id") or "") != _WATER_POINT_LABEL_LAYER_ID or layer.get("type") != "symbol":
+        return None
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return None
+    if (
+        layout.get("text-letter-spacing") != _WATER_POINT_LABEL_TEXT_LETTER_SPACING_EXPRESSION
+        or layout.get("text-max-width") != _WATER_POINT_LABEL_TEXT_MAX_WIDTH_EXPRESSION
+    ):
+        return None
+
+    variants: list[dict[str, object]] = []
+    for suffix, class_filter, text_letter_spacing, text_max_width in _WATER_POINT_LABEL_TYPOGRAPHY_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{_WATER_POINT_LABEL_LAYER_ID}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+        variant_layout = variant["layout"]
+        assert isinstance(variant_layout, dict)
+        variant_layout["text-letter-spacing"] = text_letter_spacing
+        variant_layout["text-max-width"] = text_max_width
+        variants.append(variant)
+    return variants
+
+
+def _water_label_typography_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    variants = _water_line_label_typography_layer_variants(layer)
+    if variants is not None:
+        return variants
+    return _water_point_label_typography_layer_variants(layer)
+
+
+def _split_water_label_typography_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _water_label_typography_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -3652,6 +3778,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_water_shadow_translate_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_turning_feature_circle_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_waterway_label_symbol_spacing_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_water_label_typography_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_contour_line_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
