@@ -1847,6 +1847,72 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "cliff")
         self.assertEqual(result[1]["paint"]["line-pattern"], "other-pattern")
 
+    def _building_layer(self, layer_id="building", fill_opacity=None):
+        if fill_opacity is None:
+            fill_opacity = ["interpolate", ["linear"], ["zoom"], 15, 0, 16, 1]
+        return {
+            "id": layer_id,
+            "type": "fill",
+            "minzoom": 15,
+            "filter": ["all", ["!=", ["get", "type"], "building:part"], ["==", ["get", "underground"], "false"]],
+            "paint": {
+                "fill-color": "hsl(50, 15%, 75%)",
+                "fill-opacity": fill_opacity,
+                "fill-outline-color": "hsl(60, 10%, 65%)",
+            },
+        }
+
+    def test_building_fill_opacity_splits_to_static_zoom_bands(self):
+        underground = self._building_layer(
+            layer_id="building-underground",
+            fill_opacity=["interpolate", ["linear"], ["zoom"], 15, 0, 16, 0.5],
+        )
+        style = {"layers": [self._building_layer(), underground]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 4)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        building_fade = by_id["building-z15-to-z16"]
+        building_full = by_id["building-z16-plus"]
+        underground_fade = by_id["building-underground-z15-to-z16"]
+        underground_full = by_id["building-underground-z16-plus"]
+        self.assertEqual(building_fade["minzoom"], 15)
+        self.assertEqual(building_fade["maxzoom"], 16.0)
+        self.assertEqual(building_full["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", building_full)
+        self.assertAlmostEqual(building_fade["paint"]["fill-opacity"], 0.5)
+        self.assertAlmostEqual(building_full["paint"]["fill-opacity"], 1.0)
+        self.assertAlmostEqual(underground_fade["paint"]["fill-opacity"], 0.25)
+        self.assertAlmostEqual(underground_full["paint"]["fill-opacity"], 0.5)
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["fill-color"], "hsl(50, 15%, 75%)")
+            self.assertEqual(layer["filter"], self._building_layer()["filter"])
+
+    def test_building_fill_opacity_is_not_split_when_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._building_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "building")
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+
+    def test_building_fill_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._building_layer()]
+
+        self.assertIs(
+            mapbox_config._split_building_fill_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_building_fill_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "building-z15-to-z16")
+        self.assertEqual(result[2]["id"], "building-z16-plus")
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",

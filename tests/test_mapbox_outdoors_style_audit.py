@@ -311,6 +311,38 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [{"property": "layout.text-font", "count": 1}],
         )
 
+    def test_build_style_audit_maps_split_building_layers_to_original_ids(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "building",
+                        "type": "fill",
+                        "source-layer": "building",
+                        "minzoom": 15,
+                        "filter": [
+                            "all",
+                            ["!=", ["get", "type"], "building:part"],
+                            ["==", ["get", "underground"], "false"],
+                        ],
+                        "paint": {
+                            "fill-color": "hsl(50, 15%, 75%)",
+                            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, 1],
+                        },
+                    }
+                ],
+            }
+        )
+
+        layer = audit["layers"][0]
+        self.assertIn("paint.fill-opacity", {change["property"] for change in layer["qfit_simplifies"]})
+        self.assertNotIn("paint.fill-opacity", {item["property"] for item in layer["qfit_unresolved"]})
+        self.assertEqual(
+            audit["summary"]["qfit_simplifies_by_property"],
+            [{"property": "paint.fill-opacity", "count": 1}],
+        )
+
     def test_build_style_audit_reports_visible_label_density_candidates(self):
         audit = build_style_audit(
             {

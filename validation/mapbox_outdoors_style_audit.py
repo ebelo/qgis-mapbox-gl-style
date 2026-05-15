@@ -585,6 +585,36 @@ def _unresolved_cues(layer: dict[str, object], simplified_layer: dict[str, objec
     return unresolved
 
 
+def _simplified_layers_by_original_id_for_audit(
+    original_layers: list[dict[str, object]],
+    simplified_layers: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Map qfit-split layer variants back to their original Mapbox layer ids.
+
+    Several qfit preprocessors replace one Mapbox layer with suffixed zoom-band
+    variants. The audit compares raw layers against the simplified style, so it
+    must treat the first generated variant as the representative simplified
+    layer instead of reporting the original expression as still unresolved.
+    """
+    original_ids = [str(layer.get("id") or "") for layer in original_layers]
+    original_ids = [layer_id for layer_id in original_ids if layer_id]
+    original_ids_by_specificity = sorted(original_ids, key=len, reverse=True)
+
+    by_original_id: dict[str, dict[str, object]] = {}
+    for layer in simplified_layers:
+        simplified_id = str(layer.get("id") or "")
+        if not simplified_id:
+            continue
+        if simplified_id in original_ids:
+            by_original_id[simplified_id] = layer
+            continue
+        for original_id in original_ids_by_specificity:
+            if simplified_id.startswith(f"{original_id}-"):
+                by_original_id.setdefault(original_id, layer)
+                break
+    return by_original_id
+
+
 def build_layer_audit(
     *,
     layer: dict[str, object],
@@ -2873,15 +2903,26 @@ def build_style_audit(
     resolved_config = config or StyleAuditConfig()
     style_copy = copy.deepcopy(style_definition)
     simplified_style = simplify_mapbox_style_expressions(style_copy)
-    simplified_layers = {
-        str(layer.get("id") or ""): layer
-        for layer in simplified_style.get("layers", [])
-        if isinstance(layer, dict)
-    }
-    layers = [
-        build_layer_audit(layer=layer, simplified_layer=simplified_layers.get(str(layer.get("id") or "")))
+    original_layers = [
+        layer
         for layer in style_definition.get("layers", [])
         if isinstance(layer, dict)
+    ]
+    simplified_layers = [
+        layer
+        for layer in simplified_style.get("layers", [])
+        if isinstance(layer, dict)
+    ]
+    simplified_layers_by_original_id = _simplified_layers_by_original_id_for_audit(
+        original_layers,
+        simplified_layers,
+    )
+    layers = [
+        build_layer_audit(
+            layer=layer,
+            simplified_layer=simplified_layers_by_original_id.get(str(layer.get("id") or "")),
+        )
+        for layer in original_layers
     ]
     label_density_candidates = _label_density_candidate_rows(layers)
     road_trail_hierarchy_candidates = _road_trail_hierarchy_candidate_rows(layers)
