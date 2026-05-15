@@ -697,6 +697,24 @@ _CONTINENT_LABEL_TEXT_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float |
     ("z1_5-to-z2_5", 1.5, 2.5),
     ("z2_5-plus", 2.5, None),
 )
+_CLIFF_LAYER_ID = "cliff"
+_CLIFF_LINE_PATTERN = "cliff"
+_CLIFF_LINE_PATTERN_FALLBACK_COLOR = "#388a0f"
+_CLIFF_LINE_PATTERN_FALLBACK_DASHARRAY = [1.0, 0.75]
+_CLIFF_LINE_PATTERN_FALLBACK_WIDTH = 1.5
+_CLIFF_LINE_OPACITY_EXPRESSION = [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    15,
+    0,
+    15.25,
+    1,
+]
+_CLIFF_LINE_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z15-to-z15_25", 15.0, 15.25),
+    ("z15_25-plus", 15.25, None),
+)
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -1208,6 +1226,11 @@ def _is_continent_label_layer_id(layer_id: object) -> bool:
     return normalized == _CONTINENT_LABEL_LAYER_ID or normalized.startswith(f"{_CONTINENT_LABEL_LAYER_ID}-")
 
 
+def _is_cliff_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _CLIFF_LAYER_ID or normalized.startswith(f"{_CLIFF_LAYER_ID}-")
+
+
 def _is_country_label_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _COUNTRY_LABEL_LAYER_ID or normalized.startswith(f"{_COUNTRY_LABEL_LAYER_ID}-")
@@ -1247,6 +1270,8 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         return _NATURAL_POINT_LABEL_LAYER_ID
     if _is_continent_label_layer_id(layer_id):
         return _CONTINENT_LABEL_LAYER_ID
+    if _is_cliff_layer_id(layer_id):
+        return _CLIFF_LAYER_ID
     if _is_country_label_layer_id(layer_id):
         return _COUNTRY_LABEL_LAYER_ID
     if _is_settlement_major_label_layer_id(layer_id):
@@ -1585,6 +1610,94 @@ def _split_continent_label_text_opacity_layers_for_qgis(layers: object) -> objec
             expanded_layers.append(layer)
             continue
         variants = _continent_label_text_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _has_cliff_line_pattern(layer: dict[str, object]) -> bool:
+    paint = layer.get("paint")
+    return (
+        base_mapbox_style_layer_id_for_qfit(layer.get("id")) == _CLIFF_LAYER_ID
+        and layer.get("type") == "line"
+        and isinstance(paint, dict)
+        and paint.get("line-pattern") == _CLIFF_LINE_PATTERN
+    )
+
+
+def _set_cliff_line_pattern_fallback(layer: dict[str, object]) -> None:
+    paint = layer.get("paint")
+    if not isinstance(paint, dict):
+        return
+    paint.pop("line-pattern", None)
+    paint.setdefault("line-color", _CLIFF_LINE_PATTERN_FALLBACK_COLOR)
+    paint["line-dasharray"] = copy.deepcopy(_CLIFF_LINE_PATTERN_FALLBACK_DASHARRAY)
+    paint["line-width"] = _CLIFF_LINE_PATTERN_FALLBACK_WIDTH
+
+
+def _cliff_line_opacity_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> float | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    opacity = _interpolate_filter_value_at_zoom(_CLIFF_LINE_OPACITY_EXPRESSION, representative_zoom)
+    return _clamp_opacity_value(opacity)
+
+
+def _cliff_line_pattern_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Replace Mapbox's cliff sprite pattern with a simple QGIS-safe dashed stroke."""
+    if not _has_cliff_line_pattern(layer):
+        return None
+
+    paint = layer.get("paint")
+    if not isinstance(paint, dict):
+        return None
+    if paint.get("line-opacity") != _CLIFF_LINE_OPACITY_EXPRESSION:
+        fallback_layer = copy.deepcopy(layer)
+        _set_cliff_line_pattern_fallback(fallback_layer)
+        return [fallback_layer]
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    layer_id = str(layer.get("id") or _CLIFF_LAYER_ID)
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom in _CLIFF_LINE_OPACITY_ZOOM_BANDS:
+        line_opacity = _cliff_line_opacity_for_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if line_opacity is None:
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{layer_id}-{suffix}"
+        _set_cliff_line_pattern_fallback(variant)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["line-opacity"] = line_opacity
+        variants.append(variant)
+    return variants or None
+
+
+def _split_cliff_line_pattern_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _cliff_line_pattern_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -2681,6 +2794,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_settlement_dot_icon_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_country_label_layout_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_continent_label_text_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_cliff_line_pattern_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",

@@ -1776,6 +1776,77 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][0]["id"], "continent-label")
         self.assertEqual(result["layers"][0]["paint"]["text-opacity"], text_opacity)
 
+    def _cliff_layer(self, line_opacity=None, line_pattern="cliff"):
+        if line_opacity is None:
+            line_opacity = ["interpolate", ["linear"], ["zoom"], 15, 0, 15.25, 1]
+        return {
+            "id": "cliff",
+            "type": "line",
+            "minzoom": 15,
+            "filter": ["==", ["get", "class"], "cliff"],
+            "layout": {
+                "line-cap": "round",
+                "line-join": "round",
+            },
+            "paint": {
+                "line-opacity": line_opacity,
+                "line-pattern": line_pattern,
+                "line-width": 10,
+            },
+        }
+
+    def test_cliff_line_pattern_splits_to_qgis_safe_static_lines(self):
+        style = {"layers": [self._cliff_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 2)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        fade_layer = by_id["cliff-z15-to-z15_25"]
+        full_layer = by_id["cliff-z15_25-plus"]
+        self.assertEqual(fade_layer["minzoom"], 15)
+        self.assertEqual(fade_layer["maxzoom"], 15.25)
+        self.assertEqual(full_layer["minzoom"], 15.25)
+        self.assertNotIn("maxzoom", full_layer)
+        self.assertAlmostEqual(fade_layer["paint"]["line-opacity"], 0.5)
+        self.assertAlmostEqual(full_layer["paint"]["line-opacity"], 1.0)
+        self.assertEqual(mapbox_config.base_mapbox_style_layer_id_for_qfit(full_layer["id"]), "cliff")
+        for layer in result["layers"]:
+            self.assertNotIn("line-pattern", layer["paint"])
+            self.assertEqual(layer["paint"]["line-color"], "#388a0f")
+            self.assertEqual(layer["paint"]["line-dasharray"], [1.0, 0.75])
+            self.assertEqual(layer["paint"]["line-width"], 1.5)
+            self.assertEqual(layer["filter"], ["==", ["get", "class"], "cliff"])
+
+    def test_cliff_line_pattern_fallback_keeps_single_layer_when_opacity_shape_changes(self):
+        line_opacity = ["get", "opacity"]
+        style = {"layers": [self._cliff_layer(line_opacity=line_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        layer = result["layers"][0]
+        self.assertEqual(layer["id"], "cliff")
+        self.assertNotIn("line-pattern", layer["paint"])
+        self.assertEqual(layer["paint"]["line-opacity"], line_opacity)
+        self.assertEqual(layer["paint"]["line-color"], "#388a0f")
+        self.assertEqual(layer["paint"]["line-dasharray"], [1.0, 0.75])
+        self.assertEqual(layer["paint"]["line-width"], 1.5)
+
+    def test_cliff_line_pattern_keeps_passthrough_inputs_and_other_patterns(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._cliff_layer(line_pattern="other-pattern")]
+
+        self.assertIs(
+            mapbox_config._split_cliff_line_pattern_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_cliff_line_pattern_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "cliff")
+        self.assertEqual(result[1]["paint"]["line-pattern"], "other-pattern")
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",
