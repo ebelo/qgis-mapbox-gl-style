@@ -398,6 +398,13 @@ _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
     True,
 ]
 _PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
+_POI_LABEL_LAYER_ID = "poi-label"
+_POI_FILTER_RANK_ZOOM_STEP = ["step", ["zoom"], 0, 16, 1, 17, 2]
+_POI_FILTER_RANK_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
+    ("below-z16", None, 16.0, 0.0),
+    ("z16-to-z17", 16.0, 17.0, 1.0),
+    ("z17-plus", 17.0, None, 2.0),
+)
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -716,6 +723,109 @@ def _split_path_type_filter_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _numeric_match_filter_with_offset(value: object, offset: float) -> object | None:
+    if not isinstance(value, list) or len(value) < 5 or value[0] != "match" or (len(value) - 3) % 2 != 0:
+        return None
+    adjusted = ["match", copy.deepcopy(value[1])]
+    for index in range(2, len(value) - 1, 2):
+        output_value = _numeric_expression_value(value[index + 1])
+        if output_value is None:
+            return None
+        adjusted.extend([copy.deepcopy(value[index]), output_value + offset])
+    fallback_value = _numeric_expression_value(value[-1])
+    if fallback_value is None:
+        return None
+    adjusted.append(fallback_value + offset)
+    return adjusted
+
+
+def _poi_filterrank_components(filter_value: object) -> tuple[object, object] | None:
+    if (
+        not isinstance(filter_value, list)
+        or len(filter_value) != 3
+        or filter_value[0] != "<="
+        or filter_value[1] != ["get", "filterrank"]
+    ):
+        return None
+    threshold = filter_value[2]
+    if not isinstance(threshold, list) or len(threshold) != 3 or threshold[0] != "+":
+        return None
+    left, right = threshold[1], threshold[2]
+    if left == _POI_FILTER_RANK_ZOOM_STEP:
+        return left, right
+    if right == _POI_FILTER_RANK_ZOOM_STEP:
+        return right, left
+    return None
+
+
+def _zoom_ranges_overlap(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> bool:
+    if existing_maxzoom is not None and band_minzoom is not None and existing_maxzoom <= band_minzoom:
+        return False
+    if existing_minzoom is not None and band_maxzoom is not None and existing_minzoom >= band_maxzoom:
+        return False
+    return True
+
+
+def _apply_zoom_band_bounds(
+    layer: dict[str, object],
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> dict[str, object]:
+    bounded_layer = copy.deepcopy(layer)
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    if band_minzoom is not None and (existing_minzoom is None or existing_minzoom < band_minzoom):
+        bounded_layer["minzoom"] = band_minzoom
+    if band_maxzoom is not None and (existing_maxzoom is None or existing_maxzoom > band_maxzoom):
+        bounded_layer["maxzoom"] = band_maxzoom
+    return bounded_layer
+
+
+def _poi_label_filter_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split the audited Outdoors POI filterrank zoom bump into QGIS-safe bands."""
+    if str(layer.get("id") or "") != _POI_LABEL_LAYER_ID or layer.get("type") != "symbol":
+        return None
+    components = _poi_filterrank_components(layer.get("filter"))
+    if components is None:
+        return None
+    _, class_rank_match = components
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants_with_suffixes: list[tuple[str, dict[str, object]]] = []
+    for suffix, band_minzoom, band_maxzoom, rank_offset in _POI_FILTER_RANK_ZOOM_BANDS:
+        if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
+            continue
+        adjusted_rank_match = _numeric_match_filter_with_offset(class_rank_match, rank_offset)
+        if adjusted_rank_match is None:
+            return None
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["filter"] = ["<=", ["get", "filterrank"], adjusted_rank_match]
+        variants_with_suffixes.append((suffix, variant))
+    variants = [variant for _suffix, variant in variants_with_suffixes]
+    if len(variants) > 1:
+        for suffix, variant in variants_with_suffixes:
+            variant["id"] = f"{_POI_LABEL_LAYER_ID}-{suffix}"
+    return variants or None
+
+
+def _split_poi_label_filter_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _poi_label_filter_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     if str(layer.get("id") or "") != _ROAD_NUMBER_SHIELD_LAYER_ID:
         return None
@@ -750,6 +860,20 @@ def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[st
 def _is_road_number_shield_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _ROAD_NUMBER_SHIELD_LAYER_ID or normalized.startswith(f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-")
+
+
+def _is_poi_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _POI_LABEL_LAYER_ID or normalized.startswith(f"{_POI_LABEL_LAYER_ID}-")
+
+
+def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
+    """Return the original Mapbox layer id for qfit-created layer variants."""
+    if _is_road_number_shield_layer_id(layer_id):
+        return _ROAD_NUMBER_SHIELD_LAYER_ID
+    if _is_poi_label_layer_id(layer_id):
+        return _POI_LABEL_LAYER_ID
+    return str(layer_id or "")
 
 
 def _expand_road_number_shield_layers_for_qgis(layers: object) -> object:
@@ -1415,8 +1539,7 @@ def _should_zoom_normalize_filter_for_qgis(layer: dict[str, object]) -> bool:
     # road line filters whose normalized branches improved #949 visual audits.
     # Applying the same approximation broadly can hide high-zoom path geometry
     # or over-suppress POIs/places, so keep this deliberately small.
-    layer_id = layer.get("id")
-    normalized_layer_id = _ROAD_NUMBER_SHIELD_LAYER_ID if _is_road_number_shield_layer_id(layer_id) else layer_id
+    normalized_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
     layer_type = layer.get("type")
     return (
         (layer_type == "symbol" and normalized_layer_id in _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS)
@@ -1643,6 +1766,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style = copy.deepcopy(style_definition)
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",
@@ -1694,6 +1818,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
 
     for layer in style.get("layers", []):
         layer_id = layer.get("id", "")
+        base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
 
         # Suppress or filter settlement label layers
         settlement_filter = _SETTLEMENT_FILTERS.get(layer_id, "NOTSET")
@@ -1783,7 +1908,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                 elif prop == "text-font" and _is_text_font_stack(val):
                     props[prop] = [QGIS_TEXT_FONT_FALLBACK]
                 elif prop == "text-size":
-                    override = _TEXT_SIZE_OVERRIDES.get(layer_id)
+                    override = _TEXT_SIZE_OVERRIDES.get(base_layer_id)
                     if override is not None:
                         props[prop] = override
                     else:

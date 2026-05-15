@@ -1374,6 +1374,98 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ],
         )
 
+    def test_filter_simplification_splits_poi_filterrank_filter_by_zoom_band(self):
+        class_rank_match = [
+            "match",
+            ["get", "class"],
+            "food_and_drink_stores",
+            3,
+            "park_like",
+            4,
+            2,
+        ]
+        poi_filter = [
+            "<=",
+            ["get", "filterrank"],
+            ["+", ["step", ["zoom"], 0, 16, 1, 17, 2], class_rank_match],
+        ]
+        original_poi_filter = copy.deepcopy(poi_filter)
+        style = {
+            "layers": [
+                {
+                    "id": "poi-label",
+                    "type": "symbol",
+                    "minzoom": 6,
+                    "filter": poi_filter,
+                    "layout": {"text-size": ["interpolate", ["linear"], ["zoom"], 0, 4, 20, 24]},
+                },
+                {"id": "natural-point-label", "type": "symbol", "minzoom": 6, "filter": poi_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            ["poi-label-below-z16", "poi-label-z16-to-z17", "poi-label-z17-plus", "natural-point-label"],
+        )
+        self.assertEqual(result["layers"][0]["minzoom"], 6)
+        self.assertEqual(result["layers"][0]["maxzoom"], 16.0)
+        self.assertEqual(result["layers"][1]["minzoom"], 16.0)
+        self.assertEqual(result["layers"][1]["maxzoom"], 17.0)
+        self.assertEqual(result["layers"][2]["minzoom"], 17.0)
+        self.assertNotIn("maxzoom", result["layers"][2])
+        self.assertEqual(result["layers"][0]["layout"]["text-size"], 9.0)
+        self.assertEqual(result["layers"][1]["layout"]["text-size"], 9.0)
+        self.assertEqual(result["layers"][2]["layout"]["text-size"], 9.0)
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "food_and_drink_stores", 3.0, "park_like", 4.0, 2.0]],
+        )
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "food_and_drink_stores", 4.0, "park_like", 5.0, 3.0]],
+        )
+        self.assertEqual(
+            result["layers"][2]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "food_and_drink_stores", 5.0, "park_like", 6.0, 4.0]],
+        )
+        self.assertEqual(result["layers"][3]["filter"], original_poi_filter)
+        self.assertEqual(poi_filter, original_poi_filter)
+        for layer in style["layers"]:
+            self.assertEqual(layer["filter"], original_poi_filter)
+
+    def test_filter_simplification_replaces_poi_filter_without_split_outside_thresholds(self):
+        class_rank_match = ["match", ["get", "class"], "historic", 3, 2]
+        poi_filter = [
+            "<=",
+            ["get", "filterrank"],
+            ["+", class_rank_match, ["step", ["zoom"], 0, 16, 1, 17, 2]],
+        ]
+        style = {
+            "layers": [
+                {"id": "poi-label", "type": "symbol", "minzoom": 6, "maxzoom": 16, "filter": poi_filter},
+                {"id": "poi-label", "type": "symbol", "minzoom": 16, "maxzoom": 17, "filter": poi_filter},
+                {"id": "poi-label", "type": "symbol", "minzoom": 17, "filter": poi_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual([layer["id"] for layer in result["layers"]], ["poi-label", "poi-label", "poi-label"])
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 3.0, 2.0]],
+        )
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 4.0, 3.0]],
+        )
+        self.assertEqual(
+            result["layers"][2]["filter"],
+            ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 5.0, 4.0]],
+        )
+
     def test_filter_simplification_clamps_minor_line_zoom_override_to_layer_bounds(self):
         minor_filter = [
             "match",

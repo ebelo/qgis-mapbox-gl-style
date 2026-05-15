@@ -14,6 +14,7 @@ from ...mapbox_config import (
     TILE_MODE_RASTER,
     TILE_MODE_VECTOR,
     MapboxSpriteResources,
+    base_mapbox_style_layer_id_for_qfit,
     build_background_layer_name,
     build_vector_tile_layer_uri,
     build_xyz_layer_uri,
@@ -175,7 +176,7 @@ class BackgroundMapService:
             from qgis.core import QgsProperty  # noqa: PLC0415
 
             for style in labeling.styles():
-                layer_name = style.layerName()
+                layer_name = base_mapbox_style_layer_id_for_qfit(style.layerName())
                 priority = _LAYER_PRIORITIES.get(layer_name)
                 if priority is None:
                     continue
