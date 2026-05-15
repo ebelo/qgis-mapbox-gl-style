@@ -630,12 +630,15 @@ _SETTLEMENT_DOT_TEXT_RADIAL_OFFSET_EXPRESSION = [
     _SETTLEMENT_DOT_ICON_SPLIT_ZOOM,
     0,
 ]
+_SETTLEMENT_DOT_LEFT_TEXT_ANCHORS = ["left", "bottom-left", "top-left"]
+_SETTLEMENT_DOT_RIGHT_TEXT_ANCHORS = ["right", "bottom-right", "top-right"]
+_SETTLEMENT_DOT_SIDE_TEXT_ANCHORS = [*_SETTLEMENT_DOT_LEFT_TEXT_ANCHORS, *_SETTLEMENT_DOT_RIGHT_TEXT_ANCHORS]
 _SETTLEMENT_DOT_TEXT_JUSTIFY_LOW_ZOOM = [
     "match",
     ["get", "text_anchor"],
-    ["left", "bottom-left", "top-left"],
+    _SETTLEMENT_DOT_LEFT_TEXT_ANCHORS,
     "left",
-    ["right", "bottom-right", "top-right"],
+    _SETTLEMENT_DOT_RIGHT_TEXT_ANCHORS,
     "right",
     "center",
 ]
@@ -661,6 +664,23 @@ _SETTLEMENT_DOT_ICON_VARIANTS: tuple[tuple[str, object, str, float], ...] = (
         0.55,
     ),
     ("dot-9", ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 11]], "dot-9", 0.55),
+)
+_SETTLEMENT_MAJOR_LOW_ZOOM_TEXT_JUSTIFY_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    (
+        "left",
+        ["match", ["get", "text_anchor"], _SETTLEMENT_DOT_LEFT_TEXT_ANCHORS, True, False],
+        "left",
+    ),
+    (
+        "right",
+        ["match", ["get", "text_anchor"], _SETTLEMENT_DOT_RIGHT_TEXT_ANCHORS, True, False],
+        "right",
+    ),
+    (
+        "center",
+        ["match", ["get", "text_anchor"], _SETTLEMENT_DOT_SIDE_TEXT_ANCHORS, False, True],
+        "center",
+    ),
 )
 _COUNTRY_LABEL_LEFT_TEXT_ANCHORS = ["left", "bottom-left", "top-left"]
 _COUNTRY_LABEL_RIGHT_TEXT_ANCHORS = ["right", "bottom-right", "top-right"]
@@ -1734,13 +1754,31 @@ def _set_settlement_high_zoom_text_layout(layer: dict[str, object]) -> None:
         layout["text-justify"] = "center"
 
 
+def _settlement_major_low_zoom_text_justify_variants(layer: dict[str, object]) -> list[dict[str, object]]:
+    layout = layer.get("layout")
+    if not isinstance(layout, dict) or layout.get("text-justify") != _SETTLEMENT_DOT_TEXT_JUSTIFY_LOW_ZOOM:
+        return [layer]
+    layer_id = str(layer.get("id") or _SETTLEMENT_MAJOR_LABEL_LAYER_ID)
+    variants: list[dict[str, object]] = []
+    for suffix, filter_clause, text_justify in _SETTLEMENT_MAJOR_LOW_ZOOM_TEXT_JUSTIFY_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(variant.get("filter"), filter_clause)
+        variant_layout = variant.get("layout")
+        if isinstance(variant_layout, dict):
+            variant_layout["text-justify"] = text_justify
+        variants.append(variant)
+    return variants
+
+
 def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split Mapbox's low-zoom settlement dot icons from z8+ centered labels."""
     if not _has_settlement_dot_icon_expression(layer):
         return None
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
-    layer_id = str(layer.get("id") or base_mapbox_style_layer_id_for_qfit(layer.get("id")))
+    layer_id = str(layer.get("id") or base_layer_id)
     variants: list[dict[str, object]] = []
 
     for zoom_suffix, band_minzoom, band_maxzoom in _SETTLEMENT_DOT_ICON_ZOOM_BANDS:
@@ -1755,7 +1793,10 @@ def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[s
                 icon_image=icon_image,
                 text_radial_offset=text_radial_offset,
             )
-            variants.append(icon_layer)
+            if base_layer_id == _SETTLEMENT_MAJOR_LABEL_LAYER_ID:
+                variants.extend(_settlement_major_low_zoom_text_justify_variants(icon_layer))
+            else:
+                variants.append(icon_layer)
 
     if _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, _SETTLEMENT_DOT_ICON_SPLIT_ZOOM, None):
         text_layer = _apply_zoom_band_bounds(layer, _SETTLEMENT_DOT_ICON_SPLIT_ZOOM, None)

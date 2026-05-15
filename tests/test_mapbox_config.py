@@ -1528,11 +1528,21 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(len(result["layers"]), 17)
+        self.assertEqual(len(result["layers"]), 49)
         by_id = {layer["id"]: layer for layer in result["layers"]}
         city_filter = ["match", ["get", "type"], ["city"], True, False]
-        capital_layer = by_id["settlement-major-label-z2-to-z4-capital-border-dot"]
-        dot_layer = by_id["settlement-major-label-z7-to-z8-dot-10"]
+        left_anchor_filter = ["match", ["get", "text_anchor"], ["left", "bottom-left", "top-left"], True, False]
+        right_anchor_filter = ["match", ["get", "text_anchor"], ["right", "bottom-right", "top-right"], True, False]
+        center_anchor_filter = [
+            "match",
+            ["get", "text_anchor"],
+            ["left", "bottom-left", "top-left", "right", "bottom-right", "top-right"],
+            False,
+            True,
+        ]
+        capital_layer = by_id["settlement-major-label-z2-to-z4-capital-border-dot-left"]
+        dot_layer = by_id["settlement-major-label-z7-to-z8-dot-10-right"]
+        center_layer = by_id["settlement-major-label-z2-to-z4-dot-11-center"]
         text_layer = by_id["settlement-major-label-z8-plus"]
         self.assertEqual(capital_layer["minzoom"], 2)
         self.assertEqual(capital_layer["maxzoom"], 4.0)
@@ -1545,10 +1555,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(capital_layer["layout"]["text-anchor"], ["get", "text_anchor"])
         self.assertEqual(capital_layer["layout"]["text-radial-offset"], 0.6)
         self.assertEqual(dot_layer["layout"]["text-radial-offset"], 0.55)
-        self.assertEqual(capital_layer["layout"]["text-justify"], self._settlement_dot_icon_layout()["text-justify"][2])
+        self.assertEqual(capital_layer["layout"]["text-justify"], "left")
+        self.assertEqual(dot_layer["layout"]["text-justify"], "right")
+        self.assertEqual(center_layer["layout"]["text-justify"], "center")
         self.assertEqual(
             capital_layer["filter"],
-            ["all", ["all", base_filter, ["<=", ["get", "symbolrank"], 6], ["==", ["get", "capital"], 2]], city_filter],
+            [
+                "all",
+                ["all", base_filter, ["<=", ["get", "symbolrank"], 6], ["==", ["get", "capital"], 2], left_anchor_filter],
+                city_filter,
+            ],
         )
         self.assertEqual(
             dot_layer["filter"],
@@ -1559,10 +1575,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     base_filter,
                     ["<", ["get", "symbolrank"], 10],
                     ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 9], ["<", ["get", "symbolrank"], 11]],
+                    right_anchor_filter,
                 ],
                 city_filter,
             ],
         )
+        self.assertEqual(center_layer["filter"][1][-1], center_anchor_filter)
         self.assertNotIn("icon-image", text_layer["layout"])
         self.assertEqual(text_layer["layout"]["text-anchor"], "center")
         self.assertEqual(text_layer["layout"]["text-radial-offset"], 0)
