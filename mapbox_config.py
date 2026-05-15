@@ -197,6 +197,7 @@ _POI_LABEL_MAKI_ICON_VALUES = (
 _ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
 _ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
 _ROAD_EXIT_SHIELD_ICON_IMAGE = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
+_BOUNDARY_BG_LINE_OPACITY_LAYER_IDS = {"admin-0-boundary-bg", "admin-1-boundary-bg"}
 _AIRPORT_LABEL_LAYER_ID = "airport-label"
 _TRANSIT_LABEL_LAYER_ID = "transit-label"
 _TRANSIT_LABEL_STOP_TYPE_EXCLUSION = ["!=", ["get", "stop_type"], "entrance"]
@@ -2456,6 +2457,21 @@ def _line_blur_width_mm(expr: object, *, minzoom: object = None, maxzoom: object
     return max(0.0, min(blur_px * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
 
 
+def _boundary_bg_line_opacity(
+    base_layer_id: str,
+    prop: str,
+    expr: object,
+    *,
+    minzoom: object = None,
+    maxzoom: object = None,
+) -> float | None:
+    """Return a representative scalar opacity for admin boundary background lines."""
+    if base_layer_id not in _BOUNDARY_BG_LINE_OPACITY_LAYER_IDS or prop != "line-opacity":
+        return None
+    opacity = _extract_zoom_scalar_size(expr, minzoom=minzoom, maxzoom=maxzoom)
+    return _clamp_opacity_value(opacity)
+
+
 def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> dict[str, object]:
     """Return a copy of a Mapbox style with expression-based colors replaced by
     literal fallback colors so QGIS' converter does not render them as black.
@@ -2638,6 +2654,16 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if dasharray is not None:
                         props[prop] = dasharray
                 elif prop in _FULL_OPACITY_PROPS:
+                    boundary_bg_opacity = _boundary_bg_line_opacity(
+                        base_layer_id,
+                        prop,
+                        val,
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if boundary_bg_opacity is not None:
+                        props[prop] = boundary_bg_opacity
+                        continue
                     visibility_minzoom = _zoom_step_full_opacity_minzoom(
                         val,
                         minzoom=layer.get("minzoom"),

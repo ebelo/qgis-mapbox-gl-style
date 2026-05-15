@@ -840,6 +840,25 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][2]["paint"]["fill-opacity"], partial_case)
         self.assertEqual(result["layers"][3]["paint"]["fill-opacity"], property_expression)
 
+    def test_boundary_bg_line_opacity_zoom_expression_uses_scalar(self):
+        boundary_opacity = ["interpolate", ["linear"], ["zoom"], 7, 0, 8, 0.5]
+        mixed_opacity = ["interpolate", ["linear"], ["zoom"], 7, ["get", "opacity"], 8, 0.5]
+        style = {
+            "layers": [
+                {"id": "admin-1-boundary-bg", "minzoom": 7, "paint": {"line-opacity": boundary_opacity}},
+                {"id": "admin-0-boundary-bg", "paint": {"line-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0, 4, 0.5]}},
+                {"id": "admin-1-boundary", "minzoom": 7, "paint": {"line-opacity": copy.deepcopy(boundary_opacity)}},
+                {"id": "admin-1-boundary-bg", "minzoom": 7, "paint": {"line-opacity": mixed_opacity}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["line-opacity"], 0.5)
+        self.assertEqual(result["layers"][1]["paint"]["line-opacity"], 0.5)
+        self.assertEqual(result["layers"][2]["paint"]["line-opacity"], boundary_opacity)
+        self.assertEqual(result["layers"][3]["paint"]["line-opacity"], mixed_opacity)
+
     def test_line_blur_zoom_expression_uses_representative_mm_width(self):
         blur_expression = ["interpolate", ["linear"], ["zoom"], 3, 0, 12, 3]
         data_driven_blur = ["get", "blur"]
