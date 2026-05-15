@@ -840,6 +840,26 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][2]["paint"]["fill-opacity"], partial_case)
         self.assertEqual(result["layers"][3]["paint"]["fill-opacity"], property_expression)
 
+    def test_line_blur_zoom_expression_uses_representative_mm_width(self):
+        blur_expression = ["interpolate", ["linear"], ["zoom"], 3, 0, 12, 3]
+        data_driven_blur = ["get", "blur"]
+        mixed_data_blur = ["interpolate", ["linear"], ["zoom"], 3, ["get", "blur"], 12, 3]
+        style = {
+            "layers": [
+                {"minzoom": 7, "paint": {"line-blur": blur_expression}},
+                {"paint": {"line-blur": ["interpolate", ["linear"], ["zoom"], 3, 0, 12, 20]}},
+                {"paint": {"line-blur": data_driven_blur}},
+                {"paint": {"line-blur": mixed_data_blur}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertAlmostEqual(result["layers"][0]["paint"]["line-blur"], 3 * 25.4 / 96.0)
+        self.assertEqual(result["layers"][1]["paint"]["line-blur"], 3.0)
+        self.assertEqual(result["layers"][2]["paint"]["line-blur"], data_driven_blur)
+        self.assertEqual(result["layers"][3]["paint"]["line-blur"], mixed_data_blur)
+
     def test_icon_image_placeholders_and_literal_zoom_steps_are_simplified(self):
         empty_output_step = ["step", ["zoom"], "dot-11", 8, ""]
         empty_representative_step = ["step", ["zoom"], ["case", ["==", ["get", "capital"], 2], "dot-11", "dot-9"], 8, ""]

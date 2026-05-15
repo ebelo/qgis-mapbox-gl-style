@@ -58,6 +58,8 @@ DEFAULT_MAPBOX_TILE_PIXEL_RATIO = 2
 WEB_MERCATOR_WORLD_WIDTH_M = 40075016.685578488
 DEFAULT_MAPBOX_MIN_ZOOM = 0
 DEFAULT_MAPBOX_MAX_ZOOM = 22
+_MAPBOX_PIXEL_TO_MM = 25.4 / 96.0
+_MAX_LINE_WIDTH_MM = 3.0  # ~11px at 96 DPI — sane max for cartographic lines and blur widths
 QGIS_TEXT_FONT_FALLBACK = "Noto Sans"
 _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE = object()
 _LAYOUT_SIMPLIFICATION_NOT_AVAILABLE = object()
@@ -2446,6 +2448,14 @@ def _drop_icon_opacity_without_icon_image(layer: dict[str, object]) -> None:
     del paint["icon-opacity"]
 
 
+def _line_blur_width_mm(expr: object, *, minzoom: object = None, maxzoom: object = None) -> float | None:
+    """Return a representative QGIS line-blur width in millimetres."""
+    blur_px = _extract_zoom_scalar_size(expr, minzoom=minzoom, maxzoom=maxzoom)
+    if blur_px is None:
+        return None
+    return max(0.0, min(blur_px * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
+
+
 def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> dict[str, object]:
     """Return a copy of a Mapbox style with expression-based colors replaced by
     literal fallback colors so QGIS' converter does not render them as black.
@@ -2479,7 +2489,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     # QGIS may pick a large stop and produce QPen::setWidthF warnings.
     # We extract a z12-representative value and cap to a sane maximum.
     _WIDTH_PROPS = {"line-width", "line-gap-width", "line-offset"}
-    _MAX_LINE_WIDTH_MM = 3.0  # ~11px at 96 DPI — sane max for cartographic lines
+    _LINE_BLUR_PROPS = {"line-blur"}
     _LINE_LAYOUT_CHOICES = {
         "line-cap": {"butt", "round", "square"},
         "line-join": {"bevel", "round", "miter"},
@@ -2611,10 +2621,18 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         if is_regional_road_width_variant:
                             width *= _regional_major_road_width_scale(layer_id)
                         # Convert px → mm (96 DPI) and clamp to sane range
-                        width_mm = width * 25.4 / 96.0
+                        width_mm = width * _MAPBOX_PIXEL_TO_MM
                         if is_regional_road_width_variant and prop == "line-width":
                             width_mm = max(width_mm, _regional_major_road_min_width_mm(layer_id))
                         props[prop] = max(0.1, min(width_mm, _MAX_LINE_WIDTH_MM))
+                elif prop in _LINE_BLUR_PROPS:
+                    blur_width_mm = _line_blur_width_mm(
+                        val,
+                        minzoom=layer.get("minzoom"),
+                        maxzoom=layer.get("maxzoom"),
+                    )
+                    if blur_width_mm is not None:
+                        props[prop] = blur_width_mm
                 elif prop == "line-dasharray":
                     dasharray = _extract_line_dasharray_literal(val)
                     if dasharray is not None:
