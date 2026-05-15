@@ -563,6 +563,7 @@ _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
 _PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
 _NATURAL_POINT_LABEL_LAYER_ID = "natural-point-label"
 _POI_LABEL_LAYER_ID = "poi-label"
+_COUNTRY_LABEL_LAYER_ID = "country-label"
 _SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
 _SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
 _POI_FILTER_RANK_ZOOM_STEP = ["step", ["zoom"], 0, 16, 1, 17, 2]
@@ -657,6 +658,27 @@ _SETTLEMENT_DOT_ICON_VARIANTS: tuple[tuple[str, object, str, float], ...] = (
         0.55,
     ),
     ("dot-9", ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 11]], "dot-9", 0.55),
+)
+_COUNTRY_LABEL_LAYOUT_TEXT_JUSTIFY_EXPRESSION = [
+    "step",
+    ["zoom"],
+    [
+        "match",
+        ["get", "text_anchor"],
+        ["left", "bottom-left", "top-left"],
+        "left",
+        ["right", "bottom-right", "top-right"],
+        "right",
+        "center",
+    ],
+    7,
+    "auto",
+]
+_COUNTRY_LABEL_LAYOUT_TEXT_RADIAL_OFFSET_EXPRESSION = ["step", ["zoom"], 0.6, 8, 0]
+_COUNTRY_LABEL_LAYOUT_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float | None], ...] = (
+    ("below-z7", None, 7.0, None),
+    ("z7-to-z8", 7.0, 8.0, 0.6),
+    ("z8-plus", 8.0, None, 0.0),
 )
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
@@ -1164,6 +1186,11 @@ def _is_natural_point_label_layer_id(layer_id: object) -> bool:
     return normalized == _NATURAL_POINT_LABEL_LAYER_ID or normalized.startswith(f"{_NATURAL_POINT_LABEL_LAYER_ID}-")
 
 
+def _is_country_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _COUNTRY_LABEL_LAYER_ID or normalized.startswith(f"{_COUNTRY_LABEL_LAYER_ID}-")
+
+
 def _is_settlement_major_label_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _SETTLEMENT_MAJOR_LABEL_LAYER_ID or normalized.startswith(f"{_SETTLEMENT_MAJOR_LABEL_LAYER_ID}-")
@@ -1196,6 +1223,8 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         return _POI_LABEL_LAYER_ID
     if _is_natural_point_label_layer_id(layer_id):
         return _NATURAL_POINT_LABEL_LAYER_ID
+    if _is_country_label_layer_id(layer_id):
+        return _COUNTRY_LABEL_LAYER_ID
     if _is_settlement_major_label_layer_id(layer_id):
         return _SETTLEMENT_MAJOR_LABEL_LAYER_ID
     if _is_settlement_minor_label_layer_id(layer_id):
@@ -1401,6 +1430,59 @@ def _split_settlement_dot_icon_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _settlement_dot_icon_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _has_country_label_layout_expression(layer: dict[str, object]) -> bool:
+    layout = layer.get("layout")
+    return (
+        base_mapbox_style_layer_id_for_qfit(layer.get("id")) == _COUNTRY_LABEL_LAYER_ID
+        and layer.get("type") == "symbol"
+        and isinstance(layout, dict)
+        and layout.get("text-justify") == _COUNTRY_LABEL_LAYOUT_TEXT_JUSTIFY_EXPRESSION
+        and layout.get("text-radial-offset") == _COUNTRY_LABEL_LAYOUT_TEXT_RADIAL_OFFSET_EXPRESSION
+    )
+
+
+def _set_country_label_static_layout(layer: dict[str, object], *, text_radial_offset: float) -> None:
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return
+    layout["text-justify"] = "auto"
+    layout["text-radial-offset"] = text_radial_offset
+
+
+def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split country labels where zoom-only layout ramps become literal at z7+."""
+    if not _has_country_label_layout_expression(layer):
+        return None
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    layer_id = str(layer.get("id") or _COUNTRY_LABEL_LAYER_ID)
+    variants: list[dict[str, object]] = []
+    has_static_variant = False
+    for suffix, band_minzoom, band_maxzoom, text_radial_offset in _COUNTRY_LABEL_LAYOUT_ZOOM_BANDS:
+        if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{layer_id}-{suffix}"
+        if text_radial_offset is not None:
+            _set_country_label_static_layout(variant, text_radial_offset=text_radial_offset)
+            has_static_variant = True
+        variants.append(variant)
+    return variants if has_static_variant else None
+
+
+def _split_country_label_layout_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _country_label_layout_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -2495,6 +2577,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_settlement_dot_icon_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_country_label_layout_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",

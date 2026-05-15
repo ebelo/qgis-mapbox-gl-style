@@ -1608,6 +1608,86 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertNotIn("icon-image", by_id["settlement-minor-label-z8-plus"]["layout"])
         self.assertEqual(by_id["settlement-minor-label-z8-plus"]["filter"][-1], town_filter)
 
+    def _country_label_layout(self):
+        return {
+            "icon-image": "",
+            "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
+            "text-justify": [
+                "step",
+                ["zoom"],
+                [
+                    "match",
+                    ["get", "text_anchor"],
+                    ["left", "bottom-left", "top-left"],
+                    "left",
+                    ["right", "bottom-right", "top-right"],
+                    "right",
+                    "center",
+                ],
+                7,
+                "auto",
+            ],
+            "text-radial-offset": ["step", ["zoom"], 0.6, 8, 0],
+            "text-size": ["interpolate", ["linear"], ["zoom"], 1, 11, 9, 22],
+        }
+
+    def test_country_label_layout_splits_zoom_only_justification_and_offset(self):
+        style = {
+            "layers": [
+                {
+                    "id": "country-label",
+                    "type": "symbol",
+                    "minzoom": 1,
+                    "maxzoom": 10,
+                    "layout": self._country_label_layout(),
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 3)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["country-label-below-z7"]
+        mid_layer = by_id["country-label-z7-to-z8"]
+        high_layer = by_id["country-label-z8-plus"]
+        self.assertEqual(low_layer["minzoom"], 1)
+        self.assertEqual(low_layer["maxzoom"], 7.0)
+        self.assertEqual(mid_layer["minzoom"], 7.0)
+        self.assertEqual(mid_layer["maxzoom"], 8.0)
+        self.assertEqual(high_layer["minzoom"], 8.0)
+        self.assertEqual(high_layer["maxzoom"], 10)
+        self.assertEqual(low_layer["layout"]["text-justify"], self._country_label_layout()["text-justify"])
+        self.assertEqual(low_layer["layout"]["text-radial-offset"], self._country_label_layout()["text-radial-offset"])
+        self.assertEqual(mid_layer["layout"]["text-justify"], "auto")
+        self.assertEqual(mid_layer["layout"]["text-radial-offset"], 0.6)
+        self.assertEqual(high_layer["layout"]["text-justify"], "auto")
+        self.assertEqual(high_layer["layout"]["text-radial-offset"], 0.0)
+        self.assertNotIn("icon-image", low_layer["layout"])
+        self.assertEqual({layer["layout"]["text-size"] for layer in result["layers"]}, {16.0})
+
+    def test_country_label_layout_is_not_split_when_shape_changes(self):
+        style = {
+            "layers": [
+                {
+                    "id": "country-label",
+                    "type": "symbol",
+                    "minzoom": 1,
+                    "maxzoom": 10,
+                    "layout": {
+                        **self._country_label_layout(),
+                        "text-radial-offset": ["get", "offset"],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "country-label")
+        self.assertEqual(result["layers"][0]["layout"]["text-radial-offset"], ["get", "offset"])
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",
