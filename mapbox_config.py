@@ -678,10 +678,10 @@ _COUNTRY_LABEL_LAYOUT_TEXT_JUSTIFY_EXPRESSION = [
     "auto",
 ]
 _COUNTRY_LABEL_LAYOUT_TEXT_RADIAL_OFFSET_EXPRESSION = ["step", ["zoom"], 0.6, 8, 0]
-_COUNTRY_LABEL_LAYOUT_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float | None], ...] = (
-    ("below-z7", None, 7.0, None),
-    ("z7-to-z8", 7.0, 8.0, 0.6),
-    ("z8-plus", 8.0, None, 0.0),
+_COUNTRY_LABEL_LAYOUT_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, str | None, float | None], ...] = (
+    ("below-z7", None, 7.0, None, 0.6),
+    ("z7-to-z8", 7.0, 8.0, "auto", 0.6),
+    ("z8-plus", 8.0, None, "auto", 0.0),
 )
 _CONTINENT_LABEL_TEXT_OPACITY_EXPRESSION = [
     "interpolate",
@@ -1769,12 +1769,19 @@ def _has_country_label_layout_expression(layer: dict[str, object]) -> bool:
     )
 
 
-def _set_country_label_static_layout(layer: dict[str, object], *, text_radial_offset: float) -> None:
+def _set_country_label_static_layout(
+    layer: dict[str, object],
+    *,
+    text_justify: str | None,
+    text_radial_offset: float | None,
+) -> None:
     layout = layer.get("layout")
     if not isinstance(layout, dict):
         return
-    layout["text-justify"] = "auto"
-    layout["text-radial-offset"] = text_radial_offset
+    if text_justify is not None:
+        layout["text-justify"] = text_justify
+    if text_radial_offset is not None:
+        layout["text-radial-offset"] = text_radial_offset
 
 
 def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
@@ -1786,13 +1793,17 @@ def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[
     layer_id = str(layer.get("id") or _COUNTRY_LABEL_LAYER_ID)
     variants: list[dict[str, object]] = []
     has_static_variant = False
-    for suffix, band_minzoom, band_maxzoom, text_radial_offset in _COUNTRY_LABEL_LAYOUT_ZOOM_BANDS:
+    for suffix, band_minzoom, band_maxzoom, text_justify, text_radial_offset in _COUNTRY_LABEL_LAYOUT_ZOOM_BANDS:
         if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
             continue
         variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
         variant["id"] = f"{layer_id}-{suffix}"
-        if text_radial_offset is not None:
-            _set_country_label_static_layout(variant, text_radial_offset=text_radial_offset)
+        if text_justify is not None or text_radial_offset is not None:
+            _set_country_label_static_layout(
+                variant,
+                text_justify=text_justify,
+                text_radial_offset=text_radial_offset,
+            )
             has_static_variant = True
         variants.append(variant)
     return variants if has_static_variant else None

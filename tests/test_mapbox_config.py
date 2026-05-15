@@ -1665,7 +1665,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(high_layer["minzoom"], 8.0)
         self.assertEqual(high_layer["maxzoom"], 10)
         self.assertEqual(low_layer["layout"]["text-justify"], self._country_label_layout()["text-justify"])
-        self.assertEqual(low_layer["layout"]["text-radial-offset"], self._country_label_layout()["text-radial-offset"])
+        self.assertEqual(low_layer["layout"]["text-radial-offset"], 0.6)
         self.assertEqual(mid_layer["layout"]["text-justify"], "auto")
         self.assertEqual(mid_layer["layout"]["text-radial-offset"], 0.6)
         self.assertEqual(high_layer["layout"]["text-justify"], "auto")
