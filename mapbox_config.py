@@ -565,10 +565,16 @@ _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
 _PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
 _NATURAL_POINT_LABEL_LAYER_ID = "natural-point-label"
 _POI_LABEL_LAYER_ID = "poi-label"
+_GATE_LABEL_LAYER_ID = "gate-label"
 _CONTINENT_LABEL_LAYER_ID = "continent-label"
 _COUNTRY_LABEL_LAYER_ID = "country-label"
 _SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
 _SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
+_GATE_LABEL_ICON_IMAGE_EXPRESSION = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
+_GATE_LABEL_ICON_IMAGE_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    ("gate", ["==", ["get", "type"], "gate"], "gate"),
+    ("lift-gate", ["==", ["get", "type"], "lift_gate"], "lift-gate"),
+)
 _POI_FILTER_RANK_ZOOM_STEP = ["step", ["zoom"], 0, 16, 1, 17, 2]
 _POI_FILTER_RANK_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z16", None, 16.0, 0.0),
@@ -1500,6 +1506,11 @@ def _is_poi_label_layer_id(layer_id: object) -> bool:
     return normalized == _POI_LABEL_LAYER_ID or normalized.startswith(f"{_POI_LABEL_LAYER_ID}-")
 
 
+def _is_gate_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _GATE_LABEL_LAYER_ID or normalized.startswith(f"{_GATE_LABEL_LAYER_ID}-")
+
+
 def _is_natural_point_label_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _NATURAL_POINT_LABEL_LAYER_ID or normalized.startswith(f"{_NATURAL_POINT_LABEL_LAYER_ID}-")
@@ -1576,6 +1587,8 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         return _ROAD_NUMBER_SHIELD_LAYER_ID
     if _is_poi_label_layer_id(layer_id):
         return _POI_LABEL_LAYER_ID
+    if _is_gate_label_layer_id(layer_id):
+        return _GATE_LABEL_LAYER_ID
     if _is_natural_point_label_layer_id(layer_id):
         return _NATURAL_POINT_LABEL_LAYER_ID
     if _is_continent_label_layer_id(layer_id):
@@ -2901,6 +2914,45 @@ def _split_label_icon_visibility_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _gate_label_icon_image_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    layout = layer.get("layout")
+    if (
+        base_mapbox_style_layer_id_for_qfit(layer.get("id")) != _GATE_LABEL_LAYER_ID
+        or layer.get("type") != "symbol"
+        or not isinstance(layout, dict)
+        or layout.get("icon-image") != _GATE_LABEL_ICON_IMAGE_EXPRESSION
+    ):
+        return None
+
+    layer_id = str(layer.get("id") or _GATE_LABEL_LAYER_ID)
+    variants: list[dict[str, object]] = []
+    for suffix, filter_clause, icon_image in _GATE_LABEL_ICON_IMAGE_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        if variant.get("filter") is False:
+            variant["filter"] = False
+        else:
+            variant["filter"] = _with_additional_filter_clauses(variant.get("filter"), filter_clause)
+        variant_layout = variant.get("layout")
+        if isinstance(variant_layout, dict):
+            variant_layout["icon-image"] = icon_image
+        variants.append(variant)
+    return variants
+
+
+def _split_gate_label_icon_image_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _gate_label_icon_image_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _expand_road_number_shield_layers_for_qgis(layers: object) -> object:
     if not isinstance(layers, list):
         return layers
@@ -3869,6 +3921,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_gate_label_icon_image_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_settlement_dot_icon_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_country_label_layout_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_continent_label_text_opacity_layers_for_qgis(style.get("layers"))

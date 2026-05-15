@@ -974,6 +974,69 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][1]["layout"]["icon-image"], generic_empty_fallback)
         self.assertEqual(result["layers"][2]["layout"]["icon-image"], mixed_output_fallback)
 
+    def test_gate_label_icon_match_splits_to_static_sprites(self):
+        gate_icon = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
+        style = {
+            "layers": [
+                {
+                    "id": "gate-label",
+                    "type": "symbol",
+                    "filter": ["==", ["get", "class"], "gate"],
+                    "layout": {"icon-image": gate_icon, "icon-size": 1},
+                },
+                {
+                    "id": "other-label",
+                    "type": "symbol",
+                    "filter": ["==", ["get", "class"], "gate"],
+                    "layout": {"icon-image": gate_icon},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            ["gate-label-gate", "gate-label-lift-gate", "other-label"],
+        )
+        self.assertEqual(by_id["gate-label-gate"]["layout"]["icon-image"], "gate")
+        self.assertEqual(by_id["gate-label-gate"]["layout"]["icon-size"], 1)
+        self.assertEqual(by_id["gate-label-gate"]["filter"][-1], ["==", ["get", "type"], "gate"])
+        self.assertEqual(by_id["gate-label-lift-gate"]["layout"]["icon-image"], "lift-gate")
+        self.assertEqual(by_id["gate-label-lift-gate"]["filter"][-1], ["==", ["get", "type"], "lift_gate"])
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("gate-label-gate"),
+            "gate-label",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("gate-label-lift-gate"),
+            "gate-label",
+        )
+        self.assertEqual(by_id["other-label"]["layout"]["icon-image"], gate_icon)
+
+    def test_gate_label_icon_split_preserves_disabled_filter(self):
+        gate_icon = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
+        style = {
+            "layers": [
+                {
+                    "id": "gate-label",
+                    "type": "symbol",
+                    "filter": False,
+                    "layout": {"icon-image": gate_icon},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            ["gate-label-gate", "gate-label-lift-gate"],
+        )
+        self.assertEqual(result["layers"][0]["filter"], ["==", 1, 0])
+        self.assertEqual(result["layers"][1]["filter"], ["==", 1, 0])
+
     def test_maki_icon_get_uses_existing_sprite_match_fallback(self):
         maki_icon = ["get", "maki"]
         other_field_icon = ["get", "network"]
