@@ -380,6 +380,24 @@ _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS = {
     "tunnel-minor",
     "tunnel-minor-case",
 }
+_PATH_TYPE_FILTER_SPLIT_LAYER_IDS = {
+    "bridge-path-bg",
+    "road-path",
+    "road-path-bg",
+}
+_PATH_TYPE_FILTER_LOW_ZOOM_TYPES = ["steps", "sidewalk", "crossing"]
+_PATH_TYPE_FILTER_LOW_ZOOM_INVERTED_MATCH = [
+    "!",
+    ["match", ["get", "type"], _PATH_TYPE_FILTER_LOW_ZOOM_TYPES, True, False],
+]
+_PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
+    "match",
+    ["get", "type"],
+    _PATH_TYPE_FILTER_LOW_ZOOM_TYPES,
+    False,
+    True,
+]
+_PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -604,6 +622,98 @@ def _with_additional_filter_clauses(filter_value: object, *clauses: object) -> o
     if isinstance(filter_copy, list):
         return ["all", filter_copy, *(copy.deepcopy(clause) for clause in clauses)]
     return ["all", *(copy.deepcopy(clause) for clause in clauses)]
+
+
+def _is_path_type_low_zoom_filter(value: object) -> bool:
+    return value in (_PATH_TYPE_FILTER_LOW_ZOOM_INVERTED_MATCH, _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH)
+
+
+def _is_path_type_high_zoom_filter(value: object) -> bool:
+    return value == ["!=", ["get", "type"], "steps"]
+
+
+def _path_type_zoom_step_filter_clause(value: object) -> tuple[float, object, object] | None:
+    if not isinstance(value, list) or len(value) != 5 or value[0] != "step" or value[1] != ["zoom"]:
+        return None
+    threshold = _numeric_zoom_bound(value[3])
+    if threshold is None or abs(threshold - _PATH_TYPE_FILTER_SPLIT_ZOOM) > _ZOOM_BOUND_EPSILON:
+        return None
+    low_zoom_filter = value[2]
+    high_zoom_filter = value[4]
+    if not _is_path_type_low_zoom_filter(low_zoom_filter) or not _is_path_type_high_zoom_filter(high_zoom_filter):
+        return None
+    return threshold, low_zoom_filter, high_zoom_filter
+
+
+def _filter_with_replaced_clause(filter_value: object, clause_index: int, replacement: object) -> object:
+    filter_copy = copy.deepcopy(filter_value)
+    if isinstance(filter_copy, list) and filter_copy[:1] == ["all"] and 0 < clause_index < len(filter_copy):
+        filter_copy[clause_index] = copy.deepcopy(replacement)
+        return filter_copy
+    return copy.deepcopy(replacement)
+
+
+def _zoom_band_label(zoom: float) -> str:
+    return str(int(zoom)) if zoom.is_integer() else str(zoom).replace(".", "_")
+
+
+def _path_type_filter_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited path filters at their Mapbox zoom threshold for QGIS.
+
+    QGIS cannot parse the Mapbox ``step(['zoom'], ...)`` filter clause used by
+    the Outdoors path layers.  A single representative snapshot either hides
+    sidewalks/crossings at high zoom or renders them too early at mid zoom, so
+    preserve the Mapbox behavior by emitting two static zoom-band layers.
+    """
+    layer_id = str(layer.get("id") or "")
+    if layer_id not in _PATH_TYPE_FILTER_SPLIT_LAYER_IDS or layer.get("type") != "line":
+        return None
+    filter_value = layer.get("filter")
+    if not isinstance(filter_value, list) or filter_value[:1] != ["all"]:
+        return None
+
+    for clause_index, clause in enumerate(filter_value[1:], start=1):
+        path_type_clause = _path_type_zoom_step_filter_clause(clause)
+        if path_type_clause is None:
+            continue
+
+        threshold, low_zoom_filter, high_zoom_filter = path_type_clause
+        existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+        existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+        if existing_maxzoom is not None and existing_maxzoom <= threshold:
+            low_layer = copy.deepcopy(layer)
+            low_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, low_zoom_filter)
+            return [low_layer]
+        if existing_minzoom is not None and existing_minzoom >= threshold:
+            high_layer = copy.deepcopy(layer)
+            high_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, high_zoom_filter)
+            return [high_layer]
+
+        zoom_label = _zoom_band_label(threshold)
+        low_layer = copy.deepcopy(layer)
+        low_layer["id"] = f"{layer_id}-below-z{zoom_label}"
+        low_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, low_zoom_filter)
+        low_layer["maxzoom"] = threshold
+
+        high_layer = copy.deepcopy(layer)
+        high_layer["id"] = f"{layer_id}-z{zoom_label}-plus"
+        high_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, high_zoom_filter)
+        high_layer["minzoom"] = threshold
+        return [low_layer, high_layer]
+    return None
+
+
+def _split_path_type_filter_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _path_type_filter_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
@@ -1532,6 +1642,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     """
     style = copy.deepcopy(style_definition)
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",

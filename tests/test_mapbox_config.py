@@ -1265,6 +1265,115 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         for layer in style["layers"]:
             self.assertEqual(layer["filter"], original_minor_filter)
 
+    def test_filter_simplification_splits_path_type_filters_by_zoom_band(self):
+        path_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            [
+                "step",
+                ["zoom"],
+                ["!", ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], True, False]],
+                16,
+                ["!=", ["get", "type"], "steps"],
+            ],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        original_path_filter = copy.deepcopy(path_filter)
+        style = {
+            "layers": [
+                {"id": "road-path-bg", "type": "line", "minzoom": 12, "filter": path_filter},
+                {"id": "road-path", "type": "line", "minzoom": 12, "filter": path_filter},
+                {"id": "bridge-path-bg", "type": "line", "minzoom": 14, "filter": path_filter},
+                {"id": "road-minor", "type": "line", "minzoom": 12, "filter": path_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-path-bg-below-z16",
+                "road-path-bg-z16-plus",
+                "road-path-below-z16",
+                "road-path-z16-plus",
+                "bridge-path-bg-below-z16",
+                "bridge-path-bg-z16-plus",
+                "road-minor",
+            ],
+        )
+        expected_low_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        expected_high_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            ["!=", ["get", "type"], "steps"],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        self.assertEqual(result["layers"][0]["filter"], expected_low_filter)
+        self.assertEqual(result["layers"][0]["minzoom"], 12)
+        self.assertEqual(result["layers"][0]["maxzoom"], 16.0)
+        self.assertEqual(result["layers"][1]["filter"], expected_high_filter)
+        self.assertEqual(result["layers"][1]["minzoom"], 16.0)
+        self.assertEqual(result["layers"][2]["filter"], expected_low_filter)
+        self.assertEqual(result["layers"][3]["filter"], expected_high_filter)
+        self.assertEqual(result["layers"][4]["minzoom"], 14)
+        self.assertEqual(result["layers"][4]["maxzoom"], 16.0)
+        self.assertEqual(result["layers"][5]["minzoom"], 16.0)
+        self.assertEqual(result["layers"][6]["filter"], expected_low_filter)
+        self.assertEqual(path_filter, original_path_filter)
+        for layer in style["layers"]:
+            self.assertEqual(layer["filter"], original_path_filter)
+
+    def test_filter_simplification_replaces_path_filter_without_split_outside_threshold(self):
+        path_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            [
+                "step",
+                ["zoom"],
+                ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
+                16,
+                ["!=", ["get", "type"], "steps"],
+            ],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        style = {
+            "layers": [
+                {"id": "road-path", "type": "line", "minzoom": 12, "maxzoom": 15, "filter": path_filter},
+                {"id": "road-path-bg", "type": "line", "minzoom": 16, "filter": path_filter},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual([layer["id"] for layer in result["layers"]], ["road-path", "road-path-bg"])
+        self.assertEqual(
+            result["layers"][0]["filter"],
+            [
+                "all",
+                ["==", ["get", "class"], "path"],
+                ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
+                ["==", ["geometry-type"], "LineString"],
+            ],
+        )
+        self.assertEqual(
+            result["layers"][1]["filter"],
+            [
+                "all",
+                ["==", ["get", "class"], "path"],
+                ["!=", ["get", "type"], "steps"],
+                ["==", ["geometry-type"], "LineString"],
+            ],
+        )
+
     def test_filter_simplification_clamps_minor_line_zoom_override_to_layer_bounds(self):
         minor_filter = [
             "match",
