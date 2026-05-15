@@ -2379,6 +2379,80 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "road-rail-tracks-z13_75-to-z14")
         self.assertEqual(result[3]["id"], "road-rail-tracks-z14-plus")
 
+    def _gate_fence_hedge_layer(self, line_opacity=None, filter_value=None):
+        if line_opacity is None:
+            line_opacity = ["match", ["get", "class"], "gate", 0.5, 1]
+        if filter_value is None:
+            filter_value = ["match", ["get", "class"], ["gate", "fence", "hedge"], True, False]
+        return {
+            "id": "gate-fence-hedge",
+            "type": "line",
+            "minzoom": 16,
+            "source-layer": "structure",
+            "filter": filter_value,
+            "paint": {
+                "line-color": ["match", ["get", "class"], "hedge", "hsl(98, 32%, 56%)", "hsl(60, 25%, 63%)"],
+                "line-dasharray": [1, 2, 5, 2, 1, 2],
+                "line-opacity": line_opacity,
+            },
+        }
+
+    def test_gate_fence_hedge_line_opacity_splits_to_static_class_variants(self):
+        style = {"layers": [self._gate_fence_hedge_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 2)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        gate_layer = by_id["gate-fence-hedge-gate"]
+        fence_hedge_layer = by_id["gate-fence-hedge-fence-hedge"]
+        self.assertEqual(gate_layer["minzoom"], 16)
+        self.assertEqual(fence_hedge_layer["minzoom"], 16)
+        self.assertAlmostEqual(gate_layer["paint"]["line-opacity"], 0.5)
+        self.assertAlmostEqual(fence_hedge_layer["paint"]["line-opacity"], 1.0)
+        self.assertEqual(gate_layer["paint"]["line-dasharray"], [1, 2, 5, 2, 1, 2])
+        self.assertEqual(fence_hedge_layer["paint"]["line-dasharray"], [1, 2, 5, 2, 1, 2])
+        self.assertEqual(
+            gate_layer["filter"],
+            [
+                "all",
+                ["match", ["get", "class"], ["gate", "fence", "hedge"], True, False],
+                ["match", ["get", "class"], "gate", True, False],
+            ],
+        )
+        self.assertEqual(
+            fence_hedge_layer["filter"],
+            [
+                "all",
+                ["match", ["get", "class"], ["gate", "fence", "hedge"], True, False],
+                ["match", ["get", "class"], "gate", False, True],
+            ],
+        )
+
+    def test_gate_fence_hedge_line_opacity_is_not_split_when_shape_changes(self):
+        line_opacity = ["get", "opacity"]
+        style = {"layers": [self._gate_fence_hedge_layer(line_opacity=line_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "gate-fence-hedge")
+        self.assertEqual(result["layers"][0]["paint"]["line-opacity"], line_opacity)
+
+    def test_gate_fence_hedge_line_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._gate_fence_hedge_layer()]
+
+        self.assertIs(
+            mapbox_config._split_gate_fence_hedge_line_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_gate_fence_hedge_line_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "gate-fence-hedge-gate")
+        self.assertEqual(result[2]["id"], "gate-fence-hedge-fence-hedge")
+
     def _contour_line_layer(self, line_opacity=None, minzoom=11):
         if line_opacity is None:
             line_opacity = [

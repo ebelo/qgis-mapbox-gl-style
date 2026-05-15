@@ -826,6 +826,12 @@ _RAIL_TRACK_LINE_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None
     ("z13_75-to-z14", 13.75, 14.0),
     ("z14-plus", 14.0, None),
 )
+_GATE_FENCE_HEDGE_LAYER_ID = "gate-fence-hedge"
+_GATE_FENCE_HEDGE_LINE_OPACITY_EXPRESSION = ["match", ["get", "class"], "gate", 0.5, 1]
+_GATE_FENCE_HEDGE_LINE_OPACITY_VARIANTS: tuple[tuple[str, object, float], ...] = (
+    ("gate", ["match", ["get", "class"], "gate", True, False], 0.5),
+    ("fence-hedge", ["match", ["get", "class"], "gate", False, True], 1.0),
+)
 _CONTOUR_LINE_LAYER_ID = "contour-line"
 _CONTOUR_LINE_OPACITY_EXPRESSION = [
     "interpolate",
@@ -2112,6 +2118,40 @@ def _split_rail_track_line_opacity_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _gate_fence_hedge_line_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited gate/fence/hedge opacity match into static QGIS class variants."""
+    layer_id = str(layer.get("id") or "")
+    paint = layer.get("paint")
+    if layer_id != _GATE_FENCE_HEDGE_LAYER_ID or layer.get("type") != "line" or not isinstance(paint, dict):
+        return None
+    if paint.get("line-opacity") != _GATE_FENCE_HEDGE_LINE_OPACITY_EXPRESSION:
+        return None
+
+    variants: list[dict[str, object]] = []
+    for suffix, class_filter, line_opacity in _GATE_FENCE_HEDGE_LINE_OPACITY_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["line-opacity"] = line_opacity
+        variants.append(variant)
+    return variants or None
+
+
+def _split_gate_fence_hedge_line_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _gate_fence_hedge_line_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _contour_line_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited contour index opacity expressions into static QGIS zoom bands."""
     layer_id = str(layer.get("id") or "")
@@ -3250,6 +3290,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_rail_track_line_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_gate_fence_hedge_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_contour_line_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
