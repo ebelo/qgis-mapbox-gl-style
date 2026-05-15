@@ -832,6 +832,24 @@ _GATE_FENCE_HEDGE_LINE_OPACITY_VARIANTS: tuple[tuple[str, object, float], ...] =
     ("gate", ["match", ["get", "class"], "gate", True, False], 0.5),
     ("fence-hedge", ["match", ["get", "class"], "gate", False, True], 1.0),
 )
+_WATER_SHADOW_TRANSLATE_EXPRESSION = [
+    "interpolate",
+    ["exponential", 1.2],
+    ["zoom"],
+    7,
+    ["literal", [0, 0]],
+    16,
+    ["literal", [-1, -1]],
+]
+_WATER_SHADOW_TRANSLATE_LAYERS: dict[str, tuple[str, str]] = {
+    "water-shadow": ("fill", "fill-translate"),
+    "waterway-shadow": ("line", "line-translate"),
+}
+_WATER_SHADOW_TRANSLATE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z10-to-z13", 10.0, 13.0),
+    ("z13-to-z16", 13.0, 16.0),
+    ("z16-plus", 16.0, None),
+)
 _CONTOUR_LINE_LAYER_ID = "contour-line"
 _CONTOUR_LINE_OPACITY_EXPRESSION = [
     "interpolate",
@@ -2152,6 +2170,109 @@ def _split_gate_fence_hedge_line_opacity_layers_for_qgis(layers: object) -> obje
     return expanded_layers
 
 
+def _literal_translate_vector(value: object) -> list[float] | None:
+    vector = value
+    if isinstance(value, list) and len(value) == 2 and value[0] == "literal":
+        vector = value[1]
+    if not isinstance(vector, list) or len(vector) != 2:
+        return None
+    if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in vector):
+        return None
+    return [float(vector[0]), float(vector[1])]
+
+
+def _water_shadow_translate_at_zoom(zoom: float) -> list[float] | None:
+    expr = _WATER_SHADOW_TRANSLATE_EXPRESSION
+    if len(expr) < 7:
+        return None
+    lower_stop = expr[3]
+    lower_translate = _literal_translate_vector(expr[4])
+    upper_stop = expr[5]
+    upper_translate = _literal_translate_vector(expr[6])
+    if not isinstance(lower_stop, (int, float)) or isinstance(lower_stop, bool):
+        return None
+    if not isinstance(upper_stop, (int, float)) or isinstance(upper_stop, bool):
+        return None
+    if lower_translate is None or upper_translate is None:
+        return None
+    lower_zoom = float(lower_stop)
+    upper_zoom = float(upper_stop)
+    if zoom <= lower_zoom:
+        return lower_translate
+    if zoom >= upper_zoom:
+        return upper_translate
+    factor = _interpolate_filter_factor(expr[1], zoom, lower_zoom, upper_zoom)
+    if factor is None:
+        return None
+    return [
+        lower_value + ((upper_value - lower_value) * factor)
+        for lower_value, upper_value in zip(lower_translate, upper_translate)
+    ]
+
+
+def _water_shadow_translate_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> list[float] | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    return _water_shadow_translate_at_zoom(representative_zoom)
+
+
+def _water_shadow_translate_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited water shadow translate fade into static QGIS zoom bands."""
+    layer_id = str(layer.get("id") or "")
+    expected = _WATER_SHADOW_TRANSLATE_LAYERS.get(layer_id)
+    paint = layer.get("paint")
+    if expected is None or not isinstance(paint, dict):
+        return None
+    layer_type, paint_property = expected
+    if layer.get("type") != layer_type or paint.get(paint_property) != _WATER_SHADOW_TRANSLATE_EXPRESSION:
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom in _WATER_SHADOW_TRANSLATE_ZOOM_BANDS:
+        translate = _water_shadow_translate_for_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if translate is None:
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint[paint_property] = translate
+        variants.append(variant)
+    return variants or None
+
+
+def _split_water_shadow_translate_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _water_shadow_translate_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _contour_line_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited contour index opacity expressions into static QGIS zoom bands."""
     layer_id = str(layer.get("id") or "")
@@ -3291,6 +3412,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_rail_track_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_fence_hedge_line_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_water_shadow_translate_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_contour_line_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",

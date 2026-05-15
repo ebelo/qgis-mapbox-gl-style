@@ -2453,6 +2453,117 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "gate-fence-hedge-gate")
         self.assertEqual(result[2]["id"], "gate-fence-hedge-fence-hedge")
 
+    def _water_shadow_translate_expression(self):
+        return [
+            "interpolate",
+            ["exponential", 1.2],
+            ["zoom"],
+            7,
+            ["literal", [0, 0]],
+            16,
+            ["literal", [-1, -1]],
+        ]
+
+    def _water_shadow_layer(self, translate=None):
+        if translate is None:
+            translate = self._water_shadow_translate_expression()
+        return {
+            "id": "water-shadow",
+            "type": "fill",
+            "minzoom": 10,
+            "source-layer": "water",
+            "paint": {
+                "fill-color": "hsl(224, 79%, 69%)",
+                "fill-translate": translate,
+                "fill-translate-anchor": "viewport",
+            },
+        }
+
+    def _waterway_shadow_layer(self, translate=None):
+        if translate is None:
+            translate = self._water_shadow_translate_expression()
+        return {
+            "id": "waterway-shadow",
+            "type": "line",
+            "minzoom": 10,
+            "source-layer": "waterway",
+            "layout": {"line-cap": "round", "line-join": "round"},
+            "paint": {
+                "line-color": "hsl(224, 79%, 69%)",
+                "line-translate": translate,
+                "line-translate-anchor": "viewport",
+                "line-width": 0.1,
+            },
+        }
+
+    def test_water_shadow_translate_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._water_shadow_layer(), self._waterway_shadow_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 6)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        for layer_prefix, paint_property in (
+            ("water-shadow", "fill-translate"),
+            ("waterway-shadow", "line-translate"),
+        ):
+            low_layer = by_id[f"{layer_prefix}-z10-to-z13"]
+            mid_layer = by_id[f"{layer_prefix}-z13-to-z16"]
+            high_layer = by_id[f"{layer_prefix}-z16-plus"]
+            self.assertEqual(low_layer["minzoom"], 10)
+            self.assertEqual(low_layer["maxzoom"], 13.0)
+            self.assertEqual(mid_layer["minzoom"], 13.0)
+            self.assertEqual(mid_layer["maxzoom"], 16.0)
+            self.assertEqual(high_layer["minzoom"], 16.0)
+            self.assertNotIn("maxzoom", high_layer)
+            self.assertAlmostEqual(low_layer["paint"][paint_property][0], -0.3056687812552621)
+            self.assertAlmostEqual(low_layer["paint"][paint_property][1], -0.3056687812552621)
+            self.assertAlmostEqual(mid_layer["paint"][paint_property][0], -0.7032048944969905)
+            self.assertAlmostEqual(mid_layer["paint"][paint_property][1], -0.7032048944969905)
+            self.assertEqual(high_layer["paint"][paint_property], [-1.0, -1.0])
+
+    def test_water_shadow_translate_uses_expression_stops_and_base(self):
+        expression = [
+            "interpolate",
+            ["exponential", 2],
+            ["zoom"],
+            8,
+            ["literal", [0, 0]],
+            12,
+            ["literal", [-4, -8]],
+        ]
+
+        with patch.object(mapbox_config, "_WATER_SHADOW_TRANSLATE_EXPRESSION", expression):
+            translate = mapbox_config._water_shadow_translate_at_zoom(10)
+
+        self.assertAlmostEqual(translate[0], -0.8)
+        self.assertAlmostEqual(translate[1], -1.6)
+
+    def test_water_shadow_translate_is_not_split_when_shape_changes(self):
+        translate = ["literal", [0, -1]]
+        style = {"layers": [self._water_shadow_layer(translate=translate)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "water-shadow")
+        self.assertEqual(result["layers"][0]["paint"]["fill-translate"], translate)
+
+    def test_water_shadow_translate_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._water_shadow_layer()]
+
+        self.assertIs(
+            mapbox_config._split_water_shadow_translate_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_water_shadow_translate_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "water-shadow-z10-to-z13")
+        self.assertEqual(result[2]["id"], "water-shadow-z13-to-z16")
+        self.assertEqual(result[3]["id"], "water-shadow-z16-plus")
+
     def _contour_line_layer(self, line_opacity=None, minzoom=11):
         if line_opacity is None:
             line_opacity = [
