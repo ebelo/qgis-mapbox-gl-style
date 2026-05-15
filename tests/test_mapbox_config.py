@@ -2662,6 +2662,77 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[3]["id"], "turning-feature-z18-to-z22")
         self.assertEqual(result[4]["id"], "turning-feature-z22-plus")
 
+    def _waterway_label_symbol_spacing_expression(self):
+        return ["interpolate", ["linear", 1], ["zoom"], 15, 250, 17, 400]
+
+    def _waterway_label_layer(self, symbol_spacing=None):
+        if symbol_spacing is None:
+            symbol_spacing = self._waterway_label_symbol_spacing_expression()
+        return {
+            "id": "waterway-label",
+            "type": "symbol",
+            "minzoom": 13,
+            "source-layer": "natural_label",
+            "layout": {
+                "text-font": ["DIN Pro Italic", "Arial Unicode MS Regular"],
+                "text-max-angle": 30,
+                "symbol-spacing": symbol_spacing,
+                "text-size": ["interpolate", ["linear"], ["zoom"], 13, 12, 18, 18],
+                "symbol-placement": "line",
+                "text-pitch-alignment": "viewport",
+                "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
+            },
+            "paint": {"text-color": "hsl(205, 43%, 90%)"},
+        }
+
+    def test_waterway_label_symbol_spacing_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._waterway_label_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 3)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["waterway-label-z13-to-z15"]
+        mid_layer = by_id["waterway-label-z15-to-z17"]
+        high_layer = by_id["waterway-label-z17-plus"]
+        self.assertEqual(low_layer["minzoom"], 13)
+        self.assertEqual(low_layer["maxzoom"], 15.0)
+        self.assertEqual(mid_layer["minzoom"], 15.0)
+        self.assertEqual(mid_layer["maxzoom"], 17.0)
+        self.assertEqual(high_layer["minzoom"], 17.0)
+        self.assertNotIn("maxzoom", high_layer)
+        self.assertEqual(low_layer["layout"]["symbol-spacing"], 250.0)
+        self.assertEqual(mid_layer["layout"]["symbol-spacing"], 325.0)
+        self.assertEqual(high_layer["layout"]["symbol-spacing"], 400.0)
+        self.assertEqual(low_layer["layout"]["text-size"], 10.0)
+        self.assertEqual(mid_layer["layout"]["text-size"], 10.0)
+        self.assertEqual(high_layer["layout"]["text-size"], 10.0)
+
+    def test_waterway_label_symbol_spacing_split_is_exact_shape_gated(self):
+        symbol_spacing = ["interpolate", ["linear"], ["zoom"], 15, 250, 17, 400]
+        style = {"layers": [self._waterway_label_layer(symbol_spacing=symbol_spacing)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "waterway-label")
+        self.assertEqual(result["layers"][0]["layout"]["symbol-spacing"], symbol_spacing)
+
+    def test_waterway_label_symbol_spacing_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._waterway_label_layer()]
+
+        self.assertIs(
+            mapbox_config._split_waterway_label_symbol_spacing_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_waterway_label_symbol_spacing_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "waterway-label-z13-to-z15")
+        self.assertEqual(result[2]["id"], "waterway-label-z15-to-z17")
+        self.assertEqual(result[3]["id"], "waterway-label-z17-plus")
+
     def _contour_line_layer(self, line_opacity=None, minzoom=11):
         if line_opacity is None:
             line_opacity = [

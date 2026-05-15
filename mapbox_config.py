@@ -872,6 +872,21 @@ _TURNING_FEATURE_CIRCLE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z18-to-z22", 18.0, 22.0),
     ("z22-plus", 22.0, None),
 )
+_WATERWAY_LABEL_LAYER_ID = "waterway-label"
+_WATERWAY_LABEL_SYMBOL_SPACING_EXPRESSION = [
+    "interpolate",
+    ["linear", 1],
+    ["zoom"],
+    15,
+    250,
+    17,
+    400,
+]
+_WATERWAY_LABEL_SYMBOL_SPACING_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z13-to-z15", 13.0, 15.0),
+    ("z15-to-z17", 15.0, 17.0),
+    ("z17-plus", 17.0, None),
+)
 _CONTOUR_LINE_LAYER_ID = "contour-line"
 _CONTOUR_LINE_OPACITY_EXPRESSION = [
     "interpolate",
@@ -1447,6 +1462,8 @@ def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
 
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
+    if _is_waterway_label_layer_id(layer_id):
+        return _WATERWAY_LABEL_LAYER_ID
     regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
     if regional_road_layer_id is not None:
         return regional_road_layer_id
@@ -1470,6 +1487,13 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     if _is_settlement_minor_label_layer_id(layer_id):
         return _SETTLEMENT_MINOR_LABEL_LAYER_ID
     return str(layer_id or "")
+
+
+def _is_waterway_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _WATERWAY_LABEL_LAYER_ID or normalized.startswith(
+        f"{_WATERWAY_LABEL_LAYER_ID}-"
+    )
 
 
 def _is_regional_major_road_width_variant(layer_id: object) -> bool:
@@ -2396,6 +2420,92 @@ def _split_turning_feature_circle_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _turning_feature_circle_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _waterway_label_symbol_spacing_at_zoom(zoom: float) -> float | None:
+    expr = _WATERWAY_LABEL_SYMBOL_SPACING_EXPRESSION
+    if len(expr) < 7 or expr[2] != ["zoom"]:
+        return None
+    lower_stop = _numeric_expression_value(expr[3])
+    lower_spacing = _numeric_expression_value(expr[4])
+    upper_stop = _numeric_expression_value(expr[5])
+    upper_spacing = _numeric_expression_value(expr[6])
+    if (
+        lower_stop is None
+        or lower_spacing is None
+        or upper_stop is None
+        or upper_spacing is None
+    ):
+        return None
+    if zoom <= lower_stop:
+        return lower_spacing
+    if zoom >= upper_stop:
+        return upper_spacing
+    interpolation_type = ["linear"] if expr[1] == ["linear", 1] else expr[1]
+    factor = _interpolate_filter_factor(interpolation_type, zoom, lower_stop, upper_stop)
+    if factor is None:
+        return None
+    return lower_spacing + ((upper_spacing - lower_spacing) * factor)
+
+
+def _waterway_label_symbol_spacing_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> float | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    return _waterway_label_symbol_spacing_at_zoom(representative_zoom)
+
+
+def _waterway_label_symbol_spacing_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited waterway label symbol spacing into static QGIS zoom bands."""
+    if str(layer.get("id") or "") != _WATERWAY_LABEL_LAYER_ID or layer.get("type") != "symbol":
+        return None
+    layout = layer.get("layout")
+    if not isinstance(layout, dict) or layout.get("symbol-spacing") != _WATERWAY_LABEL_SYMBOL_SPACING_EXPRESSION:
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom in _WATERWAY_LABEL_SYMBOL_SPACING_ZOOM_BANDS:
+        symbol_spacing = _waterway_label_symbol_spacing_for_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if symbol_spacing is None:
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{_WATERWAY_LABEL_LAYER_ID}-{suffix}"
+        variant_layout = variant["layout"]
+        assert isinstance(variant_layout, dict)
+        variant_layout["symbol-spacing"] = symbol_spacing
+        variants.append(variant)
+    return variants or None
+
+
+def _split_waterway_label_symbol_spacing_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _waterway_label_symbol_spacing_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -3541,6 +3651,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_gate_fence_hedge_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_water_shadow_translate_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_turning_feature_circle_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_waterway_label_symbol_spacing_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_contour_line_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
