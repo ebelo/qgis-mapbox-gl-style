@@ -604,6 +604,7 @@ _LABEL_ICON_VISIBILITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("z17-plus", _LABEL_ICON_VISIBILITY_SPLIT_ZOOM, None, _LABEL_ICON_HIGH_ZOOM_SIZERANK_THRESHOLD),
 )
 _SETTLEMENT_DOT_ICON_SPLIT_ZOOM = 8.0
+_SETTLEMENT_SYMBOL_SORT_KEY_EXPRESSION = ["get", "symbolrank"]
 _SETTLEMENT_DOT_ICON_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
     ("z2-to-z4", 2.0, 4.0),
     ("z4-to-z6", 4.0, 6.0),
@@ -3963,6 +3964,14 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                 continue
             for prop in list(props.keys()):
                 val = props[prop]
+                if (
+                    section == "layout"
+                    and prop == "symbol-sort-key"
+                    and base_layer_id in {_SETTLEMENT_MAJOR_LABEL_LAYER_ID, _SETTLEMENT_MINOR_LABEL_LAYER_ID}
+                    and val == _SETTLEMENT_SYMBOL_SORT_KEY_EXPRESSION
+                ):
+                    del props[prop]
+                    continue
                 if section == "layout" and prop == "icon-image":
                     if val == "":
                         del props[prop]

@@ -1462,6 +1462,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
     def _settlement_dot_icon_layout(self):
         return {
+            "symbol-sort-key": ["get", "symbolrank"],
             "icon-image": [
                 "step",
                 ["zoom"],
@@ -1558,6 +1559,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(capital_layer["layout"]["text-justify"], "left")
         self.assertEqual(dot_layer["layout"]["text-justify"], "right")
         self.assertEqual(center_layer["layout"]["text-justify"], "center")
+        self.assertNotIn("symbol-sort-key", capital_layer["layout"])
+        self.assertNotIn("symbol-sort-key", dot_layer["layout"])
+        self.assertNotIn("symbol-sort-key", text_layer["layout"])
         self.assertEqual(
             capital_layer["filter"],
             [
@@ -1627,11 +1631,34 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         ):
             layer = by_id[f"settlement-minor-label-z2-to-z4-{suffix}"]
             self.assertEqual(layer["layout"]["icon-image"], icon_name)
+            self.assertNotIn("symbol-sort-key", layer["layout"])
             self.assertEqual(layer["filter"][-1], town_filter)
         self.assertEqual(by_id["settlement-minor-label-z2-to-z4-dot-11"]["filter"][1][2], [">", ["get", "symbolrank"], 6])
         self.assertEqual(by_id["settlement-minor-label-z7-to-z8-dot-11"]["filter"][1][2], [">=", ["get", "symbolrank"], 10])
         self.assertNotIn("icon-image", by_id["settlement-minor-label-z8-plus"]["layout"])
+        self.assertNotIn("symbol-sort-key", by_id["settlement-minor-label-z8-plus"]["layout"])
         self.assertEqual(by_id["settlement-minor-label-z8-plus"]["filter"][-1], town_filter)
+
+    def test_settlement_symbol_sort_key_removal_is_exact_shape_gated(self):
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-major-label",
+                    "type": "symbol",
+                    "layout": {"symbol-sort-key": ["get", "other_rank"]},
+                },
+                {
+                    "id": "state-label",
+                    "type": "symbol",
+                    "layout": {"symbol-sort-key": ["get", "symbolrank"]},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"]["symbol-sort-key"], ["get", "other_rank"])
+        self.assertEqual(result["layers"][1]["layout"]["symbol-sort-key"], ["get", "symbolrank"])
 
     def _country_label_layout(self):
         return {
