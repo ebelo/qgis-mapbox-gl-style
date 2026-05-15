@@ -895,6 +895,23 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][9]["layout"]["icon-image"], data_driven_high_zoom_step)
         self.assertEqual(result["layers"][10]["layout"]["icon-image"], empty_then_data_driven_high_zoom_step)
 
+    def test_icon_opacity_is_removed_when_icon_image_is_absent(self):
+        icon_opacity = ["step", ["zoom"], ["case", ["has", "text_anchor"], 1, 0], 7, 0]
+        style = {
+            "layers": [
+                {"layout": {"icon-image": ""}, "paint": {"icon-opacity": icon_opacity}},
+                {"layout": {"icon-image": "marker"}, "paint": {"icon-opacity": copy.deepcopy(icon_opacity)}},
+                {"paint": {"icon-opacity": copy.deepcopy(icon_opacity)}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertNotIn("icon-image", result["layers"][0]["layout"])
+        self.assertNotIn("icon-opacity", result["layers"][0]["paint"])
+        self.assertEqual(result["layers"][1]["paint"]["icon-opacity"], icon_opacity)
+        self.assertNotIn("icon-opacity", result["layers"][2]["paint"])
+
     def test_gate_label_icon_match_uses_existing_sprite_fallback(self):
         gate_icon = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
         generic_empty_fallback = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]

@@ -2435,6 +2435,17 @@ def _simplify_airport_label_text_field(base_layer_id: str, expr: object) -> obje
     return copy.deepcopy(_prefer_airport_name_reference(references))
 
 
+def _drop_icon_opacity_without_icon_image(layer: dict[str, object]) -> None:
+    """Remove no-op icon opacity expressions after qfit drops an empty icon-image."""
+    paint = layer.get("paint")
+    if not isinstance(paint, dict) or "icon-opacity" not in paint:
+        return
+    layout = layer.get("layout")
+    if isinstance(layout, dict) and "icon-image" in layout:
+        return
+    del paint["icon-opacity"]
+
+
 def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> dict[str, object]:
     """Return a copy of a Mapbox style with expression-based colors replaced by
     literal fallback colors so QGIS' converter does not render them as black.
@@ -2665,6 +2676,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     choice = _line_layout_choice(val, _LINE_LAYOUT_CHOICES[prop])
                     if choice is not None:
                         props[prop] = choice
+        _drop_icon_opacity_without_icon_image(layer)
     return style
 
 
