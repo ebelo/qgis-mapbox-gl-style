@@ -816,6 +816,16 @@ _ROAD_PEDESTRIAN_POLYGON_PATTERN_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float
     ("z16-to-z17", 16.0, 17.0),
     ("z17-plus", 17.0, None),
 )
+_RAIL_TRACK_LINE_OPACITY_EXPRESSION = ["interpolate", ["linear"], ["zoom"], 13.75, 0, 14, 1]
+_RAIL_TRACK_LINE_OPACITY_EXPRESSIONS = {
+    "road-rail-tracks": copy.deepcopy(_RAIL_TRACK_LINE_OPACITY_EXPRESSION),
+    "bridge-rail-tracks": copy.deepcopy(_RAIL_TRACK_LINE_OPACITY_EXPRESSION),
+}
+_RAIL_TRACK_LINE_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("below-z13_75", None, 13.75),
+    ("z13_75-to-z14", 13.75, 14.0),
+    ("z14-plus", 14.0, None),
+)
 _CONTOUR_LINE_LAYER_ID = "contour-line"
 _CONTOUR_LINE_OPACITY_EXPRESSION = [
     "interpolate",
@@ -2078,6 +2088,30 @@ def _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(layers: 
     return expanded_layers
 
 
+def _rail_track_line_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited rail track opacity fade into static QGIS zoom bands."""
+    return _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="line",
+        paint_property="line-opacity",
+        expressions_by_layer_id=_RAIL_TRACK_LINE_OPACITY_EXPRESSIONS,
+        zoom_bands=_RAIL_TRACK_LINE_OPACITY_ZOOM_BANDS,
+    )
+
+
+def _split_rail_track_line_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _rail_track_line_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _contour_line_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited contour index opacity expressions into static QGIS zoom bands."""
     layer_id = str(layer.get("id") or "")
@@ -3215,6 +3249,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_rail_track_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_contour_line_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",

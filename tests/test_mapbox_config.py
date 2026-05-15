@@ -2305,6 +2305,80 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "road-pedestrian-polygon-pattern-z16-to-z17")
         self.assertEqual(result[2]["id"], "road-pedestrian-polygon-pattern-z17-plus")
 
+    def _rail_track_layer(self, layer_id="road-rail-tracks", line_opacity=None):
+        if line_opacity is None:
+            line_opacity = ["interpolate", ["linear"], ["zoom"], 13.75, 0, 14, 1]
+        return {
+            "id": layer_id,
+            "type": "line",
+            "minzoom": 13,
+            "source-layer": "road",
+            "filter": ["match", ["get", "class"], ["major_rail", "minor_rail"], True, False],
+            "paint": {
+                "line-color": "hsl(75, 25%, 68%)",
+                "line-dasharray": [0.1, 15],
+                "line-opacity": line_opacity,
+            },
+        }
+
+    def test_rail_track_line_opacity_splits_to_static_zoom_bands(self):
+        style = {
+            "layers": [
+                self._rail_track_layer(),
+                self._rail_track_layer(layer_id="bridge-rail-tracks"),
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 6)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        for layer_prefix in ("road-rail-tracks", "bridge-rail-tracks"):
+            low_layer = by_id[f"{layer_prefix}-below-z13_75"]
+            mid_layer = by_id[f"{layer_prefix}-z13_75-to-z14"]
+            high_layer = by_id[f"{layer_prefix}-z14-plus"]
+            self.assertEqual(low_layer["minzoom"], 13)
+            self.assertEqual(low_layer["maxzoom"], 13.75)
+            self.assertEqual(mid_layer["minzoom"], 13.75)
+            self.assertEqual(mid_layer["maxzoom"], 14.0)
+            self.assertEqual(high_layer["minzoom"], 14.0)
+            self.assertNotIn("maxzoom", high_layer)
+            self.assertAlmostEqual(low_layer["paint"]["line-opacity"], 0.0)
+            self.assertAlmostEqual(mid_layer["paint"]["line-opacity"], 0.5)
+            self.assertAlmostEqual(high_layer["paint"]["line-opacity"], 1.0)
+            for layer in (low_layer, mid_layer, high_layer):
+                self.assertEqual(layer["paint"]["line-color"], "hsl(75, 25%, 68%)")
+                self.assertEqual(layer["paint"]["line-dasharray"], [0.1, 15])
+                self.assertEqual(
+                    layer["filter"],
+                    ["match", ["get", "class"], ["major_rail", "minor_rail"], True, False],
+                )
+
+    def test_rail_track_line_opacity_is_not_split_when_shape_changes(self):
+        line_opacity = ["get", "opacity"]
+        style = {"layers": [self._rail_track_layer(line_opacity=line_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "road-rail-tracks")
+        self.assertEqual(result["layers"][0]["paint"]["line-opacity"], line_opacity)
+
+    def test_rail_track_line_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._rail_track_layer()]
+
+        self.assertIs(
+            mapbox_config._split_rail_track_line_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_rail_track_line_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "road-rail-tracks-below-z13_75")
+        self.assertEqual(result[2]["id"], "road-rail-tracks-z13_75-to-z14")
+        self.assertEqual(result[3]["id"], "road-rail-tracks-z14-plus")
+
     def _contour_line_layer(self, line_opacity=None, minzoom=11):
         if line_opacity is None:
             line_opacity = [
