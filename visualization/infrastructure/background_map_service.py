@@ -189,7 +189,7 @@ class BackgroundMapService:
                     dd_props.setProperty(
                         87,
                         QgsProperty.fromExpression(
-                            "greatest(1, least(10, 10 - coalesce(to_int(\"sizerank\"), 8) + 1))"
+                            "greatest(1, least(10, 10 - coalesce(to_int(\"symbolrank\"), to_int(\"sizerank\"), 8) + 1))"
                         ),
                     )
                     settings.setDataDefinedProperties(dd_props)
