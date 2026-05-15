@@ -1977,6 +1977,74 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "landcover-z8-to-z10")
         self.assertEqual(result[3]["id"], "landcover-z10-to-z12")
 
+    def _national_park_layer(self, fill_opacity=None):
+        if fill_opacity is None:
+            fill_opacity = ["interpolate", ["linear"], ["zoom"], 5, 0, 6, 0.6, 12, 0.2]
+        return {
+            "id": "national-park",
+            "type": "fill",
+            "minzoom": 5,
+            "source-layer": "landuse_overlay",
+            "filter": ["==", ["get", "class"], "national_park"],
+            "paint": {
+                "fill-color": "hsla(100, 58%, 76%, 0.4)",
+                "fill-opacity": fill_opacity,
+            },
+        }
+
+    def test_national_park_fill_opacity_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._national_park_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 4)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        first_layer = by_id["national-park-z5-to-z6"]
+        second_layer = by_id["national-park-z6-to-z9"]
+        third_layer = by_id["national-park-z9-to-z12"]
+        final_layer = by_id["national-park-z12-plus"]
+        self.assertEqual(first_layer["minzoom"], 5)
+        self.assertEqual(first_layer["maxzoom"], 6.0)
+        self.assertEqual(second_layer["minzoom"], 6.0)
+        self.assertEqual(second_layer["maxzoom"], 9.0)
+        self.assertEqual(third_layer["minzoom"], 9.0)
+        self.assertEqual(third_layer["maxzoom"], 12.0)
+        self.assertEqual(final_layer["minzoom"], 12.0)
+        self.assertNotIn("maxzoom", final_layer)
+        self.assertAlmostEqual(first_layer["paint"]["fill-opacity"], 0.3)
+        self.assertAlmostEqual(second_layer["paint"]["fill-opacity"], 0.5)
+        self.assertAlmostEqual(third_layer["paint"]["fill-opacity"], 0.3)
+        self.assertAlmostEqual(final_layer["paint"]["fill-opacity"], 0.2)
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["fill-color"], "hsla(100, 58%, 76%, 0.4)")
+            self.assertEqual(layer["filter"], ["==", ["get", "class"], "national_park"])
+
+    def test_national_park_fill_opacity_is_not_split_when_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._national_park_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "national-park")
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+
+    def test_national_park_fill_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._national_park_layer()]
+
+        self.assertIs(
+            mapbox_config._split_national_park_fill_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_national_park_fill_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "national-park-z5-to-z6")
+        self.assertEqual(result[2]["id"], "national-park-z6-to-z9")
+        self.assertEqual(result[3]["id"], "national-park-z9-to-z12")
+        self.assertEqual(result[4]["id"], "national-park-z12-plus")
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",

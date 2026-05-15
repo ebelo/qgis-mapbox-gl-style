@@ -732,6 +732,16 @@ _LANDCOVER_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z8-to-z10", 8.0, 10.0),
     ("z10-to-z12", 10.0, 12.0),
 )
+_NATIONAL_PARK_LAYER_ID = "national-park"
+_NATIONAL_PARK_FILL_OPACITY_EXPRESSIONS = {
+    _NATIONAL_PARK_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 5, 0, 6, 0.6, 12, 0.2],
+}
+_NATIONAL_PARK_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z5-to-z6", 5.0, 6.0),
+    ("z6-to-z9", 6.0, 9.0),
+    ("z9-to-z12", 9.0, 12.0),
+    ("z12-plus", 12.0, None),
+)
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -1804,6 +1814,30 @@ def _split_landcover_fill_opacity_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _landcover_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _national_park_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited national-park fill opacity fade into static QGIS zoom bands."""
+    return _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="fill",
+        paint_property="fill-opacity",
+        expressions_by_layer_id=_NATIONAL_PARK_FILL_OPACITY_EXPRESSIONS,
+        zoom_bands=_NATIONAL_PARK_FILL_OPACITY_ZOOM_BANDS,
+    )
+
+
+def _split_national_park_fill_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _national_park_fill_opacity_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -2903,6 +2937,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_cliff_line_pattern_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",
