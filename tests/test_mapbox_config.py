@@ -1027,6 +1027,54 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(result["layers"][1]["layout"]["icon-image"], network_icon)
 
+    def test_transit_label_non_entrance_layout_is_literalized(self):
+        text_anchor = ["match", ["get", "stop_type"], "entrance", "left", "top"]
+        text_justify = ["match", ["get", "stop_type"], "entrance", "left", "center"]
+        text_offset = [
+            "match",
+            ["get", "stop_type"],
+            "entrance",
+            ["literal", [1, 0]],
+            ["literal", [0, 0.8]],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "transit-label",
+                    "filter": ["all", ["!=", ["get", "stop_type"], "entrance"]],
+                    "layout": {
+                        "text-anchor": text_anchor,
+                        "text-justify": text_justify,
+                        "text-offset": text_offset,
+                    },
+                },
+                {
+                    "id": "transit-label",
+                    "layout": {
+                        "text-anchor": copy.deepcopy(text_anchor),
+                        "text-justify": copy.deepcopy(text_justify),
+                        "text-offset": copy.deepcopy(text_offset),
+                    },
+                },
+                {
+                    "id": "poi-label",
+                    "filter": ["all", ["!=", ["get", "stop_type"], "entrance"]],
+                    "layout": {"text-anchor": copy.deepcopy(text_anchor)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        transit_layout = result["layers"][0]["layout"]
+        self.assertEqual(transit_layout["text-anchor"], "top")
+        self.assertEqual(transit_layout["text-justify"], "center")
+        self.assertEqual(transit_layout["text-offset"], [0, 0.8])
+        self.assertEqual(result["layers"][1]["layout"]["text-anchor"], text_anchor)
+        self.assertEqual(result["layers"][1]["layout"]["text-justify"], text_justify)
+        self.assertEqual(result["layers"][1]["layout"]["text-offset"], text_offset)
+        self.assertEqual(result["layers"][2]["layout"]["text-anchor"], text_anchor)
+
     def test_road_exit_shield_concat_icon_uses_reflen_sprite_match_fallback(self):
         exit_icon = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
         other_concat_icon = ["concat", "motorway-exit-", ["get", "reflen"]]

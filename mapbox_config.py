@@ -60,6 +60,7 @@ DEFAULT_MAPBOX_MIN_ZOOM = 0
 DEFAULT_MAPBOX_MAX_ZOOM = 22
 QGIS_TEXT_FONT_FALLBACK = "Noto Sans"
 _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE = object()
+_LAYOUT_SIMPLIFICATION_NOT_AVAILABLE = object()
 _ICON_IMAGE_EMPTY_MATCH_FALLBACKS_BY_LAYER = {
     "gate-label": "gate",
 }
@@ -194,6 +195,22 @@ _POI_LABEL_MAKI_ICON_VALUES = (
 _ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
 _ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
 _ROAD_EXIT_SHIELD_ICON_IMAGE = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
+_TRANSIT_LABEL_LAYER_ID = "transit-label"
+_TRANSIT_LABEL_STOP_TYPE_EXCLUSION = ["!=", ["get", "stop_type"], "entrance"]
+_TRANSIT_LABEL_ENTRANCE_TEXT_ANCHOR = ["match", ["get", "stop_type"], "entrance", "left", "top"]
+_TRANSIT_LABEL_ENTRANCE_TEXT_JUSTIFY = ["match", ["get", "stop_type"], "entrance", "left", "center"]
+_TRANSIT_LABEL_ENTRANCE_TEXT_OFFSET = [
+    "match",
+    ["get", "stop_type"],
+    "entrance",
+    ["literal", [1, 0]],
+    ["literal", [0, 0.8]],
+]
+_TRANSIT_LABEL_NON_ENTRANCE_LAYOUT_VALUES = {
+    "text-anchor": (_TRANSIT_LABEL_ENTRANCE_TEXT_ANCHOR, "top"),
+    "text-justify": (_TRANSIT_LABEL_ENTRANCE_TEXT_JUSTIFY, "center"),
+    "text-offset": (_TRANSIT_LABEL_ENTRANCE_TEXT_OFFSET, [0, 0.8]),
+}
 _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN = {
     2: (
         "al-motorway",
@@ -875,6 +892,31 @@ def _with_additional_filter_clauses(filter_value: object, *clauses: object) -> o
     if isinstance(filter_copy, list):
         return ["all", filter_copy, *(copy.deepcopy(clause) for clause in clauses)]
     return ["all", *(copy.deepcopy(clause) for clause in clauses)]
+
+
+def _filter_contains_clause(filter_value: object, clause: object) -> bool:
+    if filter_value == clause:
+        return True
+    if isinstance(filter_value, list) and filter_value[:1] == ["all"]:
+        return any(_filter_contains_clause(child, clause) for child in filter_value[1:])
+    return False
+
+
+def _transit_label_non_entrance_layout_value(
+    prop: str,
+    value: object,
+    filter_value: object,
+) -> object:
+    """Collapse transit-label entrance layout matches when entrances are filtered out."""
+    if not _filter_contains_clause(filter_value, _TRANSIT_LABEL_STOP_TYPE_EXCLUSION):
+        return _LAYOUT_SIMPLIFICATION_NOT_AVAILABLE
+    expected = _TRANSIT_LABEL_NON_ENTRANCE_LAYOUT_VALUES.get(prop)
+    if expected is None:
+        return _LAYOUT_SIMPLIFICATION_NOT_AVAILABLE
+    expression, literal_value = expected
+    if value != expression:
+        return _LAYOUT_SIMPLIFICATION_NOT_AVAILABLE
+    return copy.deepcopy(literal_value)
 
 
 def _is_path_type_low_zoom_filter(value: object) -> bool:
@@ -2482,6 +2524,15 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     icon_image = _road_exit_shield_icon_fallback(layer_id, val)
                     if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
                         props[prop] = icon_image
+                        continue
+                if section == "layout" and base_layer_id == _TRANSIT_LABEL_LAYER_ID:
+                    layout_value = _transit_label_non_entrance_layout_value(
+                        prop,
+                        val,
+                        layer.get("filter"),
+                    )
+                    if layout_value is not _LAYOUT_SIMPLIFICATION_NOT_AVAILABLE:
+                        props[prop] = layout_value
                         continue
                 if not isinstance(val, list):
                     continue
