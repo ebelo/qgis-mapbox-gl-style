@@ -684,7 +684,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][1]["layout"]["icon-image"], generic_empty_fallback)
         self.assertEqual(result["layers"][2]["layout"]["icon-image"], mixed_output_fallback)
 
-    def test_airport_label_icon_get_uses_existing_sprite_match_fallback(self):
+    def test_maki_icon_get_uses_existing_sprite_match_fallback(self):
         maki_icon = ["get", "maki"]
         other_field_icon = ["get", "network"]
         style = {
@@ -713,8 +713,52 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "airport",
             ],
         )
-        self.assertEqual(result["layers"][1]["layout"]["icon-image"], maki_icon)
+        self.assertEqual(
+            result["layers"][1]["layout"]["icon-image"],
+            [
+                "match",
+                ["get", "maki"],
+                "marker",
+                "marker",
+                "mountain",
+                "mountain",
+                "volcano",
+                "volcano",
+                "waterfall",
+                "waterfall",
+                "marker",
+            ],
+        )
         self.assertEqual(result["layers"][2]["layout"]["icon-image"], other_field_icon)
+
+    def test_poi_label_icon_image_uses_audited_maki_sprite_match_fallback(self):
+        poi_icon = [
+            "case",
+            ["has", "maki_beta"],
+            ["coalesce", ["image", ["get", "maki_beta"]], ["image", ["get", "maki"]]],
+            ["image", ["get", "maki"]],
+        ]
+        original_poi_icon = copy.deepcopy(poi_icon)
+        style = {
+            "layers": [
+                {"id": "poi-label-z17-plus", "layout": {"icon-image": poi_icon}},
+                {"id": "other-label", "layout": {"icon-image": copy.deepcopy(poi_icon)}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        replacement = result["layers"][0]["layout"]["icon-image"]
+        self.assertEqual(replacement[:2], ["match", ["get", "maki"]])
+        self.assertIn("lodging", replacement)
+        self.assertIn("restaurant", replacement)
+        self.assertIn("fuel", replacement)
+        self.assertIn("parking", replacement)
+        self.assertIn("zoo", replacement)
+        self.assertNotIn("terminal", replacement)
+        self.assertEqual(replacement[-1], "marker")
+        self.assertEqual(result["layers"][1]["layout"]["icon-image"], original_poi_icon)
+        self.assertEqual(poi_icon, original_poi_icon)
 
     def test_transit_label_network_icon_get_uses_maki_sprite_match_fallback(self):
         network_icon = ["get", "network"]

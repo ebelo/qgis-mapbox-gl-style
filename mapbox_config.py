@@ -68,12 +68,128 @@ _ICON_IMAGE_GET_MATCH_FALLBACKS_BY_LAYER_FIELD = {
         "fallback": "airport",
         "values": ("airport", "airfield", "heliport", "rocket"),
     },
+    ("natural-point-label", "maki"): {
+        "fallback": "marker",
+        "values": ("marker", "mountain", "volcano", "waterfall"),
+    },
     ("transit-label", "network"): {
         "fallback": "rail",
         "input": ["get", "maki"],
         "values": ("bicycle-share", "bus", "entrance", "ferry", "rail", "rail-light", "rail-metro"),
     },
 }
+
+_POI_LABEL_ICON_IMAGE = [
+    "case",
+    ["has", "maki_beta"],
+    ["coalesce", ["image", ["get", "maki_beta"]], ["image", ["get", "maki"]]],
+    ["image", ["get", "maki"]],
+]
+_POI_LABEL_MAKI_ICON_VALUES = (
+    # Complete Mapbox Streets v8 poi_label.maki value set. Each value is also
+    # present in the Mapbox Outdoors sprite sheet used by qfit's runtime path.
+    "alcohol-shop",
+    "american-football",
+    "amusement-park",
+    "aquarium",
+    "art-gallery",
+    "attraction",
+    "bakery",
+    "bank",
+    "bar",
+    "basketball",
+    "beach",
+    "beer",
+    "bicycle",
+    "bowling-alley",
+    "bridge",
+    "cafe",
+    "campsite",
+    "car",
+    "car-rental",
+    "car-repair",
+    "casino",
+    "castle",
+    "cemetery",
+    "charging-station",
+    "cinema",
+    "clothing-store",
+    "college",
+    "communications-tower",
+    "confectionery",
+    "convenience",
+    "dentist",
+    "doctor",
+    "dog-park",
+    "drinking-water",
+    "embassy",
+    "farm",
+    "fast-food",
+    "fire-station",
+    "fitness-centre",
+    "fuel",
+    "furniture",
+    "garden",
+    "globe",
+    "golf",
+    "grocery",
+    "harbor",
+    "hardware",
+    "horse-riding",
+    "hospital",
+    "ice-cream",
+    "information",
+    "jewelry-store",
+    "laundry",
+    "library",
+    "lodging",
+    "marker",
+    "mobile-phone",
+    "monument",
+    "museum",
+    "music",
+    "optician",
+    "park",
+    "parking",
+    "parking-garage",
+    "pharmacy",
+    "picnic-site",
+    "pitch",
+    "place-of-worship",
+    "playground",
+    "police",
+    "post",
+    "prison",
+    "ranger-station",
+    "religious-buddhist",
+    "religious-christian",
+    "religious-jewish",
+    "religious-muslim",
+    "restaurant",
+    "restaurant-noodle",
+    "restaurant-pizza",
+    "restaurant-seafood",
+    "school",
+    "shoe",
+    "shop",
+    "skateboard",
+    "slipway",
+    "stadium",
+    "suitcase",
+    "swimming",
+    "table-tennis",
+    "tennis",
+    "theatre",
+    "toilet",
+    "town-hall",
+    "veterinary",
+    "viewpoint",
+    "volleyball",
+    "watch",
+    "watermill",
+    "windmill",
+    "zoo",
+)
 
 _ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
 _ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
@@ -572,6 +688,20 @@ def _icon_image_get_fallback(layer_id: object, expr: object) -> object:
     fallback = match_fallback["fallback"]
     input_expr = match_fallback.get("input", expr)
     return ["match", copy.deepcopy(input_expr), *(item for value in values for item in (value, value)), fallback]
+
+
+def _maki_icon_match(values: tuple[str, ...], fallback: str) -> list[object]:
+    return ["match", ["get", "maki"], *(item for value in values for item in (value, value)), fallback]
+
+
+def _poi_label_icon_image_fallback(layer_id: object, expr: object) -> object:
+    """Replace Mapbox Outdoors' dynamic POI sprite expression with audited maki sprites."""
+    if str(layer_id or "") != _POI_LABEL_LAYER_ID or expr != _POI_LABEL_ICON_IMAGE:
+        return _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE
+    # The live z8-z18 #949 camera sample only observed maki_beta=terminal, which
+    # is not present in the Outdoors sprite sheet. Fall back to the base maki
+    # field so QGIS can render finite sprite matches instead of dropping icons.
+    return _maki_icon_match(_POI_LABEL_MAKI_ICON_VALUES, "marker")
 
 
 def _road_exit_shield_icon_fallback(layer_id: object, expr: object) -> object:
@@ -1860,11 +1990,15 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         else:
                             del props[prop]
                         continue
-                    icon_image = _icon_image_empty_match_fallback(layer_id, val)
+                    icon_image = _icon_image_empty_match_fallback(base_layer_id, val)
                     if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
                         props[prop] = icon_image
                         continue
-                    icon_image = _icon_image_get_fallback(layer_id, val)
+                    icon_image = _icon_image_get_fallback(base_layer_id, val)
+                    if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
+                        props[prop] = icon_image
+                        continue
+                    icon_image = _poi_label_icon_image_fallback(base_layer_id, val)
                     if icon_image is not _ICON_IMAGE_SIMPLIFICATION_NOT_AVAILABLE:
                         props[prop] = icon_image
                         continue
