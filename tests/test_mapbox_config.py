@@ -1510,6 +1510,122 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ["<=", ["get", "filterrank"], ["match", ["get", "class"], "historic", 5.0, 4.0]],
         )
 
+    def test_filter_simplification_splits_natural_icon_visibility_by_zoom_and_sizerank(self):
+        icon_opacity = [
+            "step",
+            ["zoom"],
+            ["step", ["get", "sizerank"], 0, 5.0, 1],
+            17.0,
+            ["step", ["get", "sizerank"], 0, 13.0, 1],
+        ]
+        text_anchor = [
+            "step",
+            ["zoom"],
+            ["step", ["get", "sizerank"], "center", 5.0, "top"],
+            17.0,
+            ["step", ["get", "sizerank"], "center", 13.0, "top"],
+        ]
+        text_offset = [
+            "step",
+            ["zoom"],
+            ["step", ["get", "sizerank"], ["literal", [0, 0]], 5.0, ["literal", [0, 0.8]]],
+            17.0,
+            ["step", ["get", "sizerank"], ["literal", [0, 0]], 13.0, ["literal", [0, 0.8]]],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "natural-point-label",
+                    "type": "symbol",
+                    "minzoom": 4,
+                    "filter": ["==", ["geometry-type"], "Point"],
+                    "layout": {
+                        "icon-image": ["get", "maki"],
+                        "icon-size": 1,
+                        "text-anchor": text_anchor,
+                        "text-offset": text_offset,
+                    },
+                    "paint": {"icon-opacity": icon_opacity},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "natural-point-label-below-z17-text",
+                "natural-point-label-below-z17-icon",
+                "natural-point-label-z17-plus-text",
+                "natural-point-label-z17-plus-icon",
+            ],
+        )
+        below_text, below_icon, high_text, high_icon = result["layers"]
+        self.assertEqual(below_text["maxzoom"], 17.0)
+        self.assertEqual(below_icon["maxzoom"], 17.0)
+        self.assertEqual(high_text["minzoom"], 17.0)
+        self.assertEqual(high_icon["minzoom"], 17.0)
+        self.assertEqual(below_text["layout"]["text-anchor"], "center")
+        self.assertEqual(below_text["layout"]["text-offset"], [0, 0])
+        self.assertNotIn("icon-image", below_text["layout"])
+        self.assertNotIn("icon-size", below_text["layout"])
+        self.assertNotIn("icon-opacity", below_text["paint"])
+        self.assertEqual(below_text["filter"], ["all", ["==", ["geometry-type"], "Point"], ["<", ["get", "sizerank"], 5.0]])
+        self.assertEqual(below_icon["layout"]["text-anchor"], "top")
+        self.assertEqual(below_icon["layout"]["text-offset"], [0, 0.8])
+        self.assertEqual(below_icon["layout"]["icon-image"][0:2], ["match", ["get", "maki"]])
+        self.assertNotIn("icon-opacity", below_icon["paint"])
+        self.assertEqual(high_text["filter"][-1], ["<", ["get", "sizerank"], 13.0])
+        self.assertEqual(high_icon["filter"][-1], [">=", ["get", "sizerank"], 13.0])
+        self.assertEqual(style["layers"][0]["paint"]["icon-opacity"], icon_opacity)
+
+    def test_filter_simplification_splits_generated_poi_icon_visibility_layer(self):
+        icon_opacity = [
+            "step",
+            ["zoom"],
+            ["step", ["get", "sizerank"], 0, 5.0, 1],
+            17.0,
+            ["step", ["get", "sizerank"], 0, 13.0, 1],
+        ]
+        text_anchor = [
+            "step",
+            ["zoom"],
+            ["step", ["get", "sizerank"], "center", 5.0, "top"],
+            17.0,
+            ["step", ["get", "sizerank"], "center", 13.0, "top"],
+        ]
+        text_offset = [
+            "step",
+            ["zoom"],
+            ["step", ["get", "sizerank"], ["literal", [0, 0]], 5.0, ["literal", [0, 0.8]]],
+            17.0,
+            ["step", ["get", "sizerank"], ["literal", [0, 0]], 13.0, ["literal", [0, 0.8]]],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "poi-label-z17-plus",
+                    "type": "symbol",
+                    "minzoom": 17,
+                    "filter": ["<=", ["get", "filterrank"], 4],
+                    "layout": {"icon-image": "restaurant", "text-anchor": text_anchor, "text-offset": text_offset},
+                    "paint": {"icon-opacity": icon_opacity},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual([layer["id"] for layer in result["layers"]], ["poi-label-z17-plus-z17-plus-text", "poi-label-z17-plus-z17-plus-icon"])
+        text_layer, icon_layer = result["layers"]
+        self.assertEqual(text_layer["filter"], ["all", ["<=", ["get", "filterrank"], 4], ["<", ["get", "sizerank"], 13.0]])
+        self.assertEqual(icon_layer["filter"], ["all", ["<=", ["get", "filterrank"], 4], [">=", ["get", "sizerank"], 13.0]])
+        self.assertNotIn("icon-image", text_layer["layout"])
+        self.assertEqual(icon_layer["layout"]["icon-image"], "restaurant")
+        self.assertNotIn("icon-opacity", text_layer["paint"])
+        self.assertNotIn("icon-opacity", icon_layer["paint"])
+
     def test_filter_simplification_clamps_minor_line_zoom_override_to_layer_bounds(self):
         minor_filter = [
             "match",
