@@ -2045,6 +2045,72 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[3]["id"], "national-park-z9-to-z12")
         self.assertEqual(result[4]["id"], "national-park-z12-plus")
 
+    def _wetland_layer(self, fill_opacity=None):
+        if fill_opacity is None:
+            fill_opacity = ["interpolate", ["linear"], ["zoom"], 10, 0.25, 10.5, 0.15]
+        return {
+            "id": "wetland",
+            "type": "fill",
+            "minzoom": 5,
+            "source-layer": "landuse_overlay",
+            "filter": ["match", ["get", "class"], ["wetland", "wetland_noveg"], True, False],
+            "paint": {
+                "fill-color": "hsla(175, 53%, 73%, 0.28)",
+                "fill-opacity": fill_opacity,
+            },
+        }
+
+    def test_wetland_fill_opacity_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._wetland_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 3)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["wetland-below-z10"]
+        mid_layer = by_id["wetland-z10-to-z10_5"]
+        high_layer = by_id["wetland-z10_5-plus"]
+        self.assertEqual(low_layer["minzoom"], 5)
+        self.assertEqual(low_layer["maxzoom"], 10.0)
+        self.assertEqual(mid_layer["minzoom"], 10.0)
+        self.assertEqual(mid_layer["maxzoom"], 10.5)
+        self.assertEqual(high_layer["minzoom"], 10.5)
+        self.assertNotIn("maxzoom", high_layer)
+        self.assertAlmostEqual(low_layer["paint"]["fill-opacity"], 0.25)
+        self.assertAlmostEqual(mid_layer["paint"]["fill-opacity"], 0.2)
+        self.assertAlmostEqual(high_layer["paint"]["fill-opacity"], 0.15)
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["fill-color"], "hsla(175, 53%, 73%, 0.28)")
+            self.assertEqual(
+                layer["filter"],
+                ["match", ["get", "class"], ["wetland", "wetland_noveg"], True, False],
+            )
+
+    def test_wetland_fill_opacity_is_not_split_when_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._wetland_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "wetland")
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+
+    def test_wetland_fill_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._wetland_layer()]
+
+        self.assertIs(
+            mapbox_config._split_wetland_fill_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_wetland_fill_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "wetland-below-z10")
+        self.assertEqual(result[2]["id"], "wetland-z10-to-z10_5")
+        self.assertEqual(result[3]["id"], "wetland-z10_5-plus")
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",

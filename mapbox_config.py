@@ -742,6 +742,15 @@ _NATIONAL_PARK_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | N
     ("z9-to-z12", 9.0, 12.0),
     ("z12-plus", 12.0, None),
 )
+_WETLAND_LAYER_ID = "wetland"
+_WETLAND_FILL_OPACITY_EXPRESSIONS = {
+    _WETLAND_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 10, 0.25, 10.5, 0.15],
+}
+_WETLAND_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("below-z10", None, 10.0),
+    ("z10-to-z10_5", 10.0, 10.5),
+    ("z10_5-plus", 10.5, None),
+)
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
     "bridge-minor-case": 14.0,
@@ -1842,6 +1851,30 @@ def _split_national_park_fill_opacity_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _wetland_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited wetland fill opacity fade into static QGIS zoom bands."""
+    return _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="fill",
+        paint_property="fill-opacity",
+        expressions_by_layer_id=_WETLAND_FILL_OPACITY_EXPRESSIONS,
+        zoom_bands=_WETLAND_FILL_OPACITY_ZOOM_BANDS,
+    )
+
+
+def _split_wetland_fill_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _wetland_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _has_label_icon_visibility_expression(layer: dict[str, object]) -> bool:
     base_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
     layout = layer.get("layout")
@@ -2938,6 +2971,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",
