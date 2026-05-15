@@ -451,6 +451,238 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         width = result["layers"][0]["paint"]["line-width"]
         self.assertEqual(width, 3.0)
 
+    def test_regional_major_road_widths_are_split_by_zoom_band(self):
+        zoom_width = ["interpolate", ["linear"], ["zoom"], 3, 1, 5, 3, 6, 4, 12, 10]
+        zoom_filter = [
+            "step",
+            ["zoom"],
+            ["==", ["get", "class"], "motorway"],
+            5,
+            ["all", ["==", ["get", "class"], "motorway"], ["==", ["get", "structure"], "none"]],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "road-motorway-trunk",
+                    "type": "line",
+                    "minzoom": 3,
+                    "filter": zoom_filter,
+                    "paint": {"line-width": zoom_width},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            [
+                "road-motorway-trunk-z3-to-z5",
+                "road-motorway-trunk-z5-to-z6",
+                "road-motorway-trunk-z6-to-z9",
+                "road-motorway-trunk-z9-to-z12",
+                "road-motorway-trunk",
+            ],
+        )
+        self.assertEqual((layers[0]["minzoom"], layers[0]["maxzoom"]), (3.0, 5.0))
+        self.assertEqual((layers[1]["minzoom"], layers[1]["maxzoom"]), (5.0, 6.0))
+        self.assertEqual((layers[2]["minzoom"], layers[2]["maxzoom"]), (6.0, 9.0))
+        self.assertEqual((layers[3]["minzoom"], layers[3]["maxzoom"]), (9.0, 12.0))
+        self.assertEqual(layers[4]["minzoom"], 12.0)
+        self.assertNotIn("maxzoom", layers[4])
+        self.assertAlmostEqual(layers[0]["paint"]["line-width"], 3 * 2.1 * 25.4 / 96.0)
+        self.assertAlmostEqual(layers[1]["paint"]["line-width"], 4 * 2.1 * 25.4 / 96.0)
+        self.assertEqual(layers[2]["paint"]["line-width"], 3.0)
+        self.assertEqual(layers[3]["paint"]["line-width"], 3.0)
+        self.assertAlmostEqual(layers[4]["paint"]["line-width"], 10 * 25.4 / 96.0)
+        self.assertEqual(layers[0]["filter"], ["==", ["get", "class"], "motorway"])
+        self.assertEqual(
+            layers[1]["filter"],
+            ["all", ["==", ["get", "class"], "motorway"], ["==", ["get", "structure"], "none"]],
+        )
+        for layer in layers[2:]:
+            self.assertEqual(layer["filter"], layers[1]["filter"])
+
+    def test_regional_primary_road_width_is_split_from_layer_minzoom(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-primary",
+                    "type": "line",
+                    "minzoom": 6,
+                    "paint": {"line-width": ["interpolate", ["linear"], ["zoom"], 6, 2, 9, 5, 12, 8]},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            ["road-primary-z6-to-z9", "road-primary-z9-to-z12", "road-primary"],
+        )
+        self.assertEqual((layers[0]["minzoom"], layers[0]["maxzoom"]), (6.0, 9.0))
+        self.assertEqual((layers[1]["minzoom"], layers[1]["maxzoom"]), (9.0, 12.0))
+        self.assertEqual(layers[2]["minzoom"], 12.0)
+        self.assertAlmostEqual(layers[0]["paint"]["line-width"], 5 * 2.1 * 25.4 / 96.0)
+        self.assertEqual(layers[1]["paint"]["line-width"], 3.0)
+        self.assertAlmostEqual(layers[2]["paint"]["line-width"], 8 * 25.4 / 96.0)
+
+    def test_regional_secondary_road_width_uses_lower_qgis_scale(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-secondary-tertiary",
+                    "type": "line",
+                    "minzoom": 9,
+                    "paint": {"line-width": ["interpolate", ["linear"], ["zoom"], 9, 2, 12, 4]},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            ["road-secondary-tertiary-z9-to-z12", "road-secondary-tertiary"],
+        )
+        self.assertAlmostEqual(layers[0]["paint"]["line-width"], 4 * 1.3 * 25.4 / 96.0)
+        self.assertAlmostEqual(layers[1]["paint"]["line-width"], 4 * 25.4 / 96.0)
+
+    def test_regional_road_width_split_preserves_layers_that_end_before_z12(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-primary",
+                    "type": "line",
+                    "minzoom": 6,
+                    "maxzoom": 10,
+                    "paint": {"line-width": ["interpolate", ["linear"], ["zoom"], 6, 2, 9, 5, 12, 8]},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            ["road-primary-z6-to-z9", "road-primary-z9-to-z12"],
+        )
+        self.assertEqual((layers[0]["minzoom"], layers[0]["maxzoom"]), (6.0, 9.0))
+        self.assertEqual((layers[1]["minzoom"], layers[1]["maxzoom"]), (9.0, 10.0))
+        self.assertAlmostEqual(layers[0]["paint"]["line-width"], 5 * 2.1 * 25.4 / 96.0)
+        self.assertEqual(layers[1]["paint"]["line-width"], 3.0)
+
+    def test_regional_road_width_split_treats_missing_minzoom_as_open_lower_bound(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-motorway-trunk",
+                    "type": "line",
+                    "paint": {"line-width": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 3, 12, 10]},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            [
+                "road-motorway-trunk-z3-to-z5",
+                "road-motorway-trunk-z5-to-z6",
+                "road-motorway-trunk-z6-to-z9",
+                "road-motorway-trunk-z9-to-z12",
+                "road-motorway-trunk",
+            ],
+        )
+        self.assertNotIn("minzoom", layers[0])
+        self.assertEqual(layers[0]["maxzoom"], 5.0)
+        self.assertAlmostEqual(layers[0]["paint"]["line-width"], 3 * 2.1 * 25.4 / 96.0)
+
+    def test_regional_road_width_split_does_not_floor_line_offset(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-primary",
+                    "type": "line",
+                    "minzoom": 6,
+                    "paint": {
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 6, 2, 12, 4],
+                        "line-offset": ["interpolate", ["linear"], ["zoom"], 6, 0, 12, 0],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertAlmostEqual(layers[0]["paint"]["line-width"], 3 * 2.1 * 25.4 / 96.0)
+        self.assertEqual(layers[0]["paint"]["line-offset"], 0.1)
+
+    def test_regional_road_width_split_does_not_floor_line_gap_width(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-motorway-trunk-case",
+                    "type": "line",
+                    "minzoom": 3,
+                    "paint": {
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1, 12, 4],
+                        "line-gap-width": ["interpolate", ["linear"], ["zoom"], 3, 0, 5, 1, 12, 4],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertGreater(layers[0]["paint"]["line-width"], 0.6)
+        self.assertAlmostEqual(layers[0]["paint"]["line-gap-width"], 1 * 2.1 * 25.4 / 96.0)
+
+    def test_regional_major_road_case_gap_width_uses_split_zoom_band(self):
+        style = {
+            "layers": [
+                {
+                    "id": "road-motorway-trunk-case",
+                    "type": "line",
+                    "minzoom": 3,
+                    "paint": {
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 14, 1, 22, 2],
+                        "line-gap-width": ["interpolate", ["linear"], ["zoom"], 3, 1, 6, 4, 12, 10],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layers = result["layers"]
+        self.assertEqual(
+            [layer["id"] for layer in layers],
+            [
+                "road-motorway-trunk-case-z3-to-z5",
+                "road-motorway-trunk-case-z5-to-z6",
+                "road-motorway-trunk-case-z6-to-z9",
+                "road-motorway-trunk-case-z9-to-z12",
+                "road-motorway-trunk-case",
+            ],
+        )
+        self.assertAlmostEqual(layers[0]["paint"]["line-gap-width"], 3 * 2.1 * 25.4 / 96.0)
+        self.assertAlmostEqual(layers[1]["paint"]["line-gap-width"], 4 * 2.1 * 25.4 / 96.0)
+        self.assertEqual(layers[2]["paint"]["line-gap-width"], 3.0)
+        self.assertEqual(layers[3]["paint"]["line-gap-width"], 3.0)
+        self.assertAlmostEqual(layers[4]["paint"]["line-gap-width"], 10 * 25.4 / 96.0)
+        for layer in layers[:4]:
+            self.assertEqual(layer["paint"]["line-width"], 0.6)
+
     def test_full_line_opacity_expressions_simplify_to_scalar_default(self):
         style = {
             "layers": [

@@ -496,6 +496,32 @@ _ZOOM_NORMALIZED_LINE_FILTER_LAYER_IDS = {
     "tunnel-minor",
     "tunnel-minor-case",
 }
+_REGIONAL_MAJOR_ROAD_WIDTH_LAYER_IDS = {
+    "road-motorway-trunk",
+    "road-motorway-trunk-case",
+    "road-primary",
+    "road-primary-case",
+    "road-secondary-tertiary",
+    "road-secondary-tertiary-case",
+}
+_REGIONAL_MAJOR_ROAD_STROKE_WIDTH_PROPS = {"line-width", "line-gap-width"}
+_REGIONAL_CORE_ROAD_WIDTH_LAYER_IDS = {
+    "road-motorway-trunk",
+    "road-motorway-trunk-case",
+    "road-primary",
+    "road-primary-case",
+}
+_REGIONAL_MAJOR_ROAD_WIDTH_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z3-to-z5", None, 5.0),
+    ("z5-to-z6", 5.0, 6.0),
+    ("z6-to-z9", 6.0, 9.0),
+    ("z9-to-z12", 9.0, 12.0),
+)
+_REGIONAL_MAJOR_ROAD_WIDTH_HIGH_ZOOM_MIN = 12.0
+_REGIONAL_MAJOR_ROAD_WIDTH_QGIS_SCALE = 1.3
+_REGIONAL_MAJOR_ROAD_MIN_WIDTH_MM = 0.32
+_REGIONAL_CORE_ROAD_WIDTH_QGIS_SCALE = 2.1
+_REGIONAL_CORE_ROAD_MIN_WIDTH_MM = 0.60
 _PATH_TYPE_FILTER_SPLIT_LAYER_IDS = {
     "bridge-path-bg",
     "road-path",
@@ -1102,8 +1128,22 @@ def _is_settlement_minor_label_layer_id(layer_id: object) -> bool:
     return normalized == _SETTLEMENT_MINOR_LABEL_LAYER_ID or normalized.startswith(f"{_SETTLEMENT_MINOR_LABEL_LAYER_ID}-")
 
 
+def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    for suffix, _band_minzoom, _band_maxzoom in _REGIONAL_MAJOR_ROAD_WIDTH_BANDS:
+        band_suffix = f"-{suffix}"
+        if normalized.endswith(band_suffix):
+            base_layer_id = normalized[: -len(band_suffix)]
+            if base_layer_id in _REGIONAL_MAJOR_ROAD_WIDTH_LAYER_IDS:
+                return base_layer_id
+    return None
+
+
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
+    regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
+    if regional_road_layer_id is not None:
+        return regional_road_layer_id
     if _is_road_number_shield_layer_id(layer_id):
         return _ROAD_NUMBER_SHIELD_LAYER_ID
     if _is_poi_label_layer_id(layer_id):
@@ -1115,6 +1155,123 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     if _is_settlement_minor_label_layer_id(layer_id):
         return _SETTLEMENT_MINOR_LABEL_LAYER_ID
     return str(layer_id or "")
+
+
+def _is_regional_major_road_width_variant(layer_id: object) -> bool:
+    return _regional_major_road_width_base_layer_id(layer_id) is not None
+
+
+def _regional_major_road_width_scale(layer_id: object) -> float:
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
+    if base_layer_id in _REGIONAL_CORE_ROAD_WIDTH_LAYER_IDS:
+        return _REGIONAL_CORE_ROAD_WIDTH_QGIS_SCALE
+    return _REGIONAL_MAJOR_ROAD_WIDTH_QGIS_SCALE
+
+
+def _regional_major_road_min_width_mm(layer_id: object) -> float:
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
+    if base_layer_id in _REGIONAL_CORE_ROAD_WIDTH_LAYER_IDS:
+        return _REGIONAL_CORE_ROAD_MIN_WIDTH_MM
+    return _REGIONAL_MAJOR_ROAD_MIN_WIDTH_MM
+
+
+def _effective_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+) -> tuple[float | None, float | None] | None:
+    effective_minzoom = existing_minzoom
+    if band_minzoom is not None:
+        effective_minzoom = (
+            max(existing_minzoom, band_minzoom)
+            if existing_minzoom is not None
+            else band_minzoom
+        )
+
+    effective_maxzoom = existing_maxzoom
+    if band_maxzoom is not None:
+        effective_maxzoom = (
+            min(existing_maxzoom, band_maxzoom)
+            if existing_maxzoom is not None
+            else band_maxzoom
+        )
+
+    if effective_minzoom is not None and effective_maxzoom is not None and effective_minzoom >= effective_maxzoom:
+        return None
+    return effective_minzoom, effective_maxzoom
+
+
+def _set_zoom_bounds(layer: dict[str, object], minzoom: float | None, maxzoom: float | None) -> None:
+    if minzoom is None:
+        layer.pop("minzoom", None)
+    else:
+        layer["minzoom"] = minzoom
+    if maxzoom is None:
+        layer.pop("maxzoom", None)
+    else:
+        layer["maxzoom"] = maxzoom
+
+
+def _regional_major_road_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split z3-z12 major road strokes so regional views keep Mapbox widths."""
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
+    if base_layer_id not in _REGIONAL_MAJOR_ROAD_WIDTH_LAYER_IDS or layer.get("type") != "line":
+        return None
+    paint = layer.get("paint")
+    if not isinstance(paint, dict) or not any(
+        isinstance(paint.get(prop), list) for prop in _REGIONAL_MAJOR_ROAD_STROKE_WIDTH_PROPS
+    ):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    if existing_minzoom is not None and existing_minzoom >= _REGIONAL_MAJOR_ROAD_WIDTH_HIGH_ZOOM_MIN:
+        return None
+    if (
+        existing_minzoom is not None
+        and existing_maxzoom is not None
+        and existing_maxzoom <= existing_minzoom
+    ):
+        return None
+
+    variants: list[dict[str, object]] = []
+    layer_id = str(layer.get("id") or base_layer_id)
+    for suffix, band_minzoom, band_maxzoom in _REGIONAL_MAJOR_ROAD_WIDTH_BANDS:
+        zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom)
+        if zoom_band is None:
+            continue
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        _set_zoom_bounds(variant, *zoom_band)
+        variants.append(variant)
+
+    high_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        _REGIONAL_MAJOR_ROAD_WIDTH_HIGH_ZOOM_MIN,
+        None,
+    )
+    if not variants:
+        return None
+    if high_zoom_band is not None:
+        high_zoom_variant = copy.deepcopy(layer)
+        _set_zoom_bounds(high_zoom_variant, *high_zoom_band)
+        variants.append(high_zoom_variant)
+    return variants
+
+
+def _split_regional_major_road_width_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _regional_major_road_width_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _has_settlement_dot_icon_expression(layer: dict[str, object]) -> bool:
@@ -2211,6 +2368,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     simplified.  Literal strings (``hsl(...)``, ``#rrggbb``) are kept as-is.
     """
     style = copy.deepcopy(style_definition)
+    style["layers"] = _split_regional_major_road_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
@@ -2332,10 +2490,26 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if fallback is not None:
                         props[prop] = fallback
                 elif prop in _WIDTH_PROPS:
-                    width = _extract_midrange_size(val)
+                    width = None
+                    is_regional_road_width_variant = (
+                        prop in _REGIONAL_MAJOR_ROAD_STROKE_WIDTH_PROPS
+                        and _is_regional_major_road_width_variant(layer_id)
+                    )
+                    if is_regional_road_width_variant:
+                        width = _extract_zoom_scalar_size(
+                            val,
+                            minzoom=layer.get("minzoom"),
+                            maxzoom=layer.get("maxzoom"),
+                        )
+                    if width is None:
+                        width = _extract_midrange_size(val)
                     if width is not None:
+                        if is_regional_road_width_variant:
+                            width *= _regional_major_road_width_scale(layer_id)
                         # Convert px → mm (96 DPI) and clamp to sane range
                         width_mm = width * 25.4 / 96.0
+                        if is_regional_road_width_variant and prop == "line-width":
+                            width_mm = max(width_mm, _regional_major_road_min_width_mm(layer_id))
                         props[prop] = max(0.1, min(width_mm, _MAX_LINE_WIDTH_MM))
                 elif prop == "line-dasharray":
                     dasharray = _extract_line_dasharray_literal(val)
