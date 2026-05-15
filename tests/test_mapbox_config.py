@@ -1,4 +1,5 @@
 import copy
+import json
 import unittest
 from unittest.mock import patch
 
@@ -1976,6 +1977,137 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "landcover-below-z8")
         self.assertEqual(result[2]["id"], "landcover-z8-to-z10")
         self.assertEqual(result[3]["id"], "landcover-z10-to-z12")
+
+    def _landuse_layer(self, fill_opacity=None, filter_value=None):
+        if fill_opacity is None:
+            fill_opacity = [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                8,
+                ["match", ["get", "class"], "residential", 0.8, 0.2],
+                10,
+                ["match", ["get", "class"], "residential", 0, 1],
+            ]
+        if filter_value is None:
+            filter_value = ["==", ["get", "source"], "test"]
+        return {
+            "id": "landuse",
+            "type": "fill",
+            "minzoom": 5,
+            "source-layer": "landuse",
+            "filter": filter_value,
+            "paint": {
+                "fill-color": "hsl(60, 22%, 72%)",
+                "fill-opacity": fill_opacity,
+            },
+        }
+
+    def test_landuse_fill_opacity_splits_to_class_and_zoom_bands(self):
+        style = {"layers": [self._landuse_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 6)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        residential_low = by_id["landuse-residential-below-z8"]
+        residential_mid = by_id["landuse-residential-z8-to-z10"]
+        residential_high = by_id["landuse-residential-z10-plus"]
+        other_low = by_id["landuse-other-below-z8"]
+        other_mid = by_id["landuse-other-z8-to-z10"]
+        other_high = by_id["landuse-other-z10-plus"]
+        self.assertEqual(residential_low["minzoom"], 5)
+        self.assertEqual(residential_low["maxzoom"], 8.0)
+        self.assertEqual(residential_mid["minzoom"], 8.0)
+        self.assertEqual(residential_mid["maxzoom"], 10.0)
+        self.assertEqual(residential_high["minzoom"], 10.0)
+        self.assertNotIn("maxzoom", residential_high)
+        self.assertEqual(other_low["minzoom"], 5)
+        self.assertEqual(other_low["maxzoom"], 8.0)
+        self.assertEqual(other_mid["minzoom"], 8.0)
+        self.assertEqual(other_mid["maxzoom"], 10.0)
+        self.assertEqual(other_high["minzoom"], 10.0)
+        self.assertNotIn("maxzoom", other_high)
+        self.assertAlmostEqual(residential_low["paint"]["fill-opacity"], 0.8)
+        self.assertAlmostEqual(residential_mid["paint"]["fill-opacity"], 0.4)
+        self.assertAlmostEqual(residential_high["paint"]["fill-opacity"], 0.0)
+        self.assertAlmostEqual(other_low["paint"]["fill-opacity"], 0.2)
+        self.assertAlmostEqual(other_mid["paint"]["fill-opacity"], 0.6)
+        self.assertAlmostEqual(other_high["paint"]["fill-opacity"], 1.0)
+        for layer in (residential_low, residential_mid, residential_high):
+            self.assertEqual(
+                layer["filter"],
+                [
+                    "all",
+                    ["==", ["get", "source"], "test"],
+                    ["match", ["get", "class"], "residential", True, False],
+                ],
+            )
+            self.assertEqual(layer["paint"]["fill-color"], "hsl(60, 22%, 72%)")
+        for layer in (other_low, other_mid, other_high):
+            self.assertEqual(
+                layer["filter"],
+                [
+                    "all",
+                    ["==", ["get", "source"], "test"],
+                    ["match", ["get", "class"], "residential", False, True],
+                ],
+            )
+            self.assertEqual(layer["paint"]["fill-color"], "hsl(60, 22%, 72%)")
+
+    def test_landuse_fill_opacity_uses_effective_zoom_band_midpoints(self):
+        layer = self._landuse_layer()
+        layer["minzoom"] = 9.5
+        style = {"layers": [layer]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertNotIn("landuse-residential-below-z8", by_id)
+        self.assertNotIn("landuse-other-below-z8", by_id)
+        self.assertAlmostEqual(by_id["landuse-residential-z8-to-z10"]["paint"]["fill-opacity"], 0.1)
+        self.assertAlmostEqual(by_id["landuse-other-z8-to-z10"]["paint"]["fill-opacity"], 0.9)
+        self.assertAlmostEqual(by_id["landuse-residential-z10-plus"]["paint"]["fill-opacity"], 0.0)
+        self.assertAlmostEqual(by_id["landuse-other-z10-plus"]["paint"]["fill-opacity"], 1.0)
+
+    def test_landuse_fill_opacity_variants_keep_filter_normalization(self):
+        style = {"layers": [self._landuse_layer(filter_value=["step", ["zoom"], False, 8, True])]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-residential-z8-to-z10"),
+            "landuse",
+        )
+        self.assertNotIn('"zoom"', json.dumps([layer["filter"] for layer in result["layers"]]))
+
+    def test_landuse_fill_opacity_is_not_split_when_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._landuse_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "landuse")
+        self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+
+    def test_landuse_fill_opacity_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._landuse_layer()]
+
+        self.assertIs(
+            mapbox_config._split_landuse_fill_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_landuse_fill_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "landuse-residential-below-z8")
+        self.assertEqual(result[2]["id"], "landuse-residential-z8-to-z10")
+        self.assertEqual(result[3]["id"], "landuse-residential-z10-plus")
+        self.assertEqual(result[4]["id"], "landuse-other-below-z8")
+        self.assertEqual(result[5]["id"], "landuse-other-z8-to-z10")
+        self.assertEqual(result[6]["id"], "landuse-other-z10-plus")
 
     def _national_park_layer(self, fill_opacity=None):
         if fill_opacity is None:

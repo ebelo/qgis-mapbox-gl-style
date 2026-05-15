@@ -732,6 +732,63 @@ _LANDCOVER_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z8-to-z10", 8.0, 10.0),
     ("z10-to-z12", 10.0, 12.0),
 )
+_LANDUSE_LAYER_ID = "landuse"
+_LANDUSE_FILL_OPACITY_EXPRESSION = [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    8,
+    ["match", ["get", "class"], "residential", 0.8, 0.2],
+    10,
+    ["match", ["get", "class"], "residential", 0, 1],
+]
+_LANDUSE_FILL_OPACITY_VARIANTS: tuple[
+    tuple[str, object, float | None, float | None, bool],
+    ...,
+] = (
+    (
+        "residential-below-z8",
+        ["match", ["get", "class"], "residential", True, False],
+        None,
+        8.0,
+        True,
+    ),
+    (
+        "residential-z8-to-z10",
+        ["match", ["get", "class"], "residential", True, False],
+        8.0,
+        10.0,
+        True,
+    ),
+    (
+        "residential-z10-plus",
+        ["match", ["get", "class"], "residential", True, False],
+        10.0,
+        None,
+        True,
+    ),
+    (
+        "other-below-z8",
+        ["match", ["get", "class"], "residential", False, True],
+        None,
+        8.0,
+        False,
+    ),
+    (
+        "other-z8-to-z10",
+        ["match", ["get", "class"], "residential", False, True],
+        8.0,
+        10.0,
+        False,
+    ),
+    (
+        "other-z10-plus",
+        ["match", ["get", "class"], "residential", False, True],
+        10.0,
+        None,
+        False,
+    ),
+)
 _NATIONAL_PARK_LAYER_ID = "national-park"
 _NATIONAL_PARK_FILL_OPACITY_EXPRESSIONS = {
     _NATIONAL_PARK_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 5, 0, 6, 0.6, 12, 0.2],
@@ -1311,6 +1368,16 @@ def _is_settlement_minor_label_layer_id(layer_id: object) -> bool:
     return normalized == _SETTLEMENT_MINOR_LABEL_LAYER_ID or normalized.startswith(f"{_SETTLEMENT_MINOR_LABEL_LAYER_ID}-")
 
 
+def _landuse_fill_opacity_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    if normalized == _LANDUSE_LAYER_ID:
+        return _LANDUSE_LAYER_ID
+    for suffix, _class_filter, _band_minzoom, _band_maxzoom, _fill_opacity in _LANDUSE_FILL_OPACITY_VARIANTS:
+        if normalized == f"{_LANDUSE_LAYER_ID}-{suffix}":
+            return _LANDUSE_LAYER_ID
+    return None
+
+
 def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     for suffix, _band_minzoom, _band_maxzoom in _REGIONAL_MAJOR_ROAD_WIDTH_BANDS:
@@ -1327,6 +1394,9 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
     if regional_road_layer_id is not None:
         return regional_road_layer_id
+    landuse_layer_id = _landuse_fill_opacity_base_layer_id(layer_id)
+    if landuse_layer_id is not None:
+        return landuse_layer_id
     if _is_road_number_shield_layer_id(layer_id):
         return _ROAD_NUMBER_SHIELD_LAYER_ID
     if _is_poi_label_layer_id(layer_id):
@@ -1852,6 +1922,84 @@ def _split_landcover_fill_opacity_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _landcover_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _landuse_fill_opacity_at_zoom(zoom: float, *, residential: bool) -> float | None:
+    lower_opacity = 0.8 if residential else 0.2
+    upper_opacity = 0.0 if residential else 1.0
+    if zoom <= 8.0:
+        return lower_opacity
+    if zoom >= 10.0:
+        return upper_opacity
+    factor = _interpolate_filter_factor(["linear"], zoom, 8.0, 10.0)
+    if factor is None:
+        return None
+    return _clamp_opacity_value(lower_opacity + ((upper_opacity - lower_opacity) * factor))
+
+
+def _landuse_fill_opacity_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+    *,
+    residential: bool,
+) -> float | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    return _landuse_fill_opacity_at_zoom(representative_zoom, residential=residential)
+
+
+def _landuse_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited landuse opacity class fade into static QGIS zoom/class bands."""
+    layer_id = str(layer.get("id") or "")
+    paint = layer.get("paint")
+    if layer_id != _LANDUSE_LAYER_ID or layer.get("type") != "fill" or not isinstance(paint, dict):
+        return None
+    if paint.get("fill-opacity") != _LANDUSE_FILL_OPACITY_EXPRESSION:
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, class_filter, band_minzoom, band_maxzoom, residential in _LANDUSE_FILL_OPACITY_VARIANTS:
+        fill_opacity = _landuse_fill_opacity_for_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+            residential=residential,
+        )
+        if fill_opacity is None:
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["fill-opacity"] = fill_opacity
+        variants.append(variant)
+    return variants or None
+
+
+def _split_landuse_fill_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _landuse_fill_opacity_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -3063,6 +3211,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_cliff_line_pattern_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_landuse_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
