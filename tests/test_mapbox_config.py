@@ -1117,6 +1117,161 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(style["layers"][0]["filter"], major_filter)
         self.assertEqual(style["layers"][1]["filter"], minor_filter)
 
+    def _settlement_dot_icon_layout(self):
+        return {
+            "icon-image": [
+                "step",
+                ["zoom"],
+                [
+                    "case",
+                    ["==", ["get", "capital"], 2],
+                    "border-dot-13",
+                    ["step", ["get", "symbolrank"], "dot-11", 9, "dot-10", 11, "dot-9"],
+                ],
+                8.0,
+                "",
+            ],
+            "text-anchor": ["step", ["zoom"], ["get", "text_anchor"], 8.0, "center"],
+            "text-radial-offset": ["step", ["zoom"], ["match", ["get", "capital"], 2, 0.6, 0.55], 8.0, 0],
+            "text-justify": [
+                "step",
+                ["zoom"],
+                [
+                    "match",
+                    ["get", "text_anchor"],
+                    ["left", "bottom-left", "top-left"],
+                    "left",
+                    ["right", "bottom-right", "top-right"],
+                    "right",
+                    "center",
+                ],
+                8.0,
+                "center",
+            ],
+        }
+
+    def test_filter_simplification_splits_major_settlement_dot_icons_by_zoom_and_rank(self):
+        base_filter = ["<=", ["get", "filterrank"], 3]
+        major_filter = [
+            "all",
+            base_filter,
+            [
+                "step",
+                ["zoom"],
+                False,
+                2,
+                ["<=", ["get", "symbolrank"], 6],
+                4,
+                ["<", ["get", "symbolrank"], 7],
+                6,
+                ["<", ["get", "symbolrank"], 8],
+                7,
+                ["<", ["get", "symbolrank"], 10],
+            ],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-major-label",
+                    "type": "symbol",
+                    "minzoom": 2,
+                    "maxzoom": 15,
+                    "filter": major_filter,
+                    "layout": self._settlement_dot_icon_layout(),
+                }
+            ]
+        }
+        original_icon_image = copy.deepcopy(style["layers"][0]["layout"]["icon-image"])
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 17)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        city_filter = ["match", ["get", "type"], ["city"], True, False]
+        capital_layer = by_id["settlement-major-label-z2-to-z4-capital-border-dot"]
+        dot_layer = by_id["settlement-major-label-z7-to-z8-dot-10"]
+        text_layer = by_id["settlement-major-label-z8-plus"]
+        self.assertEqual(capital_layer["minzoom"], 2)
+        self.assertEqual(capital_layer["maxzoom"], 4.0)
+        self.assertEqual(dot_layer["minzoom"], 7.0)
+        self.assertEqual(dot_layer["maxzoom"], 8.0)
+        self.assertEqual(text_layer["minzoom"], 8.0)
+        self.assertEqual(text_layer["maxzoom"], 15)
+        self.assertEqual(capital_layer["layout"]["icon-image"], "border-dot-13")
+        self.assertEqual(dot_layer["layout"]["icon-image"], "dot-10")
+        self.assertEqual(capital_layer["layout"]["text-anchor"], ["get", "text_anchor"])
+        self.assertEqual(capital_layer["layout"]["text-radial-offset"], 0.6)
+        self.assertEqual(dot_layer["layout"]["text-radial-offset"], 0.55)
+        self.assertEqual(capital_layer["layout"]["text-justify"], self._settlement_dot_icon_layout()["text-justify"][2])
+        self.assertEqual(
+            capital_layer["filter"],
+            ["all", ["all", base_filter, ["<=", ["get", "symbolrank"], 6], ["==", ["get", "capital"], 2]], city_filter],
+        )
+        self.assertEqual(
+            dot_layer["filter"],
+            [
+                "all",
+                [
+                    "all",
+                    base_filter,
+                    ["<", ["get", "symbolrank"], 10],
+                    ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 9], ["<", ["get", "symbolrank"], 11]],
+                ],
+                city_filter,
+            ],
+        )
+        self.assertNotIn("icon-image", text_layer["layout"])
+        self.assertEqual(text_layer["layout"]["text-anchor"], "center")
+        self.assertEqual(text_layer["layout"]["text-radial-offset"], 0)
+        self.assertEqual(text_layer["layout"]["text-justify"], "center")
+        self.assertEqual(text_layer["filter"][-1], city_filter)
+        self.assertEqual(style["layers"][0]["layout"]["icon-image"], original_icon_image)
+
+    def test_filter_simplification_splits_minor_settlement_dot_icons_with_town_filter(self):
+        base_filter = ["<=", ["get", "filterrank"], 3]
+        minor_filter = [
+            "step",
+            ["zoom"],
+            [">", ["get", "symbolrank"], 6],
+            4,
+            [">=", ["get", "symbolrank"], 7],
+            6,
+            [">=", ["get", "symbolrank"], 8],
+            7,
+            [">=", ["get", "symbolrank"], 10],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-minor-label",
+                    "type": "symbol",
+                    "minzoom": 2,
+                    "maxzoom": 13,
+                    "filter": ["all", base_filter, minor_filter],
+                    "layout": self._settlement_dot_icon_layout(),
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 17)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        town_filter = ["match", ["get", "type"], ["town"], True, False]
+        for suffix, icon_name in (
+            ("capital-border-dot", "border-dot-13"),
+            ("dot-11", "dot-11"),
+            ("dot-10", "dot-10"),
+            ("dot-9", "dot-9"),
+        ):
+            layer = by_id[f"settlement-minor-label-z2-to-z4-{suffix}"]
+            self.assertEqual(layer["layout"]["icon-image"], icon_name)
+            self.assertEqual(layer["filter"][-1], town_filter)
+        self.assertEqual(by_id["settlement-minor-label-z2-to-z4-dot-11"]["filter"][1][2], [">", ["get", "symbolrank"], 6])
+        self.assertEqual(by_id["settlement-minor-label-z7-to-z8-dot-11"]["filter"][1][2], [">=", ["get", "symbolrank"], 10])
+        self.assertNotIn("icon-image", by_id["settlement-minor-label-z8-plus"]["layout"])
+        self.assertEqual(by_id["settlement-minor-label-z8-plus"]["filter"][-1], town_filter)
+
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
             "all",

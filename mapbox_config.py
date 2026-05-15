@@ -516,6 +516,8 @@ _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
 _PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
 _NATURAL_POINT_LABEL_LAYER_ID = "natural-point-label"
 _POI_LABEL_LAYER_ID = "poi-label"
+_SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
+_SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
 _POI_FILTER_RANK_ZOOM_STEP = ["step", ["zoom"], 0, 16, 1, 17, 2]
 _POI_FILTER_RANK_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z16", None, 16.0, 0.0),
@@ -549,6 +551,65 @@ _LABEL_ICON_TEXT_OFFSET_EXPRESSION = [
 _LABEL_ICON_VISIBILITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z17", None, _LABEL_ICON_VISIBILITY_SPLIT_ZOOM, _LABEL_ICON_LOW_ZOOM_SIZERANK_THRESHOLD),
     ("z17-plus", _LABEL_ICON_VISIBILITY_SPLIT_ZOOM, None, _LABEL_ICON_HIGH_ZOOM_SIZERANK_THRESHOLD),
+)
+_SETTLEMENT_DOT_ICON_SPLIT_ZOOM = 8.0
+_SETTLEMENT_DOT_ICON_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z2-to-z4", 2.0, 4.0),
+    ("z4-to-z6", 4.0, 6.0),
+    ("z6-to-z7", 6.0, 7.0),
+    ("z7-to-z8", 7.0, _SETTLEMENT_DOT_ICON_SPLIT_ZOOM),
+)
+_SETTLEMENT_DOT_ICON_IMAGE_EXPRESSION = [
+    "step",
+    ["zoom"],
+    [
+        "case",
+        ["==", ["get", "capital"], 2],
+        "border-dot-13",
+        ["step", ["get", "symbolrank"], "dot-11", 9, "dot-10", 11, "dot-9"],
+    ],
+    _SETTLEMENT_DOT_ICON_SPLIT_ZOOM,
+    "",
+]
+_SETTLEMENT_DOT_TEXT_ANCHOR_EXPRESSION = ["step", ["zoom"], ["get", "text_anchor"], _SETTLEMENT_DOT_ICON_SPLIT_ZOOM, "center"]
+_SETTLEMENT_DOT_TEXT_RADIAL_OFFSET_EXPRESSION = [
+    "step",
+    ["zoom"],
+    ["match", ["get", "capital"], 2, 0.6, 0.55],
+    _SETTLEMENT_DOT_ICON_SPLIT_ZOOM,
+    0,
+]
+_SETTLEMENT_DOT_TEXT_JUSTIFY_LOW_ZOOM = [
+    "match",
+    ["get", "text_anchor"],
+    ["left", "bottom-left", "top-left"],
+    "left",
+    ["right", "bottom-right", "top-right"],
+    "right",
+    "center",
+]
+_SETTLEMENT_DOT_TEXT_JUSTIFY_EXPRESSION = [
+    "step",
+    ["zoom"],
+    _SETTLEMENT_DOT_TEXT_JUSTIFY_LOW_ZOOM,
+    _SETTLEMENT_DOT_ICON_SPLIT_ZOOM,
+    "center",
+]
+_SETTLEMENT_DOT_ICON_VARIANTS: tuple[tuple[str, object, str, float], ...] = (
+    ("capital-border-dot", ["==", ["get", "capital"], 2], "border-dot-13", 0.6),
+    (
+        "dot-11",
+        ["all", ["!=", ["get", "capital"], 2], ["<", ["get", "symbolrank"], 9]],
+        "dot-11",
+        0.55,
+    ),
+    (
+        "dot-10",
+        ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 9], ["<", ["get", "symbolrank"], 11]],
+        "dot-10",
+        0.55,
+    ),
+    ("dot-9", ["all", ["!=", ["get", "capital"], 2], [">=", ["get", "symbolrank"], 11]], "dot-9", 0.55),
 )
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,
@@ -1031,6 +1092,16 @@ def _is_natural_point_label_layer_id(layer_id: object) -> bool:
     return normalized == _NATURAL_POINT_LABEL_LAYER_ID or normalized.startswith(f"{_NATURAL_POINT_LABEL_LAYER_ID}-")
 
 
+def _is_settlement_major_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _SETTLEMENT_MAJOR_LABEL_LAYER_ID or normalized.startswith(f"{_SETTLEMENT_MAJOR_LABEL_LAYER_ID}-")
+
+
+def _is_settlement_minor_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _SETTLEMENT_MINOR_LABEL_LAYER_ID or normalized.startswith(f"{_SETTLEMENT_MINOR_LABEL_LAYER_ID}-")
+
+
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
     if _is_road_number_shield_layer_id(layer_id):
@@ -1039,7 +1110,96 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         return _POI_LABEL_LAYER_ID
     if _is_natural_point_label_layer_id(layer_id):
         return _NATURAL_POINT_LABEL_LAYER_ID
+    if _is_settlement_major_label_layer_id(layer_id):
+        return _SETTLEMENT_MAJOR_LABEL_LAYER_ID
+    if _is_settlement_minor_label_layer_id(layer_id):
+        return _SETTLEMENT_MINOR_LABEL_LAYER_ID
     return str(layer_id or "")
+
+
+def _has_settlement_dot_icon_expression(layer: dict[str, object]) -> bool:
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
+    layout = layer.get("layout")
+    return (
+        base_layer_id in {_SETTLEMENT_MAJOR_LABEL_LAYER_ID, _SETTLEMENT_MINOR_LABEL_LAYER_ID}
+        and layer.get("type") == "symbol"
+        and isinstance(layout, dict)
+        and layout.get("icon-image") == _SETTLEMENT_DOT_ICON_IMAGE_EXPRESSION
+        and layout.get("text-anchor") == _SETTLEMENT_DOT_TEXT_ANCHOR_EXPRESSION
+        and layout.get("text-radial-offset") == _SETTLEMENT_DOT_TEXT_RADIAL_OFFSET_EXPRESSION
+    )
+
+
+def _set_settlement_low_zoom_dot_label_layout(
+    layer: dict[str, object],
+    *,
+    icon_image: str,
+    text_radial_offset: float,
+) -> None:
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return
+    layout["icon-image"] = icon_image
+    layout["text-anchor"] = ["get", "text_anchor"]
+    layout["text-radial-offset"] = text_radial_offset
+    if layout.get("text-justify") == _SETTLEMENT_DOT_TEXT_JUSTIFY_EXPRESSION:
+        layout["text-justify"] = copy.deepcopy(_SETTLEMENT_DOT_TEXT_JUSTIFY_LOW_ZOOM)
+
+
+def _set_settlement_high_zoom_text_layout(layer: dict[str, object]) -> None:
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return
+    layout.pop("icon-image", None)
+    layout["text-anchor"] = "center"
+    layout["text-radial-offset"] = 0
+    if layout.get("text-justify") == _SETTLEMENT_DOT_TEXT_JUSTIFY_EXPRESSION:
+        layout["text-justify"] = "center"
+
+
+def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split Mapbox's low-zoom settlement dot icons from z8+ centered labels."""
+    if not _has_settlement_dot_icon_expression(layer):
+        return None
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    layer_id = str(layer.get("id") or base_mapbox_style_layer_id_for_qfit(layer.get("id")))
+    variants: list[dict[str, object]] = []
+
+    for zoom_suffix, band_minzoom, band_maxzoom in _SETTLEMENT_DOT_ICON_ZOOM_BANDS:
+        if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
+            continue
+        for suffix, icon_filter, icon_image, text_radial_offset in _SETTLEMENT_DOT_ICON_VARIANTS:
+            icon_layer = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+            icon_layer["id"] = f"{layer_id}-{zoom_suffix}-{suffix}"
+            icon_layer["filter"] = _with_additional_filter_clauses(layer.get("filter"), icon_filter)
+            _set_settlement_low_zoom_dot_label_layout(
+                icon_layer,
+                icon_image=icon_image,
+                text_radial_offset=text_radial_offset,
+            )
+            variants.append(icon_layer)
+
+    if _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, _SETTLEMENT_DOT_ICON_SPLIT_ZOOM, None):
+        text_layer = _apply_zoom_band_bounds(layer, _SETTLEMENT_DOT_ICON_SPLIT_ZOOM, None)
+        text_layer["id"] = f"{layer_id}-z8-plus"
+        _set_settlement_high_zoom_text_layout(text_layer)
+        variants.append(text_layer)
+
+    return variants or None
+
+
+def _split_settlement_dot_icon_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _settlement_dot_icon_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _has_label_icon_visibility_expression(layer: dict[str, object]) -> bool:
@@ -2055,6 +2215,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_settlement_dot_icon_layers_for_qgis(style.get("layers"))
     color_props = {
         "line-color", "fill-color", "fill-outline-color", "circle-color",
         "circle-stroke-color", "text-color", "text-halo-color",
@@ -2109,7 +2270,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
         base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
 
         # Suppress or filter settlement label layers
-        settlement_filter = _SETTLEMENT_FILTERS.get(layer_id, "NOTSET")
+        settlement_filter = _SETTLEMENT_FILTERS.get(base_layer_id, "NOTSET")
         if settlement_filter != "NOTSET":
             if settlement_filter is None:
                 layer["layout"] = layer.get("layout", {})
