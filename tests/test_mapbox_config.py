@@ -3562,9 +3562,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     "id": "road-path-bg",
                     "type": "line",
                     "minzoom": 12,
-                    "filter": path_filter,
+                    "filter": copy.deepcopy(path_filter),
                     "paint": {"line-color": copy.deepcopy(mapbox_config._PATH_BACKGROUND_LINE_COLOR_EXPRESSION)},
-                }
+                },
+                {
+                    "id": "bridge-path-bg",
+                    "type": "line",
+                    "minzoom": 14,
+                    "filter": copy.deepcopy(path_filter),
+                    "paint": {"line-color": copy.deepcopy(mapbox_config._PATH_BACKGROUND_LINE_COLOR_EXPRESSION)},
+                },
             ]
         }
 
@@ -3577,15 +3584,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-path-bg-below-z16-outdoor",
                 "road-path-bg-below-z16-remaining",
                 "road-path-bg-z16-plus",
+                "bridge-path-bg-below-z16-piste",
+                "bridge-path-bg-below-z16-outdoor",
+                "bridge-path-bg-below-z16-remaining",
+                "bridge-path-bg-z16-plus",
             ],
         )
         by_id = {layer["id"]: layer for layer in result["layers"]}
-        self.assertEqual(by_id["road-path-bg-below-z16-piste"]["maxzoom"], 16.0)
-        self.assertEqual(by_id["road-path-bg-z16-plus"]["minzoom"], 16.0)
-        self.assertEqual(by_id["road-path-bg-below-z16-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
-        self.assertEqual(by_id["road-path-bg-below-z16-outdoor"]["paint"]["line-color"], "hsl(35, 80%, 48%)")
-        self.assertEqual(by_id["road-path-bg-below-z16-remaining"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
-        self.assertEqual(by_id["road-path-bg-z16-plus"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
+        for layer_id in ("road-path-bg", "bridge-path-bg"):
+            self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["maxzoom"], 16.0)
+            self.assertEqual(by_id[f"{layer_id}-z16-plus"]["minzoom"], 16.0)
+            self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
+            self.assertEqual(by_id[f"{layer_id}-below-z16-outdoor"]["paint"]["line-color"], "hsl(35, 80%, 48%)")
+            self.assertEqual(by_id[f"{layer_id}-below-z16-remaining"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
+            self.assertEqual(by_id[f"{layer_id}-z16-plus"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
+        self.assertEqual(by_id["road-path-bg-below-z16-piste"]["minzoom"], 12)
+        self.assertEqual(by_id["bridge-path-bg-below-z16-piste"]["minzoom"], 14)
         self.assertEqual(
             by_id["road-path-bg-below-z16-outdoor"]["filter"],
             [
@@ -3606,6 +3620,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("road-path-bg-below-z16-outdoor"),
             "road-path-bg",
+        )
+        self.assertEqual(
+            by_id["bridge-path-bg-below-z16-outdoor"]["filter"],
+            by_id["road-path-bg-below-z16-outdoor"]["filter"],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("bridge-path-bg-below-z16-outdoor"),
+            "bridge-path-bg",
         )
 
     def test_path_background_line_color_helpers_keep_passthrough_inputs(self):
