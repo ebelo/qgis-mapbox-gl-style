@@ -3194,7 +3194,34 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             },
         }
 
-    def _waterway_shadow_layer(self, translate=None):
+    def _waterway_line_width_expression(self):
+        return [
+            "interpolate",
+            ["exponential", 1.3],
+            ["zoom"],
+            9,
+            ["match", ["get", "class"], ["canal", "river"], 0.1, 0],
+            20,
+            ["match", ["get", "class"], ["canal", "river"], 8, 3],
+        ]
+
+    def _waterway_layer(self, line_width=None):
+        if line_width is None:
+            line_width = self._waterway_line_width_expression()
+        return {
+            "id": "waterway",
+            "type": "line",
+            "minzoom": 8,
+            "source-layer": "waterway",
+            "layout": {"line-cap": "round", "line-join": "round"},
+            "paint": {
+                "line-color": "hsl(205, 56%, 73%)",
+                "line-opacity": ["interpolate", ["linear"], ["zoom"], 8, 0, 8.5, 1],
+                "line-width": line_width,
+            },
+        }
+
+    def _waterway_shadow_layer(self, translate=None, line_width=0.1):
         if translate is None:
             translate = self._water_shadow_translate_expression()
         return {
@@ -3207,7 +3234,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "line-color": "hsl(224, 79%, 69%)",
                 "line-translate": translate,
                 "line-translate-anchor": "viewport",
-                "line-width": 0.1,
+                "line-width": line_width,
             },
         }
 
@@ -3278,6 +3305,83 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "water-shadow-z10-to-z13")
         self.assertEqual(result[2]["id"], "water-shadow-z13-to-z16")
         self.assertEqual(result[3]["id"], "water-shadow-z16-plus")
+
+    def test_waterway_line_width_splits_classes_and_zoom_bands(self):
+        style = {
+            "layers": [
+                self._waterway_layer(),
+                self._waterway_shadow_layer(line_width=self._waterway_line_width_expression()),
+            ],
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            list(by_id),
+            [
+                "waterway-canal-river-z8-to-z13",
+                "waterway-other-z8-to-z13",
+                "waterway-canal-river-z13-to-z16",
+                "waterway-other-z13-to-z16",
+                "waterway-canal-river-z16-plus",
+                "waterway-other-z16-plus",
+                "waterway-shadow-z10-to-z13-canal-river",
+                "waterway-shadow-z10-to-z13-other",
+                "waterway-shadow-z13-to-z16-canal-river",
+                "waterway-shadow-z13-to-z16-other",
+                "waterway-shadow-z16-plus-canal-river",
+                "waterway-shadow-z16-plus-other",
+            ],
+        )
+        low_major = by_id["waterway-canal-river-z8-to-z13"]
+        low_other = by_id["waterway-other-z8-to-z13"]
+        mid_major = by_id["waterway-canal-river-z13-to-z16"]
+        high_major = by_id["waterway-canal-river-z16-plus"]
+        shadow_low_major = by_id["waterway-shadow-z10-to-z13-canal-river"]
+        self.assertEqual(low_major["minzoom"], 8)
+        self.assertEqual(low_major["maxzoom"], 13.0)
+        self.assertEqual(mid_major["minzoom"], 13.0)
+        self.assertEqual(mid_major["maxzoom"], 16.0)
+        self.assertEqual(high_major["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", high_major)
+        self.assertEqual(shadow_low_major["minzoom"], 10)
+        self.assertEqual(shadow_low_major["maxzoom"], 13.0)
+        self.assertIn(["match", ["get", "class"], ["canal", "river"], True, False], low_major["filter"])
+        self.assertIn(["match", ["get", "class"], ["canal", "river"], False, True], low_other["filter"])
+        self.assertAlmostEqual(low_major["paint"]["line-width"], 0.08602461899537378)
+        self.assertAlmostEqual(low_other["paint"]["line-width"], 0.022620108479255864)
+        self.assertAlmostEqual(mid_major["paint"]["line-width"], 0.42585675726411115)
+        self.assertAlmostEqual(high_major["paint"]["line-width"], 0.6780241671213343)
+        self.assertAlmostEqual(shadow_low_major["paint"]["line-width"], 0.14095142330582108)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("waterway-shadow-z16-plus-other"),
+            "waterway-shadow",
+        )
+
+    def test_waterway_line_width_is_not_split_when_shape_changes(self):
+        line_width = ["interpolate", ["linear"], ["zoom"], 9, 0.1, 20, 8]
+        layers = [self._waterway_layer(line_width=line_width)]
+
+        result = mapbox_config._split_waterway_line_width_layers_for_qgis(layers)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "waterway")
+        self.assertEqual(result[0]["paint"]["line-width"], line_width)
+
+    def test_waterway_line_width_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._waterway_layer()]
+
+        self.assertIs(
+            mapbox_config._split_waterway_line_width_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_waterway_line_width_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "waterway-canal-river-z8-to-z13")
+        self.assertEqual(result[2]["id"], "waterway-other-z8-to-z13")
 
     def _turning_feature_circle_radius_expression(self):
         return ["interpolate", ["exponential", 1.5], ["zoom"], 15, 4.5, 16, 8, 18, 20, 22, 200]

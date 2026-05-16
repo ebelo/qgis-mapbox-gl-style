@@ -1165,6 +1165,26 @@ _WATER_SHADOW_TRANSLATE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z13-to-z16", 13.0, 16.0),
     ("z16-plus", 16.0, None),
 )
+_WATERWAY_LAYER_ID = "waterway"
+_WATERWAY_SHADOW_LAYER_ID = "waterway-shadow"
+_WATERWAY_LINE_WIDTH_EXPRESSION = [
+    "interpolate",
+    ["exponential", 1.3],
+    ["zoom"],
+    9,
+    ["match", ["get", "class"], ["canal", "river"], 0.1, 0],
+    20,
+    ["match", ["get", "class"], ["canal", "river"], 8, 3],
+]
+_WATERWAY_LINE_WIDTH_CLASS_VARIANTS: tuple[tuple[str, object, float, float], ...] = (
+    ("canal-river", ["match", ["get", "class"], ["canal", "river"], True, False], 0.1, 8.0),
+    ("other", ["match", ["get", "class"], ["canal", "river"], False, True], 0.0, 3.0),
+)
+_WATERWAY_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z8-to-z13", 8.0, 13.0),
+    ("z13-to-z16", 13.0, 16.0),
+    ("z16-plus", 16.0, None),
+)
 _TURNING_FEATURE_LAYER_ID = "turning-feature"
 _TURNING_FEATURE_OUTLINE_LAYER_ID = "turning-feature-outline"
 _TURNING_FEATURE_CIRCLE_RADIUS_EXPRESSION = [
@@ -1921,11 +1941,23 @@ def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _waterway_line_width_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    if normalized == _WATERWAY_LAYER_ID or normalized.startswith(f"{_WATERWAY_LAYER_ID}-canal-river-"):
+        return _WATERWAY_LAYER_ID
+    if normalized.startswith(f"{_WATERWAY_LAYER_ID}-other-"):
+        return _WATERWAY_LAYER_ID
+    if normalized == _WATERWAY_SHADOW_LAYER_ID or normalized.startswith(f"{_WATERWAY_SHADOW_LAYER_ID}-"):
+        return _WATERWAY_SHADOW_LAYER_ID
+    return None
+
+
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
     for resolved_layer_id in (
         _road_class_line_color_base_layer_id(layer_id),
         _hillshade_base_layer_id(layer_id),
+        _waterway_line_width_base_layer_id(layer_id),
         _water_label_typography_base_layer_id(layer_id),
         _regional_major_road_width_base_layer_id(layer_id),
         _major_link_width_base_layer_id(layer_id),
@@ -3228,6 +3260,99 @@ def _split_water_shadow_translate_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _water_shadow_translate_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _waterway_line_width_px_at_zoom(target_zoom: float, lower_width: float, upper_width: float) -> float | None:
+    if target_zoom <= 9.0:
+        return lower_width
+    if target_zoom >= 20.0:
+        return upper_width
+    factor = _interpolate_filter_factor(["exponential", 1.3], target_zoom, 9.0, 20.0)
+    if factor is None:
+        return None
+    return lower_width + ((upper_width - lower_width) * factor)
+
+
+def _waterway_line_width_mm_for_zoom_band(
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band_minzoom: float | None,
+    band_maxzoom: float | None,
+    lower_width: float,
+    upper_width: float,
+) -> tuple[float, float | None, float | None] | None:
+    effective_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        band_minzoom,
+        band_maxzoom,
+    )
+    if effective_zoom_band is None:
+        return None
+    representative_zoom = _zoom_band_representative_zoom(*effective_zoom_band)
+    width_px = _waterway_line_width_px_at_zoom(representative_zoom, lower_width, upper_width)
+    if width_px is None:
+        return None
+    return min(max(width_px * _MAPBOX_PIXEL_TO_MM, 0.0), _MAX_LINE_WIDTH_MM), *effective_zoom_band
+
+
+def _waterway_line_width_layer_id(layer_id: str, class_suffix: str, band_suffix: str) -> str:
+    if layer_id.startswith(f"{_WATERWAY_SHADOW_LAYER_ID}-"):
+        return f"{layer_id}-{class_suffix}"
+    return f"{layer_id}-{class_suffix}-{band_suffix}"
+
+
+def _waterway_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split Mapbox waterway width classes into static QGIS zoom bands."""
+    layer_id = str(layer.get("id") or "")
+    base_layer_id = _waterway_line_width_base_layer_id(layer_id)
+    paint = layer.get("paint")
+    if (
+        base_layer_id not in {_WATERWAY_LAYER_ID, _WATERWAY_SHADOW_LAYER_ID}
+        or layer.get("type") != "line"
+        or not isinstance(paint, dict)
+        or paint.get("line-width") != _WATERWAY_LINE_WIDTH_EXPRESSION
+    ):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for band_suffix, band_minzoom, band_maxzoom in _WATERWAY_LINE_WIDTH_ZOOM_BANDS:
+        for class_suffix, class_filter, lower_width, upper_width in _WATERWAY_LINE_WIDTH_CLASS_VARIANTS:
+            width = _waterway_line_width_mm_for_zoom_band(
+                existing_minzoom,
+                existing_maxzoom,
+                band_minzoom,
+                band_maxzoom,
+                lower_width,
+                upper_width,
+            )
+            if width is None:
+                continue
+            line_width, effective_minzoom, effective_maxzoom = width
+            variant = copy.deepcopy(layer)
+            variant["id"] = _waterway_line_width_layer_id(layer_id, class_suffix, band_suffix)
+            _set_zoom_bounds(variant, effective_minzoom, effective_maxzoom)
+            variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+            variant_paint = variant["paint"]
+            assert isinstance(variant_paint, dict)
+            variant_paint["line-width"] = line_width
+            variants.append(variant)
+    return variants or None
+
+
+def _split_waterway_line_width_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _waterway_line_width_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -4634,8 +4759,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
-    QGIS can parse, splits visible hillshade, landcover, landuse, path
-    background, and road class colors into static class layers, and collapses
+    QGIS can parse, splits visible hillshade, landcover, landuse, waterway,
+    path background, and road class colors into static class layers, and collapses
     Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
@@ -4669,6 +4794,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_rail_track_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_fence_hedge_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_water_shadow_translate_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_waterway_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_turning_feature_circle_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_waterway_label_symbol_spacing_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_water_label_typography_layers_for_qgis(style.get("layers"))
