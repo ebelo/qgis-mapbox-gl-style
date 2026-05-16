@@ -688,6 +688,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
     def test_major_link_widths_are_split_by_zoom_band(self):
         link_width = ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0.8, 18, 20, 22, 200]
         case_width = ["interpolate", ["exponential", 1.5], ["zoom"], 14, 0.8, 22, 2]
+        zero_gap_width = ["interpolate", ["linear"], ["zoom"], 12, 0, 18, 0]
         style = {
             "layers": [
                 {
@@ -703,6 +704,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     "minzoom": 12,
                     "paint": {"line-width": case_width, "line-gap-width": copy.deepcopy(link_width)},
                 },
+                {
+                    "id": "tunnel-major-link-case",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": copy.deepcopy(case_width), "line-gap-width": zero_gap_width},
+                },
             ]
         }
 
@@ -715,9 +722,18 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-major-link-z16-plus",
                 "bridge-major-link-case-z12-to-z16",
                 "bridge-major-link-case-z16-plus",
+                "tunnel-major-link-case-z12-to-z16",
+                "tunnel-major-link-case-z16-plus",
             ],
         )
         by_id = {layer["id"]: layer for layer in result["layers"]}
+        width_mm = lambda expr, zoom, minimum: max(
+            minimum,
+            min(
+                mapbox_config._interpolate_filter_value_at_zoom(expr, zoom) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+                mapbox_config._MAX_LINE_WIDTH_MM,
+            ),
+        )
         self.assertEqual(
             (
                 by_id["road-major-link-z12-to-z16"]["minzoom"],
@@ -728,20 +744,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(by_id["road-major-link-z16-plus"]["minzoom"], 16.0)
         self.assertAlmostEqual(
             by_id["road-major-link-z12-to-z16"]["paint"]["line-width"],
-            mapbox_config._interpolate_filter_value_at_zoom(link_width, 14.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+            width_mm(link_width, 14.0, 0.1),
         )
         self.assertAlmostEqual(
             by_id["road-major-link-z16-plus"]["paint"]["line-width"],
-            mapbox_config._interpolate_filter_value_at_zoom(link_width, 16.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+            width_mm(link_width, 16.0, 0.1),
         )
         self.assertAlmostEqual(
             by_id["bridge-major-link-case-z12-to-z16"]["paint"]["line-width"],
-            mapbox_config._interpolate_filter_value_at_zoom(case_width, 14.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+            width_mm(case_width, 14.0, 0.1),
         )
         self.assertAlmostEqual(
             by_id["bridge-major-link-case-z12-to-z16"]["paint"]["line-gap-width"],
-            mapbox_config._interpolate_filter_value_at_zoom(link_width, 14.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+            width_mm(link_width, 14.0, 0.0),
         )
+        self.assertEqual(by_id["tunnel-major-link-case-z12-to-z16"]["paint"]["line-gap-width"], 0.0)
+        self.assertEqual(by_id["tunnel-major-link-case-z16-plus"]["paint"]["line-gap-width"], 0.0)
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("bridge-major-link-case-z12-to-z16"),
             "bridge-major-link-case",

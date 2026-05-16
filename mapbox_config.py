@@ -545,6 +545,10 @@ _MAJOR_LINK_WIDTH_LAYER_IDS = {
     "tunnel-major-link-case",
 }
 _MAJOR_LINK_WIDTH_PROPS = {"line-width", "line-gap-width"}
+_MAJOR_LINK_WIDTH_MINIMUM_MM_BY_PROP = {
+    "line-width": 0.1,
+    "line-gap-width": 0.0,
+}
 _MAJOR_LINK_WIDTH_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("z12-to-z16", 12.0, 16.0, 14.0),
     ("z16-plus", 16.0, None, 16.0),
@@ -2032,11 +2036,11 @@ def _extract_zoom_scalar_size_at_zoom(expr: object, target_zoom: float) -> float
     return None
 
 
-def _major_link_width_mm(expr: object, target_zoom: float) -> float | None:
+def _major_link_width_mm(expr: object, target_zoom: float, *, minimum_mm: float) -> float | None:
     size = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
     if size is None:
         return None
-    return max(0.1, min(size * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
+    return max(minimum_mm, min(size * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
 
 
 def _has_major_link_width_expression(layer: dict[str, object]) -> bool:
@@ -2052,7 +2056,8 @@ def _has_major_link_width_expression(layer: dict[str, object]) -> bool:
 def _apply_major_link_width_values_for_qgis(paint: dict[str, object], target_zoom: float) -> bool:
     changed = False
     for prop in _MAJOR_LINK_WIDTH_PROPS:
-        width_mm = _major_link_width_mm(paint.get(prop), target_zoom)
+        minimum_mm = _MAJOR_LINK_WIDTH_MINIMUM_MM_BY_PROP[prop]
+        width_mm = _major_link_width_mm(paint.get(prop), target_zoom, minimum_mm=minimum_mm)
         if width_mm is not None:
             paint[prop] = width_mm
             changed = True
