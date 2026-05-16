@@ -982,6 +982,38 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("airport", ["match", ["get", "class"], "airport", True, False], _LANDUSE_AIRPORT_FILL_COLOR),
     ("remaining", ["match", ["get", "class"], ["park", "airport"], False, True], _LANDUSE_FALLBACK_FILL_COLOR),
 )
+_LANDCOVER_CROP_FILL_COLOR = "hsla(68, 55%, 70%, 0.6)"
+_LANDCOVER_FALLBACK_FILL_COLOR = "hsl(98, 48%, 67%)"
+_LANDCOVER_FILL_COLOR_EXPRESSION = [
+    "match",
+    ["get", "class"],
+    "wood",
+    _LANDUSE_WOOD_FILL_COLOR,
+    "scrub",
+    _LANDUSE_SCRUB_FILL_COLOR,
+    "crop",
+    _LANDCOVER_CROP_FILL_COLOR,
+    "grass",
+    _LANDUSE_AGRICULTURE_FILL_COLOR,
+    "snow",
+    _LANDUSE_GLACIER_FILL_COLOR,
+    _LANDCOVER_FALLBACK_FILL_COLOR,
+]
+_LANDCOVER_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
+    f"{_LANDCOVER_LAYER_ID}-{suffix}" for suffix, _band_minzoom, _band_maxzoom in _LANDCOVER_FILL_OPACITY_ZOOM_BANDS
+}
+_LANDCOVER_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    ("wood", ["match", ["get", "class"], "wood", True, False], _LANDUSE_WOOD_FILL_COLOR),
+    ("scrub", ["match", ["get", "class"], "scrub", True, False], _LANDUSE_SCRUB_FILL_COLOR),
+    ("crop", ["match", ["get", "class"], "crop", True, False], _LANDCOVER_CROP_FILL_COLOR),
+    ("grass", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
+    ("snow", ["match", ["get", "class"], "snow", True, False], _LANDUSE_GLACIER_FILL_COLOR),
+    (
+        "remaining",
+        ["match", ["get", "class"], ["wood", "scrub", "crop", "grass", "snow"], False, True],
+        _LANDCOVER_FALLBACK_FILL_COLOR,
+    ),
+)
 _NATIONAL_PARK_LAYER_ID = "national-park"
 _NATIONAL_PARK_FILL_OPACITY_EXPRESSIONS = {
     _NATIONAL_PARK_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 5, 0, 6, 0.6, 12, 0.2],
@@ -1684,6 +1716,17 @@ def _is_settlement_minor_label_layer_id(layer_id: object) -> bool:
     return normalized == _SETTLEMENT_MINOR_LABEL_LAYER_ID or normalized.startswith(f"{_SETTLEMENT_MINOR_LABEL_LAYER_ID}-")
 
 
+def _landcover_fill_opacity_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    if normalized == _LANDCOVER_LAYER_ID:
+        return _LANDCOVER_LAYER_ID
+    for suffix, _band_minzoom, _band_maxzoom in _LANDCOVER_FILL_OPACITY_ZOOM_BANDS:
+        opacity_variant_id = f"{_LANDCOVER_LAYER_ID}-{suffix}"
+        if normalized == opacity_variant_id or normalized.startswith(f"{opacity_variant_id}-"):
+            return _LANDCOVER_LAYER_ID
+    return None
+
+
 def _landuse_fill_opacity_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     if normalized == _LANDUSE_LAYER_ID:
@@ -1724,6 +1767,9 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
     if regional_road_layer_id is not None:
         return regional_road_layer_id
+    landcover_layer_id = _landcover_fill_opacity_base_layer_id(layer_id)
+    if landcover_layer_id is not None:
+        return landcover_layer_id
     landuse_layer_id = _landuse_fill_opacity_base_layer_id(layer_id)
     if landuse_layer_id is not None:
         return landuse_layer_id
@@ -2323,6 +2369,44 @@ def _split_landcover_fill_opacity_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _landcover_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _landcover_class_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split landcover opacity bands into QGIS-safe class colors."""
+    layer_id = str(layer.get("id") or "")
+    paint = layer.get("paint")
+    if (
+        layer_id not in _LANDCOVER_CLASS_FILL_COLOR_SPLIT_LAYER_IDS
+        or base_mapbox_style_layer_id_for_qfit(layer_id) != _LANDCOVER_LAYER_ID
+        or layer.get("type") != "fill"
+        or not isinstance(paint, dict)
+        or paint.get("fill-color") != _LANDCOVER_FILL_COLOR_EXPRESSION
+    ):
+        return None
+
+    variants: list[dict[str, object]] = []
+    for suffix, class_filter, fill_color in _LANDCOVER_CLASS_FILL_COLOR_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["fill-color"] = fill_color
+        variants.append(variant)
+    return variants or None
+
+
+def _split_landcover_class_fill_color_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _landcover_class_fill_color_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -4090,7 +4174,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
-    QGIS can parse, splits visible landuse park/airport colors into static
+    QGIS can parse, splits visible landcover and landuse class colors into static
     class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
@@ -4111,6 +4195,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_cliff_line_pattern_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_landcover_class_fill_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landuse_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landuse_class_fill_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
