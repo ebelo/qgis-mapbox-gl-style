@@ -3542,6 +3542,116 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         for layer in style["layers"]:
             self.assertEqual(layer["filter"], original_path_filter)
 
+    def test_path_background_line_color_splits_type_colors_after_zoom_filter_split(self):
+        path_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            [
+                "step",
+                ["zoom"],
+                ["!", ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], True, False]],
+                16,
+                ["!=", ["get", "type"], "steps"],
+            ],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "road-path-bg",
+                    "type": "line",
+                    "minzoom": 12,
+                    "filter": copy.deepcopy(path_filter),
+                    "paint": {"line-color": copy.deepcopy(mapbox_config._PATH_BACKGROUND_LINE_COLOR_EXPRESSION)},
+                },
+                {
+                    "id": "bridge-path-bg",
+                    "type": "line",
+                    "minzoom": 14,
+                    "filter": copy.deepcopy(path_filter),
+                    "paint": {"line-color": copy.deepcopy(mapbox_config._PATH_BACKGROUND_LINE_COLOR_EXPRESSION)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-path-bg-below-z16-piste",
+                "road-path-bg-below-z16-outdoor",
+                "road-path-bg-below-z16-remaining",
+                "road-path-bg-z16-plus",
+                "bridge-path-bg-below-z16-piste",
+                "bridge-path-bg-below-z16-outdoor",
+                "bridge-path-bg-below-z16-remaining",
+                "bridge-path-bg-z16-plus",
+            ],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        for layer_id in ("road-path-bg", "bridge-path-bg"):
+            self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["maxzoom"], 16.0)
+            self.assertEqual(by_id[f"{layer_id}-z16-plus"]["minzoom"], 16.0)
+            self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
+            self.assertEqual(by_id[f"{layer_id}-below-z16-outdoor"]["paint"]["line-color"], "hsl(35, 80%, 48%)")
+            self.assertEqual(by_id[f"{layer_id}-below-z16-remaining"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
+            self.assertEqual(by_id[f"{layer_id}-z16-plus"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
+        self.assertEqual(by_id["road-path-bg-below-z16-piste"]["minzoom"], 12)
+        self.assertEqual(by_id["bridge-path-bg-below-z16-piste"]["minzoom"], 14)
+        self.assertEqual(
+            by_id["road-path-bg-below-z16-outdoor"]["filter"],
+            [
+                "all",
+                ["==", ["get", "class"], "path"],
+                ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
+                ["match", ["get", "structure"], ["none", "ford"], True, False],
+                ["==", ["geometry-type"], "LineString"],
+                [
+                    "match",
+                    ["get", "type"],
+                    ["mountain_bike", "hiking", "trail", "cycleway", "footway", "path", "bridleway"],
+                    True,
+                    False,
+                ],
+            ],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-path-bg-below-z16-outdoor"),
+            "road-path-bg",
+        )
+        self.assertEqual(
+            by_id["bridge-path-bg-below-z16-outdoor"]["filter"],
+            by_id["road-path-bg-below-z16-outdoor"]["filter"],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("bridge-path-bg-below-z16-outdoor"),
+            "bridge-path-bg",
+        )
+
+    def test_path_background_line_color_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        split_layer = {
+            "id": "bridge-path-bg-below-z16",
+            "type": "line",
+            "maxzoom": 16.0,
+            "paint": {"line-color": copy.deepcopy(mapbox_config._PATH_BACKGROUND_LINE_COLOR_EXPRESSION)},
+        }
+        mixed_layers = ["not-a-layer", {"id": "road-path-bg", "type": "line"}, split_layer]
+
+        self.assertIs(
+            mapbox_config._split_path_background_line_color_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_path_background_line_color_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "road-path-bg")
+        self.assertEqual(result[2]["id"], "bridge-path-bg-below-z16-piste")
+        self.assertEqual(result[3]["id"], "bridge-path-bg-below-z16-outdoor")
+        self.assertEqual(result[4]["id"], "bridge-path-bg-below-z16-remaining")
+
     def test_filter_simplification_replaces_path_filter_without_split_outside_threshold(self):
         path_filter = [
             "all",

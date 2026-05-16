@@ -550,6 +550,33 @@ _PATH_TYPE_FILTER_SPLIT_LAYER_IDS = {
     "road-path",
     "road-path-bg",
 }
+_PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
+    "bridge-path-bg",
+    "road-path-bg",
+}
+_PATH_BACKGROUND_LINE_COLOR_EXPRESSION = [
+    "match",
+    ["get", "type"],
+    "piste",
+    "hsl(215, 80%, 48%)",
+    ["mountain_bike", "hiking", "trail", "cycleway", "footway", "path", "bridleway"],
+    "hsl(35, 80%, 48%)",
+    "hsl(60, 1%, 64%)",
+]
+_PATH_BACKGROUND_OUTDOOR_TYPES = ["mountain_bike", "hiking", "trail", "cycleway", "footway", "path", "bridleway"]
+_PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    ("piste", ["match", ["get", "type"], "piste", True, False], "hsl(215, 80%, 48%)"),
+    (
+        "outdoor",
+        ["match", ["get", "type"], _PATH_BACKGROUND_OUTDOOR_TYPES, True, False],
+        "hsl(35, 80%, 48%)",
+    ),
+    (
+        "remaining",
+        ["match", ["get", "type"], ["piste", *_PATH_BACKGROUND_OUTDOOR_TYPES], False, True],
+        "hsl(60, 1%, 64%)",
+    ),
+)
 _PATH_TYPE_FILTER_LOW_ZOOM_TYPES = ["steps", "sidewalk", "crossing"]
 _PATH_TYPE_FILTER_LOW_ZOOM_INVERTED_MATCH = [
     "!",
@@ -1537,6 +1564,49 @@ def _split_path_type_filter_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _path_background_line_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited path background casing colors into QGIS-safe type layers."""
+    base_layer_id = _path_background_line_color_base_layer_id(layer.get("id"))
+    paint = layer.get("paint")
+    if (
+        base_layer_id is None
+        or layer.get("type") != "line"
+        or not isinstance(paint, dict)
+        or paint.get("line-color") != _PATH_BACKGROUND_LINE_COLOR_EXPRESSION
+    ):
+        return None
+    maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    # Keep z16+ path backgrounds on the conservative fallback until QGIS can
+    # approximate Mapbox's high-zoom pedestrian/path casing stack more fully.
+    if maxzoom is None or maxzoom > _PATH_TYPE_FILTER_SPLIT_ZOOM:
+        return None
+
+    layer_id = str(layer.get("id") or base_layer_id)
+    variants: list[dict[str, object]] = []
+    for suffix, type_filter, line_color in _PATH_BACKGROUND_LINE_COLOR_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), type_filter)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["line-color"] = line_color
+        variants.append(variant)
+    return variants or None
+
+
+def _split_path_background_line_color_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _path_background_line_color_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _numeric_match_filter_with_offset(value: object, offset: float) -> object | None:
     if not isinstance(value, list) or len(value) < 5 or value[0] != "match" or (len(value) - 3) % 2 != 0:
         return None
@@ -1738,6 +1808,14 @@ def _landuse_fill_opacity_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _path_background_line_color_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    for base_layer_id in _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS:
+        if normalized == base_layer_id or normalized.startswith(f"{base_layer_id}-"):
+            return base_layer_id
+    return None
+
+
 def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     for suffix, _band_minzoom, _band_maxzoom in _REGIONAL_MAJOR_ROAD_WIDTH_BANDS:
@@ -1759,38 +1837,29 @@ def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
 
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
-    if _is_waterway_label_layer_id(layer_id):
-        return _WATERWAY_LABEL_LAYER_ID
-    water_label_layer_id = _water_label_typography_base_layer_id(layer_id)
-    if water_label_layer_id is not None:
-        return water_label_layer_id
-    regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
-    if regional_road_layer_id is not None:
-        return regional_road_layer_id
-    landcover_layer_id = _landcover_fill_opacity_base_layer_id(layer_id)
-    if landcover_layer_id is not None:
-        return landcover_layer_id
-    landuse_layer_id = _landuse_fill_opacity_base_layer_id(layer_id)
-    if landuse_layer_id is not None:
-        return landuse_layer_id
-    if _is_road_number_shield_layer_id(layer_id):
-        return _ROAD_NUMBER_SHIELD_LAYER_ID
-    if _is_poi_label_layer_id(layer_id):
-        return _POI_LABEL_LAYER_ID
-    if _is_gate_label_layer_id(layer_id):
-        return _GATE_LABEL_LAYER_ID
-    if _is_natural_point_label_layer_id(layer_id):
-        return _NATURAL_POINT_LABEL_LAYER_ID
-    if _is_continent_label_layer_id(layer_id):
-        return _CONTINENT_LABEL_LAYER_ID
-    if _is_cliff_layer_id(layer_id):
-        return _CLIFF_LAYER_ID
-    if _is_country_label_layer_id(layer_id):
-        return _COUNTRY_LABEL_LAYER_ID
-    if _is_settlement_major_label_layer_id(layer_id):
-        return _SETTLEMENT_MAJOR_LABEL_LAYER_ID
-    if _is_settlement_minor_label_layer_id(layer_id):
-        return _SETTLEMENT_MINOR_LABEL_LAYER_ID
+    for resolved_layer_id in (
+        _water_label_typography_base_layer_id(layer_id),
+        _regional_major_road_width_base_layer_id(layer_id),
+        _landcover_fill_opacity_base_layer_id(layer_id),
+        _landuse_fill_opacity_base_layer_id(layer_id),
+        _path_background_line_color_base_layer_id(layer_id),
+    ):
+        if resolved_layer_id is not None:
+            return resolved_layer_id
+    for matches_layer_id, base_layer_id in (
+        (_is_waterway_label_layer_id, _WATERWAY_LABEL_LAYER_ID),
+        (_is_road_number_shield_layer_id, _ROAD_NUMBER_SHIELD_LAYER_ID),
+        (_is_poi_label_layer_id, _POI_LABEL_LAYER_ID),
+        (_is_gate_label_layer_id, _GATE_LABEL_LAYER_ID),
+        (_is_natural_point_label_layer_id, _NATURAL_POINT_LABEL_LAYER_ID),
+        (_is_continent_label_layer_id, _CONTINENT_LABEL_LAYER_ID),
+        (_is_cliff_layer_id, _CLIFF_LAYER_ID),
+        (_is_country_label_layer_id, _COUNTRY_LABEL_LAYER_ID),
+        (_is_settlement_major_label_layer_id, _SETTLEMENT_MAJOR_LABEL_LAYER_ID),
+        (_is_settlement_minor_label_layer_id, _SETTLEMENT_MINOR_LABEL_LAYER_ID),
+    ):
+        if matches_layer_id(layer_id):
+            return base_layer_id
     return str(layer_id or "")
 
 
@@ -4174,8 +4243,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
-    QGIS can parse, splits visible landcover and landuse class colors into static
-    class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
+    QGIS can parse, splits visible landcover, landuse, and path background class
+    colors into static class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
 
@@ -4186,6 +4255,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_regional_major_road_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_label_icon_image_layers_for_qgis(style.get("layers"))
