@@ -956,7 +956,24 @@ _LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
     "landuse-other-z10-plus",
 }
 _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
-    ("park", ["match", ["get", "class"], "park", True, False], _LANDUSE_PARK_FILL_COLOR),
+    (
+        "park-special",
+        [
+            "all",
+            ["match", ["get", "class"], "park", True, False],
+            ["match", ["get", "type"], ["garden", "playground", "zoo"], True, False],
+        ],
+        _LANDUSE_PARK_SPECIAL_FILL_COLOR,
+    ),
+    (
+        "park",
+        [
+            "all",
+            ["match", ["get", "class"], "park", True, False],
+            ["match", ["get", "type"], ["garden", "playground", "zoo"], False, True],
+        ],
+        _LANDUSE_PARK_FILL_COLOR,
+    ),
     ("airport", ["match", ["get", "class"], "airport", True, False], _LANDUSE_AIRPORT_FILL_COLOR),
     ("remaining", ["match", ["get", "class"], ["park", "airport"], False, True], _LANDUSE_FALLBACK_FILL_COLOR),
 )

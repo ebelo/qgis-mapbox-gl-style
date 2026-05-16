@@ -2204,18 +2204,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = simplify_mapbox_style_expressions(style)
 
         by_id = {layer["id"]: layer for layer in result["layers"]}
-        self.assertEqual(len(result["layers"]), 10)
+        self.assertEqual(len(result["layers"]), 12)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
+        park_special_mid = by_id["landuse-other-z8-to-z10-park-special"]
         park_mid = by_id["landuse-other-z8-to-z10-park"]
         airport_mid = by_id["landuse-other-z8-to-z10-airport"]
         remaining_mid = by_id["landuse-other-z8-to-z10-remaining"]
+        park_special_high = by_id["landuse-other-z10-plus-park-special"]
         park_high = by_id["landuse-other-z10-plus-park"]
         airport_high = by_id["landuse-other-z10-plus-airport"]
         remaining_high = by_id["landuse-other-z10-plus-remaining"]
+        self.assertEqual(park_special_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
         self.assertEqual(park_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
         self.assertEqual(airport_mid["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
         self.assertEqual(remaining_mid["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
+        self.assertEqual(park_special_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
         self.assertEqual(park_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
         self.assertEqual(airport_high["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
         self.assertEqual(remaining_high["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
@@ -2229,7 +2233,19 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "all",
                 ["==", ["get", "source"], "test"],
                 ["match", ["get", "class"], "residential", False, True],
+                [
+                    "all",
+                    ["match", ["get", "class"], "park", True, False],
+                    ["match", ["get", "type"], ["garden", "playground", "zoo"], False, True],
+                ],
+            ],
+        )
+        self.assertEqual(
+            park_special_mid["filter"][-1],
+            [
+                "all",
                 ["match", ["get", "class"], "park", True, False],
+                ["match", ["get", "type"], ["garden", "playground", "zoo"], True, False],
             ],
         )
         self.assertEqual(
@@ -2314,9 +2330,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result[0], "not-a-layer")
         self.assertEqual(result[1]["id"], "landuse")
-        self.assertEqual(result[2]["id"], "landuse-other-z10-plus-park")
-        self.assertEqual(result[3]["id"], "landuse-other-z10-plus-airport")
-        self.assertEqual(result[4]["id"], "landuse-other-z10-plus-remaining")
+        self.assertEqual(result[2]["id"], "landuse-other-z10-plus-park-special")
+        self.assertEqual(result[3]["id"], "landuse-other-z10-plus-park")
+        self.assertEqual(result[4]["id"], "landuse-other-z10-plus-airport")
+        self.assertEqual(result[5]["id"], "landuse-other-z10-plus-remaining")
 
     def _national_park_layer(self, fill_opacity=None):
         if fill_opacity is None:
