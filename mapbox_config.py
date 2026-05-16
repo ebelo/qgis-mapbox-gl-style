@@ -783,6 +783,118 @@ _LANDCOVER_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z10-to-z12", 10.0, 12.0),
 )
 _LANDUSE_LAYER_ID = "landuse"
+_LANDUSE_WOOD_FILL_COLOR = "hsla(103, 50%, 60%, 0.8)"
+_LANDUSE_SCRUB_FILL_COLOR = "hsla(98, 47%, 68%, 0.6)"
+_LANDUSE_AGRICULTURE_FILL_COLOR = "hsla(98, 50%, 74%, 0.6)"
+_LANDUSE_PARK_SPECIAL_FILL_COLOR = "hsl(98, 38%, 68%)"
+_LANDUSE_PARK_FILL_COLOR = "hsl(98, 55%, 70%)"
+_LANDUSE_AIRPORT_FILL_COLOR = "hsl(230, 40%, 82%)"
+_LANDUSE_CEMETERY_FILL_COLOR = "hsl(98, 45%, 75%)"
+_LANDUSE_GLACIER_FILL_COLOR = "hsl(205, 45%, 95%)"
+_LANDUSE_HOSPITAL_FILL_COLOR = "hsl(20, 45%, 82%)"
+_LANDUSE_PITCH_FILL_COLOR = "hsl(88, 65%, 75%)"
+_LANDUSE_SAND_FILL_COLOR = "hsl(69, 60%, 72%)"
+_LANDUSE_ROCK_FILL_COLOR = "hsl(60, 0%, 85%)"
+_LANDUSE_ROCK_HIGH_ZOOM_FILL_COLOR = "hsla(60, 0%, 85%, 0.5)"
+_LANDUSE_SCHOOL_FILL_COLOR = "hsl(40, 45%, 78%)"
+_LANDUSE_COMMERCIAL_AREA_FILL_COLOR = "hsl(55, 45%, 85%)"
+_LANDUSE_COMMERCIAL_AREA_HIGH_ZOOM_FILL_COLOR = "hsla(55, 45%, 85%, 0.5)"
+_LANDUSE_RESIDENTIAL_FILL_COLOR = "hsl(60, 7%, 87%)"
+_LANDUSE_INDUSTRIAL_FILL_COLOR = "hsl(230, 20%, 85%)"
+_LANDUSE_FALLBACK_FILL_COLOR = "hsl(60, 22%, 72%)"
+_LANDUSE_LOW_ZOOM_FILL_COLORS = [
+    "match",
+    ["get", "class"],
+    "wood",
+    _LANDUSE_WOOD_FILL_COLOR,
+    "scrub",
+    _LANDUSE_SCRUB_FILL_COLOR,
+    "agriculture",
+    _LANDUSE_AGRICULTURE_FILL_COLOR,
+    "park",
+    [
+        "match",
+        ["get", "type"],
+        ["garden", "playground", "zoo"],
+        _LANDUSE_PARK_SPECIAL_FILL_COLOR,
+        _LANDUSE_PARK_FILL_COLOR,
+    ],
+    "grass",
+    _LANDUSE_AGRICULTURE_FILL_COLOR,
+    "airport",
+    _LANDUSE_AIRPORT_FILL_COLOR,
+    "cemetery",
+    _LANDUSE_CEMETERY_FILL_COLOR,
+    "glacier",
+    _LANDUSE_GLACIER_FILL_COLOR,
+    "hospital",
+    _LANDUSE_HOSPITAL_FILL_COLOR,
+    "pitch",
+    _LANDUSE_PITCH_FILL_COLOR,
+    "sand",
+    _LANDUSE_SAND_FILL_COLOR,
+    "rock",
+    _LANDUSE_ROCK_FILL_COLOR,
+    "school",
+    _LANDUSE_SCHOOL_FILL_COLOR,
+    "commercial_area",
+    _LANDUSE_COMMERCIAL_AREA_FILL_COLOR,
+    "residential",
+    _LANDUSE_RESIDENTIAL_FILL_COLOR,
+    ["facility", "industrial"],
+    _LANDUSE_INDUSTRIAL_FILL_COLOR,
+    _LANDUSE_FALLBACK_FILL_COLOR,
+]
+_LANDUSE_HIGH_ZOOM_FILL_COLORS = [
+    "match",
+    ["get", "class"],
+    "wood",
+    _LANDUSE_WOOD_FILL_COLOR,
+    "scrub",
+    _LANDUSE_SCRUB_FILL_COLOR,
+    "agriculture",
+    _LANDUSE_AGRICULTURE_FILL_COLOR,
+    "park",
+    [
+        "match",
+        ["get", "type"],
+        ["garden", "playground", "zoo"],
+        _LANDUSE_PARK_SPECIAL_FILL_COLOR,
+        _LANDUSE_PARK_FILL_COLOR,
+    ],
+    "grass",
+    _LANDUSE_AGRICULTURE_FILL_COLOR,
+    "airport",
+    _LANDUSE_AIRPORT_FILL_COLOR,
+    "cemetery",
+    _LANDUSE_CEMETERY_FILL_COLOR,
+    "glacier",
+    _LANDUSE_GLACIER_FILL_COLOR,
+    "hospital",
+    _LANDUSE_HOSPITAL_FILL_COLOR,
+    "pitch",
+    _LANDUSE_PITCH_FILL_COLOR,
+    "sand",
+    _LANDUSE_SAND_FILL_COLOR,
+    "rock",
+    _LANDUSE_ROCK_HIGH_ZOOM_FILL_COLOR,
+    "school",
+    _LANDUSE_SCHOOL_FILL_COLOR,
+    "commercial_area",
+    _LANDUSE_COMMERCIAL_AREA_HIGH_ZOOM_FILL_COLOR,
+    ["facility", "industrial"],
+    _LANDUSE_INDUSTRIAL_FILL_COLOR,
+    _LANDUSE_FALLBACK_FILL_COLOR,
+]
+_LANDUSE_FILL_COLOR_EXPRESSION = [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    15,
+    _LANDUSE_LOW_ZOOM_FILL_COLORS,
+    16,
+    _LANDUSE_HIGH_ZOOM_FILL_COLORS,
+]
 _LANDUSE_FILL_OPACITY_EXPRESSION = [
     "interpolate",
     ["linear"],
@@ -838,6 +950,15 @@ _LANDUSE_FILL_OPACITY_VARIANTS: tuple[
         None,
         False,
     ),
+)
+_LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
+    "landuse-other-z8-to-z10",
+    "landuse-other-z10-plus",
+}
+_LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    ("park", ["match", ["get", "class"], "park", True, False], _LANDUSE_PARK_FILL_COLOR),
+    ("airport", ["match", ["get", "class"], "airport", True, False], _LANDUSE_AIRPORT_FILL_COLOR),
+    ("remaining", ["match", ["get", "class"], ["park", "airport"], False, True], _LANDUSE_FALLBACK_FILL_COLOR),
 )
 _NATIONAL_PARK_LAYER_ID = "national-park"
 _NATIONAL_PARK_FILL_OPACITY_EXPRESSIONS = {
@@ -1546,7 +1667,8 @@ def _landuse_fill_opacity_base_layer_id(layer_id: object) -> str | None:
     if normalized == _LANDUSE_LAYER_ID:
         return _LANDUSE_LAYER_ID
     for suffix, _class_filter, _band_minzoom, _band_maxzoom, _fill_opacity in _LANDUSE_FILL_OPACITY_VARIANTS:
-        if normalized == f"{_LANDUSE_LAYER_ID}-{suffix}":
+        opacity_variant_id = f"{_LANDUSE_LAYER_ID}-{suffix}"
+        if normalized == opacity_variant_id or normalized.startswith(f"{opacity_variant_id}-"):
             return _LANDUSE_LAYER_ID
     return None
 
@@ -2257,6 +2379,44 @@ def _split_landuse_fill_opacity_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _landuse_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _landuse_class_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split visible non-residential landuse bands into QGIS-safe class colors."""
+    layer_id = str(layer.get("id") or "")
+    paint = layer.get("paint")
+    if (
+        layer_id not in _LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS
+        or base_mapbox_style_layer_id_for_qfit(layer_id) != _LANDUSE_LAYER_ID
+        or layer.get("type") != "fill"
+        or not isinstance(paint, dict)
+        or paint.get("fill-color") != _LANDUSE_FILL_COLOR_EXPRESSION
+    ):
+        return None
+
+    variants: list[dict[str, object]] = []
+    for suffix, class_filter, fill_color in _LANDUSE_CLASS_FILL_COLOR_VARIANTS:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["fill-color"] = fill_color
+        variants.append(variant)
+    return variants or None
+
+
+def _split_landuse_class_fill_color_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _landuse_class_fill_color_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -3908,7 +4068,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
-    QGIS can parse, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
+    QGIS can parse, splits visible landuse park/airport colors into static
+    class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
 
@@ -3929,6 +4090,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landuse_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_landuse_class_fill_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
