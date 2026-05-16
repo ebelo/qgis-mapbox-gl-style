@@ -837,6 +837,32 @@ _BUILDING_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None],
     ("z15-to-z16", 15.0, 16.0),
     ("z16-plus", 16.0, None),
 )
+_HILLSHADE_LAYER_ID = "hillshade"
+_HILLSHADE_SHADOW_FILL_COLOR = "hsla(66, 38%, 17%, 0.08)"
+_HILLSHADE_HIGHLIGHT_FILL_COLOR = "hsla(60, 20%, 95%, 0.14)"
+_HILLSHADE_HIGHLIGHT_MIN_ZOOM = 11.0
+_HILLSHADE_CLASS_SPLIT_MAX_ZOOM = 13.0
+_HILLSHADE_FILL_COLOR_EXPRESSION = [
+    "interpolate",
+    ["linear"],
+    ["zoom"],
+    14,
+    [
+        "match",
+        ["get", "class"],
+        "shadow",
+        _HILLSHADE_SHADOW_FILL_COLOR,
+        _HILLSHADE_HIGHLIGHT_FILL_COLOR,
+    ],
+    16,
+    [
+        "match",
+        ["get", "class"],
+        "shadow",
+        "hsla(66, 38%, 17%, 0)",
+        "hsla(60, 20%, 95%, 0)",
+    ],
+]
 _LANDCOVER_LAYER_ID = "landcover"
 _LANDCOVER_FILL_OPACITY_EXPRESSIONS = {
     _LANDCOVER_LAYER_ID: ["interpolate", ["exponential", 1.5], ["zoom"], 8, 0.8, 12, 0],
@@ -1875,6 +1901,18 @@ def _major_link_width_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _hillshade_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    if normalized in {
+        _HILLSHADE_LAYER_ID,
+        f"{_HILLSHADE_LAYER_ID}-shadow",
+        f"{_HILLSHADE_LAYER_ID}-highlight",
+        f"{_HILLSHADE_LAYER_ID}-z13-plus",
+    }:
+        return _HILLSHADE_LAYER_ID
+    return None
+
+
 def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     for base_layer_id in _WATER_LABEL_TYPOGRAPHY_LAYER_IDS:
@@ -1887,6 +1925,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
     for resolved_layer_id in (
         _road_class_line_color_base_layer_id(layer_id),
+        _hillshade_base_layer_id(layer_id),
         _water_label_typography_base_layer_id(layer_id),
         _regional_major_road_width_base_layer_id(layer_id),
         _major_link_width_base_layer_id(layer_id),
@@ -2692,6 +2731,90 @@ def _split_building_fill_opacity_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _building_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _hillshade_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split Mapbox hillshade shadows and highlights into static QGIS layers."""
+    paint = layer.get("paint")
+    if (
+        str(layer.get("id") or "") != _HILLSHADE_LAYER_ID
+        or layer.get("type") != "fill"
+        or not isinstance(paint, dict)
+        or paint.get("fill-color") != _HILLSHADE_FILL_COLOR_EXPRESSION
+    ):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+
+    split_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        None,
+        _HILLSHADE_CLASS_SPLIT_MAX_ZOOM,
+    )
+    if split_zoom_band is not None:
+        shadow_layer = copy.deepcopy(layer)
+        shadow_layer["id"] = f"{_HILLSHADE_LAYER_ID}-shadow"
+        _set_zoom_bounds(shadow_layer, *split_zoom_band)
+        shadow_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["==", ["get", "class"], "shadow"],
+        )
+        shadow_paint = shadow_layer["paint"]
+        assert isinstance(shadow_paint, dict)
+        shadow_paint["fill-color"] = _HILLSHADE_SHADOW_FILL_COLOR
+        variants.append(shadow_layer)
+
+    highlight_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        _HILLSHADE_HIGHLIGHT_MIN_ZOOM,
+        _HILLSHADE_CLASS_SPLIT_MAX_ZOOM,
+    )
+    if highlight_zoom_band is not None:
+        highlight_layer = copy.deepcopy(layer)
+        highlight_layer["id"] = f"{_HILLSHADE_LAYER_ID}-highlight"
+        _set_zoom_bounds(highlight_layer, *highlight_zoom_band)
+        highlight_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["!=", ["get", "class"], "shadow"],
+        )
+        highlight_paint = highlight_layer["paint"]
+        assert isinstance(highlight_paint, dict)
+        highlight_paint["fill-color"] = _HILLSHADE_HIGHLIGHT_FILL_COLOR
+        variants.append(highlight_layer)
+
+    high_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        _HILLSHADE_CLASS_SPLIT_MAX_ZOOM,
+        None,
+    )
+    if high_zoom_band is not None:
+        high_zoom_layer = copy.deepcopy(layer)
+        high_zoom_layer["id"] = f"{_HILLSHADE_LAYER_ID}-z13-plus"
+        _set_zoom_bounds(high_zoom_layer, *high_zoom_band)
+        high_zoom_paint = high_zoom_layer["paint"]
+        assert isinstance(high_zoom_paint, dict)
+        high_zoom_paint["fill-color"] = _HILLSHADE_HIGHLIGHT_FILL_COLOR
+        variants.append(high_zoom_layer)
+
+    return variants or None
+
+
+def _split_hillshade_fill_color_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _hillshade_fill_color_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -4511,8 +4634,9 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
-    QGIS can parse, splits visible landcover, landuse, path background, and road
-    class colors into static class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
+    QGIS can parse, splits visible hillshade, landcover, landuse, path
+    background, and road class colors into static class layers, and collapses
+    Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
 
@@ -4534,6 +4658,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_continent_label_text_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_cliff_line_pattern_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_building_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_hillshade_fill_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landcover_class_fill_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_landuse_fill_opacity_layers_for_qgis(style.get("layers"))
