@@ -549,6 +549,24 @@ _MAJOR_LINK_WIDTH_MINIMUM_MM_BY_PROP = {
     "line-width": 0.1,
     "line-gap-width": 0.0,
 }
+_ROAD_CLASS_LINE_COLOR_VARIANTS_BY_LAYER_ID = {
+    "bridge-major-link": (("motorway_link", "motorway-link"), ("trunk_link", "trunk-link")),
+    "bridge-major-link-2": (("motorway_link", "motorway-link"), ("trunk_link", "trunk-link")),
+    "bridge-motorway-trunk": (("motorway", "motorway"), ("trunk", "trunk")),
+    "bridge-motorway-trunk-2": (("motorway", "motorway"), ("trunk", "trunk")),
+    "road-major-link": (("motorway_link", "motorway-link"), ("trunk_link", "trunk-link")),
+    "road-motorway-trunk": (("motorway", "motorway"), ("trunk", "trunk")),
+    "tunnel-major-link": (("motorway_link", "motorway-link"), ("trunk_link", "trunk-link")),
+    "tunnel-motorway-trunk": (("motorway", "motorway"), ("trunk", "trunk")),
+}
+_ROAD_CLASS_LINE_COLOR_SUFFIXES = tuple(
+    sorted(
+        {suffix for variants in _ROAD_CLASS_LINE_COLOR_VARIANTS_BY_LAYER_ID.values() for _class_value, suffix in variants},
+        key=len,
+        reverse=True,
+    )
+)
+_ROAD_CLASS_LINE_COLOR_MIN_ZOOM = 12.0
 _MAJOR_LINK_WIDTH_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("z12-to-z16", 12.0, 16.0, 14.0),
     ("z16-plus", 16.0, None, 16.0),
@@ -1868,6 +1886,7 @@ def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
     for resolved_layer_id in (
+        _road_class_line_color_base_layer_id(layer_id),
         _water_label_typography_base_layer_id(layer_id),
         _regional_major_road_width_base_layer_id(layer_id),
         _major_link_width_base_layer_id(layer_id),
@@ -1955,6 +1974,103 @@ def _set_zoom_bounds(layer: dict[str, object], minzoom: float | None, maxzoom: f
         layer.pop("maxzoom", None)
     else:
         layer["maxzoom"] = maxzoom
+
+
+def _match_output_for_value(expr: object, value: object) -> object | None:
+    if not isinstance(expr, list) or len(expr) < 5 or expr[0] != "match" or (len(expr) - 3) % 2 != 0:
+        return None
+    for index in range(2, len(expr) - 1, 2):
+        candidate = expr[index]
+        if candidate == value or (isinstance(candidate, list) and value in candidate):
+            return expr[index + 1]
+    return expr[-1]
+
+
+def _line_color_for_road_class(expr: object, class_value: str, target_zoom: float) -> str | None:
+    if _is_literal_color(expr):
+        return str(expr)
+    if not isinstance(expr, list) or not expr:
+        return None
+    if expr[0] == "step" and expr[1:2] == [["zoom"]]:
+        return _line_color_for_road_class(_step_zoom_value(expr, target_zoom=target_zoom), class_value, target_zoom)
+    if expr[0] != "match" or expr[1] != ["get", "class"]:
+        return None
+    output = _match_output_for_value(expr, class_value)
+    return str(output) if _is_literal_color(output) else None
+
+
+def _road_class_line_color_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    for suffix in _ROAD_CLASS_LINE_COLOR_SUFFIXES:
+        color_suffix = f"-{suffix}"
+        if not normalized.endswith(color_suffix):
+            continue
+        candidate = normalized[: -len(color_suffix)]
+        for base_layer_id in (
+            _regional_major_road_width_base_layer_id(candidate),
+            _major_link_width_base_layer_id(candidate),
+            candidate,
+        ):
+            if base_layer_id in _ROAD_CLASS_LINE_COLOR_VARIANTS_BY_LAYER_ID:
+                return base_layer_id
+    return None
+
+
+def _road_class_line_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited motorway/trunk class colors into static QGIS layers."""
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer.get("id"))
+    variants = _ROAD_CLASS_LINE_COLOR_VARIANTS_BY_LAYER_ID.get(base_layer_id)
+    paint = layer.get("paint")
+    if variants is None or layer.get("type") != "line" or not isinstance(paint, dict):
+        return None
+    line_color = paint.get("line-color")
+    if not isinstance(line_color, list):
+        return None
+
+    target_zoom = _representative_zoom_in_layer_range(layer.get("minzoom"), layer.get("maxzoom"))
+    if target_zoom is None:
+        return None
+    minimum_zoom = _numeric_zoom_bound(layer.get("minzoom"))
+    if minimum_zoom is None or minimum_zoom < _ROAD_CLASS_LINE_COLOR_MIN_ZOOM:
+        return None
+
+    resolved_variants: list[tuple[str, str, str]] = []
+    for class_value, suffix in variants:
+        color = _line_color_for_road_class(line_color, class_value, target_zoom)
+        if color is None:
+            return None
+        resolved_variants.append((class_value, suffix, color))
+
+    if len({color for _class_value, _suffix, color in resolved_variants}) <= 1:
+        return None
+
+    layer_id = str(layer.get("id") or base_layer_id)
+    class_layers: list[dict[str, object]] = []
+    for class_value, suffix, color in resolved_variants:
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["==", ["get", "class"], class_value],
+        )
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["line-color"] = color
+        class_layers.append(variant)
+    return class_layers
+
+
+def _split_road_class_line_color_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _road_class_line_color_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _regional_major_road_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
@@ -4395,8 +4511,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     literalizes simple ``line-dasharray`` expressions so dashed routes and paths
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
-    QGIS can parse, splits visible landcover, landuse, and path background class
-    colors into static class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
+    QGIS can parse, splits visible landcover, landuse, path background, and road
+    class colors into static class layers, and collapses Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
 
@@ -4406,6 +4522,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style = copy.deepcopy(style_definition)
     style["layers"] = _split_regional_major_road_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_major_link_width_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_road_class_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
