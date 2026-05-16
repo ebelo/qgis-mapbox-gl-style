@@ -879,6 +879,153 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "road-major-link-z12-to-z16")
         self.assertEqual(result[3]["id"], "road-major-link-z16-plus")
 
+    def test_motorway_trunk_line_color_splits_only_at_high_zoom(self):
+        line_color = [
+            "step",
+            ["zoom"],
+            [
+                "match",
+                ["get", "class"],
+                "motorway",
+                "hsl(15, 88%, 69%)",
+                "trunk",
+                "hsl(35, 81%, 59%)",
+                "hsl(60, 18%, 85%)",
+            ],
+            9,
+            [
+                "match",
+                ["get", "class"],
+                "motorway",
+                "hsl(15, 100%, 75%)",
+                "hsl(35, 89%, 75%)",
+            ],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "road-motorway-trunk",
+                    "type": "line",
+                    "minzoom": 3,
+                    "filter": ["==", ["geometry-type"], "LineString"],
+                    "paint": {
+                        "line-color": line_color,
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1, 12, 10],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-motorway-trunk-z3-to-z5",
+                "road-motorway-trunk-z5-to-z6",
+                "road-motorway-trunk-z6-to-z9",
+                "road-motorway-trunk-z9-to-z12",
+                "road-motorway-trunk-motorway",
+                "road-motorway-trunk-trunk",
+            ],
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-z6-to-z9"]["paint"]["line-color"],
+            "hsl(35, 89%, 75%)",
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-motorway"]["paint"]["line-color"],
+            "hsl(15, 100%, 75%)",
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-trunk"]["paint"]["line-color"],
+            "hsl(35, 89%, 75%)",
+        )
+        self.assertIn(["==", ["get", "class"], "motorway"], by_id["road-motorway-trunk-motorway"]["filter"])
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-motorway-trunk-motorway"),
+            "road-motorway-trunk",
+        )
+
+    def test_major_link_line_color_splits_after_width_bands(self):
+        link_width = ["interpolate", ["linear"], ["zoom"], 12, 0.8, 16, 4]
+        style = {
+            "layers": [
+                {
+                    "id": "road-major-link",
+                    "type": "line",
+                    "minzoom": 12,
+                    "filter": ["==", ["geometry-type"], "LineString"],
+                    "paint": {
+                        "line-color": [
+                            "match",
+                            ["get", "class"],
+                            "motorway_link",
+                            "hsl(15, 100%, 75%)",
+                            "hsl(35, 89%, 75%)",
+                        ],
+                        "line-width": link_width,
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-major-link-z12-to-z16-motorway-link",
+                "road-major-link-z12-to-z16-trunk-link",
+                "road-major-link-z16-plus-motorway-link",
+                "road-major-link-z16-plus-trunk-link",
+            ],
+        )
+        self.assertEqual(
+            by_id["road-major-link-z12-to-z16-motorway-link"]["paint"]["line-color"],
+            "hsl(15, 100%, 75%)",
+        )
+        self.assertEqual(
+            by_id["road-major-link-z12-to-z16-trunk-link"]["paint"]["line-color"],
+            "hsl(35, 89%, 75%)",
+        )
+        self.assertIn(
+            ["==", ["get", "class"], "motorway_link"],
+            by_id["road-major-link-z12-to-z16-motorway-link"]["filter"],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-major-link-z12-to-z16-motorway-link"),
+            "road-major-link",
+        )
+
+    def test_road_class_line_color_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = [
+            "not-a-layer",
+            {
+                "id": "road-major-link",
+                "type": "symbol",
+                "paint": {"line-color": ["match", ["get", "class"], "motorway_link", "red", "blue"]},
+            },
+            {
+                "id": "road-major-link",
+                "type": "line",
+                "paint": {"line-color": ["get", "color"]},
+            },
+        ]
+
+        self.assertIs(
+            mapbox_config._split_road_class_line_color_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_road_class_line_color_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["type"], "symbol")
+        self.assertEqual(result[2]["id"], "road-major-link")
+
     def test_full_line_opacity_expressions_simplify_to_scalar_default(self):
         style = {
             "layers": [
