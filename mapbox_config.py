@@ -534,6 +534,25 @@ _REGIONAL_CORE_ROAD_WIDTH_LAYER_IDS = {
     "road-primary",
     "road-primary-case",
 }
+_MAJOR_LINK_WIDTH_LAYER_IDS = {
+    "bridge-major-link",
+    "bridge-major-link-2",
+    "bridge-major-link-2-case",
+    "bridge-major-link-case",
+    "road-major-link",
+    "road-major-link-case",
+    "tunnel-major-link",
+    "tunnel-major-link-case",
+}
+_MAJOR_LINK_WIDTH_PROPS = {"line-width", "line-gap-width"}
+_MAJOR_LINK_WIDTH_MINIMUM_MM_BY_PROP = {
+    "line-width": 0.1,
+    "line-gap-width": 0.0,
+}
+_MAJOR_LINK_WIDTH_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
+    ("z12-to-z16", 12.0, 16.0, 14.0),
+    ("z16-plus", 16.0, None, 16.0),
+)
 _REGIONAL_MAJOR_ROAD_WIDTH_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
     ("z3-to-z5", None, 5.0),
     ("z5-to-z6", 5.0, 6.0),
@@ -1827,6 +1846,17 @@ def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _major_link_width_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    for suffix, _band_minzoom, _band_maxzoom, _target_zoom in _MAJOR_LINK_WIDTH_BANDS:
+        band_suffix = f"-{suffix}"
+        if normalized.endswith(band_suffix):
+            base_layer_id = normalized[: -len(band_suffix)]
+            if base_layer_id in _MAJOR_LINK_WIDTH_LAYER_IDS:
+                return base_layer_id
+    return None
+
+
 def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     for base_layer_id in _WATER_LABEL_TYPOGRAPHY_LAYER_IDS:
@@ -1840,6 +1870,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     for resolved_layer_id in (
         _water_label_typography_base_layer_id(layer_id),
         _regional_major_road_width_base_layer_id(layer_id),
+        _major_link_width_base_layer_id(layer_id),
         _landcover_fill_opacity_base_layer_id(layer_id),
         _landuse_fill_opacity_base_layer_id(layer_id),
         _path_background_line_color_base_layer_id(layer_id),
@@ -1983,6 +2014,137 @@ def _split_regional_major_road_width_layers_for_qgis(layers: object) -> object:
             expanded_layers.append(layer)
             continue
         variants = _regional_major_road_width_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
+def _extract_zoom_scalar_size_at_zoom(expr: object, target_zoom: float) -> float | None:
+    if isinstance(expr, bool):
+        return None
+    if isinstance(expr, (int, float)):
+        return float(expr)
+    if not isinstance(expr, list) or len(expr) < 4:
+        return None
+    if expr[0] == "step" and expr[1] == ["zoom"]:
+        outputs = _step_outputs(expr)
+        if all(_numeric_expression_value(output) is not None for output in outputs):
+            return _numeric_expression_value(_step_zoom_value(expr, target_zoom=target_zoom))
+    if expr[0] == "interpolate" and len(expr) >= 5 and expr[2] == ["zoom"]:
+        outputs = [expr[index] for index in range(4, len(expr), 2)]
+        if all(_numeric_expression_value(output) is not None for output in outputs):
+            return _numeric_expression_value(_interpolate_filter_value_at_zoom(expr, target_zoom))
+    return None
+
+
+def _major_link_width_mm(expr: object, target_zoom: float, *, minimum_mm: float) -> float | None:
+    size = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
+    if size is None:
+        return None
+    return max(minimum_mm, min(size * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
+
+
+def _has_major_link_width_expression(layer: dict[str, object]) -> bool:
+    layer_id = str(layer.get("id") or "")
+    if layer_id not in _MAJOR_LINK_WIDTH_LAYER_IDS or layer.get("type") != "line":
+        return False
+    paint = layer.get("paint")
+    return isinstance(paint, dict) and any(
+        isinstance(paint.get(prop), list) for prop in _MAJOR_LINK_WIDTH_PROPS
+    )
+
+
+def _apply_major_link_width_values_for_qgis(paint: dict[str, object], target_zoom: float) -> bool:
+    changed = False
+    for prop in _MAJOR_LINK_WIDTH_PROPS:
+        minimum_mm = _MAJOR_LINK_WIDTH_MINIMUM_MM_BY_PROP[prop]
+        width_mm = _major_link_width_mm(paint.get(prop), target_zoom, minimum_mm=minimum_mm)
+        if width_mm is not None:
+            paint[prop] = width_mm
+            changed = True
+    return changed
+
+
+def _major_link_width_layer_variant(
+    layer: dict[str, object],
+    layer_id: str,
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band: tuple[str, float | None, float | None, float],
+) -> dict[str, object] | None:
+    suffix, band_minzoom, band_maxzoom, target_zoom = band
+    zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom)
+    if zoom_band is None:
+        return None
+    target_zoom = _zoom_in_layer_range(target_zoom, *zoom_band)
+    if target_zoom is None:
+        return None
+    variant = copy.deepcopy(layer)
+    variant["id"] = f"{layer_id}-{suffix}"
+    _set_zoom_bounds(variant, *zoom_band)
+    variant_paint = variant.get("paint")
+    if not isinstance(variant_paint, dict):
+        return None
+    return variant if _apply_major_link_width_values_for_qgis(variant_paint, target_zoom) else None
+
+
+def _major_link_width_passthrough_layer_variant(
+    layer: dict[str, object],
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+) -> dict[str, object] | None:
+    first_split_minzoom = _MAJOR_LINK_WIDTH_BANDS[0][1]
+    if first_split_minzoom is None:
+        return None
+    zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, None, first_split_minzoom)
+    if zoom_band is None:
+        return None
+    variant = copy.deepcopy(layer)
+    _set_zoom_bounds(variant, *zoom_band)
+    return variant
+
+
+def _major_link_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited z12+ motorway/trunk link widths into static QGIS zoom bands."""
+    if not _has_major_link_width_expression(layer):
+        return None
+
+    layer_id = str(layer.get("id") or "")
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    split_variants: list[dict[str, object]] = []
+    for band in _MAJOR_LINK_WIDTH_BANDS:
+        variant = _major_link_width_layer_variant(
+            layer,
+            layer_id,
+            existing_minzoom,
+            existing_maxzoom,
+            band,
+        )
+        if variant is not None:
+            split_variants.append(variant)
+    if not split_variants:
+        return None
+    variants: list[dict[str, object]] = []
+    passthrough_variant = _major_link_width_passthrough_layer_variant(
+        layer,
+        existing_minzoom,
+        existing_maxzoom,
+    )
+    if passthrough_variant is not None:
+        variants.append(passthrough_variant)
+    variants.extend(split_variants)
+    return variants
+
+
+def _split_major_link_width_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _major_link_width_layer_variants(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
 
@@ -3382,20 +3544,10 @@ def _extract_zoom_scalar_size(expr: object, *, minzoom: object = None, maxzoom: 
     Keep data-driven sizes intact; QGIS may be able to apply them in contexts
     where a static snapshot would lose feature-specific emphasis.
     """
-    if not isinstance(expr, list) or len(expr) < 4:
-        return None
     target_zoom = _representative_zoom_in_layer_range(minzoom, maxzoom)
     if target_zoom is None:
         return None
-    if expr[0] == "step" and expr[1] == ["zoom"]:
-        outputs = _step_outputs(expr)
-        if all(_numeric_expression_value(output) is not None for output in outputs):
-            return _numeric_expression_value(_step_zoom_value(expr, target_zoom=target_zoom))
-    if expr[0] == "interpolate" and len(expr) >= 5 and expr[2] == ["zoom"]:
-        outputs = [expr[index] for index in range(4, len(expr), 2)]
-        if all(_numeric_expression_value(output) is not None for output in outputs):
-            return _numeric_expression_value(_interpolate_filter_value_at_zoom(expr, target_zoom))
-    return None
+    return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
 
 
 def _clamp_opacity_value(value: object) -> float | None:
@@ -4253,6 +4405,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     """
     style = copy.deepcopy(style_definition)
     style["layers"] = _split_regional_major_road_width_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_major_link_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
