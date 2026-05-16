@@ -2396,6 +2396,89 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "building-z15-to-z16")
         self.assertEqual(result[2]["id"], "building-z16-plus")
 
+    def _hillshade_layer(self, fill_color=None, maxzoom=16):
+        if fill_color is None:
+            fill_color = copy.deepcopy(mapbox_config._HILLSHADE_FILL_COLOR_EXPRESSION)
+        return {
+            "id": "hillshade",
+            "type": "fill",
+            "minzoom": 0,
+            "maxzoom": maxzoom,
+            "source-layer": "hillshade",
+            "filter": [
+                "all",
+                ["step", ["zoom"], ["==", ["get", "class"], "shadow"], 11, True],
+                ["match", ["get", "level"], 89, True, 78, ["step", ["zoom"], False, 5, True], False],
+            ],
+            "paint": {
+                "fill-antialias": False,
+                "fill-color": fill_color,
+            },
+        }
+
+    def test_hillshade_fill_color_splits_shadow_and_highlight_layers(self):
+        style = {"layers": [self._hillshade_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            ["hillshade-shadow", "hillshade-highlight", "hillshade-z13-plus"],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        shadow = by_id["hillshade-shadow"]
+        highlight = by_id["hillshade-highlight"]
+        high_zoom = by_id["hillshade-z13-plus"]
+        self.assertEqual(shadow["minzoom"], 0)
+        self.assertEqual(shadow["maxzoom"], 13.0)
+        self.assertEqual(highlight["minzoom"], 11.0)
+        self.assertEqual(highlight["maxzoom"], 13.0)
+        self.assertEqual(high_zoom["minzoom"], 13.0)
+        self.assertEqual(high_zoom["maxzoom"], 16)
+        self.assertEqual(shadow["paint"]["fill-color"], "hsla(66, 38%, 17%, 0.08)")
+        self.assertEqual(highlight["paint"]["fill-color"], "hsla(60, 20%, 95%, 0.14)")
+        self.assertEqual(high_zoom["paint"]["fill-color"], "hsla(60, 20%, 95%, 0.14)")
+        self.assertIn(["==", ["get", "class"], "shadow"], shadow["filter"])
+        self.assertIn(["!=", ["get", "class"], "shadow"], highlight["filter"])
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("hillshade-z13-plus"),
+            "hillshade",
+        )
+
+    def test_hillshade_fill_color_skips_highlight_when_not_visible(self):
+        style = {"layers": [self._hillshade_layer(maxzoom=10)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual([layer["id"] for layer in result["layers"]], ["hillshade-shadow"])
+        self.assertEqual(result["layers"][0]["maxzoom"], 10)
+
+    def test_hillshade_fill_color_is_not_split_when_shape_changes(self):
+        fill_color = ["get", "color"]
+        style = {"layers": [self._hillshade_layer(fill_color=fill_color)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "hillshade")
+        self.assertEqual(result["layers"][0]["paint"]["fill-color"], fill_color)
+
+    def test_hillshade_fill_color_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", {"id": "hillshade", "type": "fill"}, self._hillshade_layer()]
+
+        self.assertIs(
+            mapbox_config._split_hillshade_fill_color_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_hillshade_fill_color_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "hillshade")
+        self.assertEqual(result[2]["id"], "hillshade-shadow")
+        self.assertEqual(result[3]["id"], "hillshade-highlight")
+        self.assertEqual(result[4]["id"], "hillshade-z13-plus")
+
     def _landcover_layer(self, fill_opacity=None):
         if fill_opacity is None:
             fill_opacity = ["interpolate", ["exponential", 1.5], ["zoom"], 8, 0.8, 12, 0]
