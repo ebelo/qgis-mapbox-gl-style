@@ -685,6 +685,93 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         for layer in layers[:4]:
             self.assertEqual(layer["paint"]["line-width"], 0.6)
 
+    def test_major_link_widths_are_split_by_zoom_band(self):
+        link_width = ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0.8, 18, 20, 22, 200]
+        case_width = ["interpolate", ["exponential", 1.5], ["zoom"], 14, 0.8, 22, 2]
+        style = {
+            "layers": [
+                {
+                    "id": "road-major-link",
+                    "type": "line",
+                    "minzoom": 12,
+                    "filter": ["==", ["get", "class"], "motorway_link"],
+                    "paint": {"line-color": "hsl(15, 100%, 75%)", "line-width": link_width},
+                },
+                {
+                    "id": "bridge-major-link-case",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": case_width, "line-gap-width": copy.deepcopy(link_width)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-major-link-z12-to-z16",
+                "road-major-link-z16-plus",
+                "bridge-major-link-case-z12-to-z16",
+                "bridge-major-link-case-z16-plus",
+            ],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            (
+                by_id["road-major-link-z12-to-z16"]["minzoom"],
+                by_id["road-major-link-z12-to-z16"]["maxzoom"],
+            ),
+            (12.0, 16.0),
+        )
+        self.assertEqual(by_id["road-major-link-z16-plus"]["minzoom"], 16.0)
+        self.assertAlmostEqual(
+            by_id["road-major-link-z12-to-z16"]["paint"]["line-width"],
+            mapbox_config._interpolate_filter_value_at_zoom(link_width, 14.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertAlmostEqual(
+            by_id["road-major-link-z16-plus"]["paint"]["line-width"],
+            mapbox_config._interpolate_filter_value_at_zoom(link_width, 16.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-major-link-case-z12-to-z16"]["paint"]["line-width"],
+            mapbox_config._interpolate_filter_value_at_zoom(case_width, 14.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-major-link-case-z12-to-z16"]["paint"]["line-gap-width"],
+            mapbox_config._interpolate_filter_value_at_zoom(link_width, 14.0) * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("bridge-major-link-case-z12-to-z16"),
+            "bridge-major-link-case",
+        )
+        self.assertEqual(style["layers"][0]["paint"]["line-width"], link_width)
+
+    def test_major_link_width_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        link_width = ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0.8, 18, 20, 22, 200]
+        mixed_layers = [
+            "not-a-layer",
+            {
+                "id": "road-major-link",
+                "type": "symbol",
+                "paint": {"line-width": copy.deepcopy(link_width)},
+            },
+            {"id": "road-major-link", "type": "line", "paint": {"line-width": copy.deepcopy(link_width)}},
+        ]
+
+        self.assertIs(
+            mapbox_config._split_major_link_width_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_major_link_width_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["type"], "symbol")
+        self.assertEqual(result[2]["id"], "road-major-link-z12-to-z16")
+        self.assertEqual(result[3]["id"], "road-major-link-z16-plus")
+
     def test_full_line_opacity_expressions_simplify_to_scalar_default(self):
         style = {
             "layers": [
