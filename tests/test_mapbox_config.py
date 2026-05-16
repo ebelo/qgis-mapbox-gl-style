@@ -766,6 +766,90 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(style["layers"][0]["paint"]["line-width"], link_width)
 
+    def test_major_link_width_split_preserves_pre_z12_visibility(self):
+        link_width = ["interpolate", ["linear"], ["zoom"], 10, 0.2, 12, 0.8, 16, 6]
+        style = {
+            "layers": [
+                {
+                    "id": "road-major-link",
+                    "type": "line",
+                    "minzoom": 10,
+                    "paint": {"line-width": copy.deepcopy(link_width)},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            ["road-major-link", "road-major-link-z12-to-z16", "road-major-link-z16-plus"],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            (by_id["road-major-link"]["minzoom"], by_id["road-major-link"]["maxzoom"]),
+            (10.0, 12.0),
+        )
+        self.assertEqual(by_id["road-major-link-z12-to-z16"]["minzoom"], 12.0)
+        self.assertEqual(by_id["road-major-link-z16-plus"]["minzoom"], 16.0)
+
+    def test_major_link_widths_sample_within_effective_zoom_band(self):
+        link_width = ["interpolate", ["linear"], ["zoom"], 12, 1.0, 16, 9.0]
+        layers = [
+            {
+                "id": "road-major-link",
+                "type": "line",
+                "minzoom": 15,
+                "maxzoom": 15.5,
+                "paint": {"line-width": copy.deepcopy(link_width)},
+            },
+            {
+                "id": "bridge-major-link",
+                "type": "line",
+                "minzoom": 12,
+                "maxzoom": 13,
+                "paint": {"line-width": copy.deepcopy(link_width)},
+            },
+        ]
+
+        result = mapbox_config._split_major_link_width_layers_for_qgis(layers)
+
+        self.assertEqual(
+            [layer["id"] for layer in result],
+            ["road-major-link-z12-to-z16", "bridge-major-link-z12-to-z16"],
+        )
+        by_id = {layer["id"]: layer for layer in result}
+        width_mm = lambda zoom: max(
+            0.1,
+            min(
+                mapbox_config._interpolate_filter_value_at_zoom(link_width, zoom)
+                * mapbox_config._MAPBOX_PIXEL_TO_MM,
+                mapbox_config._MAX_LINE_WIDTH_MM,
+            ),
+        )
+        self.assertEqual(
+            (
+                by_id["road-major-link-z12-to-z16"]["minzoom"],
+                by_id["road-major-link-z12-to-z16"]["maxzoom"],
+            ),
+            (15.0, 15.5),
+        )
+        self.assertAlmostEqual(
+            by_id["road-major-link-z12-to-z16"]["paint"]["line-width"],
+            width_mm(15.0),
+        )
+        self.assertEqual(
+            (
+                by_id["bridge-major-link-z12-to-z16"]["minzoom"],
+                by_id["bridge-major-link-z12-to-z16"]["maxzoom"],
+            ),
+            (12.0, 13.0),
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-major-link-z12-to-z16"]["paint"]["line-width"],
+            width_mm(13.0 - mapbox_config._ZOOM_BOUND_EPSILON),
+        )
+
     def test_major_link_width_helpers_keep_passthrough_inputs(self):
         unchanged_layers = "not-a-layer-list"
         link_width = ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0.8, 18, 20, 22, 200]
@@ -776,7 +860,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "type": "symbol",
                 "paint": {"line-width": copy.deepcopy(link_width)},
             },
-            {"id": "road-major-link", "type": "line", "paint": {"line-width": copy.deepcopy(link_width)}},
+            {
+                "id": "road-major-link",
+                "type": "line",
+                "minzoom": 12,
+                "paint": {"line-width": copy.deepcopy(link_width)},
+            },
         ]
 
         self.assertIs(

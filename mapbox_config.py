@@ -2075,6 +2075,9 @@ def _major_link_width_layer_variant(
     zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom)
     if zoom_band is None:
         return None
+    target_zoom = _zoom_in_layer_range(target_zoom, *zoom_band)
+    if target_zoom is None:
+        return None
     variant = copy.deepcopy(layer)
     variant["id"] = f"{layer_id}-{suffix}"
     _set_zoom_bounds(variant, *zoom_band)
@@ -2082,6 +2085,22 @@ def _major_link_width_layer_variant(
     if not isinstance(variant_paint, dict):
         return None
     return variant if _apply_major_link_width_values_for_qgis(variant_paint, target_zoom) else None
+
+
+def _major_link_width_passthrough_layer_variant(
+    layer: dict[str, object],
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+) -> dict[str, object] | None:
+    first_split_minzoom = _MAJOR_LINK_WIDTH_BANDS[0][1]
+    if first_split_minzoom is None:
+        return None
+    zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, None, first_split_minzoom)
+    if zoom_band is None:
+        return None
+    variant = copy.deepcopy(layer)
+    _set_zoom_bounds(variant, *zoom_band)
+    return variant
 
 
 def _major_link_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
@@ -2092,7 +2111,7 @@ def _major_link_width_layer_variants(layer: dict[str, object]) -> list[dict[str,
     layer_id = str(layer.get("id") or "")
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
-    variants: list[dict[str, object]] = []
+    split_variants: list[dict[str, object]] = []
     for band in _MAJOR_LINK_WIDTH_BANDS:
         variant = _major_link_width_layer_variant(
             layer,
@@ -2102,8 +2121,19 @@ def _major_link_width_layer_variants(layer: dict[str, object]) -> list[dict[str,
             band,
         )
         if variant is not None:
-            variants.append(variant)
-    return variants or None
+            split_variants.append(variant)
+    if not split_variants:
+        return None
+    variants: list[dict[str, object]] = []
+    passthrough_variant = _major_link_width_passthrough_layer_variant(
+        layer,
+        existing_minzoom,
+        existing_maxzoom,
+    )
+    if passthrough_variant is not None:
+        variants.append(passthrough_variant)
+    variants.extend(split_variants)
+    return variants
 
 
 def _split_major_link_width_layers_for_qgis(layers: object) -> object:
