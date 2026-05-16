@@ -1837,41 +1837,29 @@ def _water_label_typography_base_layer_id(layer_id: object) -> str | None:
 
 def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     """Return the original Mapbox layer id for qfit-created layer variants."""
-    if _is_waterway_label_layer_id(layer_id):
-        return _WATERWAY_LABEL_LAYER_ID
-    water_label_layer_id = _water_label_typography_base_layer_id(layer_id)
-    if water_label_layer_id is not None:
-        return water_label_layer_id
-    regional_road_layer_id = _regional_major_road_width_base_layer_id(layer_id)
-    if regional_road_layer_id is not None:
-        return regional_road_layer_id
-    landcover_layer_id = _landcover_fill_opacity_base_layer_id(layer_id)
-    if landcover_layer_id is not None:
-        return landcover_layer_id
-    landuse_layer_id = _landuse_fill_opacity_base_layer_id(layer_id)
-    if landuse_layer_id is not None:
-        return landuse_layer_id
-    path_background_layer_id = _path_background_line_color_base_layer_id(layer_id)
-    if path_background_layer_id is not None:
-        return path_background_layer_id
-    if _is_road_number_shield_layer_id(layer_id):
-        return _ROAD_NUMBER_SHIELD_LAYER_ID
-    if _is_poi_label_layer_id(layer_id):
-        return _POI_LABEL_LAYER_ID
-    if _is_gate_label_layer_id(layer_id):
-        return _GATE_LABEL_LAYER_ID
-    if _is_natural_point_label_layer_id(layer_id):
-        return _NATURAL_POINT_LABEL_LAYER_ID
-    if _is_continent_label_layer_id(layer_id):
-        return _CONTINENT_LABEL_LAYER_ID
-    if _is_cliff_layer_id(layer_id):
-        return _CLIFF_LAYER_ID
-    if _is_country_label_layer_id(layer_id):
-        return _COUNTRY_LABEL_LAYER_ID
-    if _is_settlement_major_label_layer_id(layer_id):
-        return _SETTLEMENT_MAJOR_LABEL_LAYER_ID
-    if _is_settlement_minor_label_layer_id(layer_id):
-        return _SETTLEMENT_MINOR_LABEL_LAYER_ID
+    for resolved_layer_id in (
+        _water_label_typography_base_layer_id(layer_id),
+        _regional_major_road_width_base_layer_id(layer_id),
+        _landcover_fill_opacity_base_layer_id(layer_id),
+        _landuse_fill_opacity_base_layer_id(layer_id),
+        _path_background_line_color_base_layer_id(layer_id),
+    ):
+        if resolved_layer_id is not None:
+            return resolved_layer_id
+    for matches_layer_id, base_layer_id in (
+        (_is_waterway_label_layer_id, _WATERWAY_LABEL_LAYER_ID),
+        (_is_road_number_shield_layer_id, _ROAD_NUMBER_SHIELD_LAYER_ID),
+        (_is_poi_label_layer_id, _POI_LABEL_LAYER_ID),
+        (_is_gate_label_layer_id, _GATE_LABEL_LAYER_ID),
+        (_is_natural_point_label_layer_id, _NATURAL_POINT_LABEL_LAYER_ID),
+        (_is_continent_label_layer_id, _CONTINENT_LABEL_LAYER_ID),
+        (_is_cliff_layer_id, _CLIFF_LAYER_ID),
+        (_is_country_label_layer_id, _COUNTRY_LABEL_LAYER_ID),
+        (_is_settlement_major_label_layer_id, _SETTLEMENT_MAJOR_LABEL_LAYER_ID),
+        (_is_settlement_minor_label_layer_id, _SETTLEMENT_MINOR_LABEL_LAYER_ID),
+    ):
+        if matches_layer_id(layer_id):
+            return base_layer_id
     return str(layer_id or "")
 
 
