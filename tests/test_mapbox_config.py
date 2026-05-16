@@ -2094,6 +2094,45 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             self.assertEqual(layer["paint"]["fill-color"], "hsl(98, 48%, 67%)")
             self.assertFalse(layer["paint"]["fill-antialias"])
 
+    def test_landcover_fill_color_splits_class_colors_across_zoom_bands(self):
+        layer = self._landcover_layer()
+        layer["paint"]["fill-color"] = copy.deepcopy(mapbox_config._LANDCOVER_FILL_COLOR_EXPRESSION)
+        style = {"layers": [layer]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(len(result["layers"]), 18)
+        self.assertEqual(
+            mapbox_config._LANDCOVER_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
+            {"landcover-below-z8", "landcover-z8-to-z10", "landcover-z10-to-z12"},
+        )
+        wood_low = by_id["landcover-below-z8-wood"]
+        snow_mid = by_id["landcover-z8-to-z10-snow"]
+        remaining_high = by_id["landcover-z10-to-z12-remaining"]
+        self.assertEqual(wood_low["minzoom"], 0)
+        self.assertEqual(wood_low["maxzoom"], 8.0)
+        self.assertEqual(snow_mid["minzoom"], 8.0)
+        self.assertEqual(snow_mid["maxzoom"], 10.0)
+        self.assertEqual(remaining_high["minzoom"], 10.0)
+        self.assertEqual(remaining_high["maxzoom"], 12)
+        self.assertEqual(wood_low["paint"]["fill-color"], mapbox_config._LANDUSE_WOOD_FILL_COLOR)
+        self.assertEqual(snow_mid["paint"]["fill-color"], mapbox_config._LANDUSE_GLACIER_FILL_COLOR)
+        self.assertEqual(remaining_high["paint"]["fill-color"], mapbox_config._LANDCOVER_FALLBACK_FILL_COLOR)
+        self.assertAlmostEqual(wood_low["paint"]["fill-opacity"], 0.8)
+        self.assertAlmostEqual(snow_mid["paint"]["fill-opacity"], 0.7015384615384616)
+        self.assertAlmostEqual(remaining_high["paint"]["fill-opacity"], 0.3323076923076923)
+        self.assertEqual(wood_low["filter"], ["all", ["match", ["get", "class"], "wood", True, False]])
+        self.assertEqual(snow_mid["filter"], ["all", ["match", ["get", "class"], "snow", True, False]])
+        self.assertEqual(
+            remaining_high["filter"],
+            ["all", ["match", ["get", "class"], ["wood", "scrub", "crop", "grass", "snow"], False, True]],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landcover-z8-to-z10-snow"),
+            "landcover",
+        )
+
     def test_landcover_fill_opacity_is_not_split_when_shape_changes(self):
         fill_opacity = ["get", "opacity"]
         style = {"layers": [self._landcover_layer(fill_opacity=fill_opacity)]}
@@ -2118,6 +2157,28 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "landcover-below-z8")
         self.assertEqual(result[2]["id"], "landcover-z8-to-z10")
         self.assertEqual(result[3]["id"], "landcover-z10-to-z12")
+
+    def test_landcover_fill_color_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        split_layer = self._landcover_layer()
+        split_layer["id"] = "landcover-z8-to-z10"
+        split_layer["paint"]["fill-color"] = copy.deepcopy(mapbox_config._LANDCOVER_FILL_COLOR_EXPRESSION)
+        mixed_layers = ["not-a-layer", self._landcover_layer(), split_layer]
+
+        self.assertIs(
+            mapbox_config._split_landcover_class_fill_color_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_landcover_class_fill_color_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "landcover")
+        self.assertEqual(result[2]["id"], "landcover-z8-to-z10-wood")
+        self.assertEqual(result[3]["id"], "landcover-z8-to-z10-scrub")
+        self.assertEqual(result[4]["id"], "landcover-z8-to-z10-crop")
+        self.assertEqual(result[5]["id"], "landcover-z8-to-z10-grass")
+        self.assertEqual(result[6]["id"], "landcover-z8-to-z10-snow")
+        self.assertEqual(result[7]["id"], "landcover-z8-to-z10-remaining")
 
     def _landuse_layer(self, fill_opacity=None, filter_value=None):
         if fill_opacity is None:
