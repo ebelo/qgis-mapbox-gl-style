@@ -2039,37 +2039,64 @@ def _major_link_width_mm(expr: object, target_zoom: float) -> float | None:
     return max(0.1, min(size * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
 
 
-def _major_link_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
-    """Split audited z12+ motorway/trunk link widths into static QGIS zoom bands."""
+def _has_major_link_width_expression(layer: dict[str, object]) -> bool:
     layer_id = str(layer.get("id") or "")
     if layer_id not in _MAJOR_LINK_WIDTH_LAYER_IDS or layer.get("type") != "line":
-        return None
+        return False
     paint = layer.get("paint")
-    if not isinstance(paint, dict) or not any(
+    return isinstance(paint, dict) and any(
         isinstance(paint.get(prop), list) for prop in _MAJOR_LINK_WIDTH_PROPS
-    ):
+    )
+
+
+def _apply_major_link_width_values_for_qgis(paint: dict[str, object], target_zoom: float) -> bool:
+    changed = False
+    for prop in _MAJOR_LINK_WIDTH_PROPS:
+        width_mm = _major_link_width_mm(paint.get(prop), target_zoom)
+        if width_mm is not None:
+            paint[prop] = width_mm
+            changed = True
+    return changed
+
+
+def _major_link_width_layer_variant(
+    layer: dict[str, object],
+    layer_id: str,
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+    band: tuple[str, float | None, float | None, float],
+) -> dict[str, object] | None:
+    suffix, band_minzoom, band_maxzoom, target_zoom = band
+    zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom)
+    if zoom_band is None:
+        return None
+    variant = copy.deepcopy(layer)
+    variant["id"] = f"{layer_id}-{suffix}"
+    _set_zoom_bounds(variant, *zoom_band)
+    variant_paint = variant.get("paint")
+    if not isinstance(variant_paint, dict):
+        return None
+    return variant if _apply_major_link_width_values_for_qgis(variant_paint, target_zoom) else None
+
+
+def _major_link_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited z12+ motorway/trunk link widths into static QGIS zoom bands."""
+    if not _has_major_link_width_expression(layer):
         return None
 
+    layer_id = str(layer.get("id") or "")
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
     variants: list[dict[str, object]] = []
-    for suffix, band_minzoom, band_maxzoom, target_zoom in _MAJOR_LINK_WIDTH_BANDS:
-        zoom_band = _effective_zoom_band(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom)
-        if zoom_band is None:
-            continue
-        variant = copy.deepcopy(layer)
-        variant["id"] = f"{layer_id}-{suffix}"
-        _set_zoom_bounds(variant, *zoom_band)
-        variant_paint = variant.get("paint")
-        if not isinstance(variant_paint, dict):
-            continue
-        changed = False
-        for prop in _MAJOR_LINK_WIDTH_PROPS:
-            width_mm = _major_link_width_mm(variant_paint.get(prop), target_zoom)
-            if width_mm is not None:
-                variant_paint[prop] = width_mm
-                changed = True
-        if changed:
+    for band in _MAJOR_LINK_WIDTH_BANDS:
+        variant = _major_link_width_layer_variant(
+            layer,
+            layer_id,
+            existing_minzoom,
+            existing_maxzoom,
+            band,
+        )
+        if variant is not None:
             variants.append(variant)
     return variants or None
 
