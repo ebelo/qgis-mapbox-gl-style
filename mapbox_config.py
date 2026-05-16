@@ -845,6 +845,9 @@ _LANDUSE_LOW_ZOOM_FILL_COLORS = [
     _LANDUSE_INDUSTRIAL_FILL_COLOR,
     _LANDUSE_FALLBACK_FILL_COLOR,
 ]
+# This intentionally mirrors the live Mapbox Outdoors z16 stop. Residential is
+# absent in Mapbox's expression here, and qfit's residential z10+ opacity band is
+# fully transparent.
 _LANDUSE_HIGH_ZOOM_FILL_COLORS = [
     "match",
     ["get", "class"],
@@ -951,9 +954,11 @@ _LANDUSE_FILL_OPACITY_VARIANTS: tuple[
         False,
     ),
 )
+_LANDUSE_CLASS_FILL_COLOR_EXCLUDED_OPACITY_SUFFIXES = {"other-below-z8"}
 _LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
-    "landuse-other-z8-to-z10",
-    "landuse-other-z10-plus",
+    f"{_LANDUSE_LAYER_ID}-{suffix}"
+    for suffix, _class_filter, _band_minzoom, _band_maxzoom, residential in _LANDUSE_FILL_OPACITY_VARIANTS
+    if not residential and suffix not in _LANDUSE_CLASS_FILL_COLOR_EXCLUDED_OPACITY_SUFFIXES
 }
 _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     (

@@ -2204,6 +2204,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = simplify_mapbox_style_expressions(style)
 
         by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
+            {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
+        )
         self.assertEqual(len(result["layers"]), 12)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
