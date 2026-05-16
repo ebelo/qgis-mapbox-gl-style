@@ -2196,6 +2196,75 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             )
             self.assertEqual(layer["paint"]["fill-color"], "hsl(60, 22%, 72%)")
 
+    def test_landuse_fill_color_splits_visible_park_and_airport_classes(self):
+        layer = self._landuse_layer()
+        layer["paint"]["fill-color"] = copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION)
+        style = {"layers": [layer]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
+            {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
+        )
+        self.assertEqual(len(result["layers"]), 12)
+        self.assertIn("landuse-other-below-z8", by_id)
+        self.assertNotIn("landuse-other-below-z8-park", by_id)
+        park_special_mid = by_id["landuse-other-z8-to-z10-park-special"]
+        park_mid = by_id["landuse-other-z8-to-z10-park"]
+        airport_mid = by_id["landuse-other-z8-to-z10-airport"]
+        remaining_mid = by_id["landuse-other-z8-to-z10-remaining"]
+        park_special_high = by_id["landuse-other-z10-plus-park-special"]
+        park_high = by_id["landuse-other-z10-plus-park"]
+        airport_high = by_id["landuse-other-z10-plus-airport"]
+        remaining_high = by_id["landuse-other-z10-plus-remaining"]
+        self.assertEqual(park_special_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
+        self.assertEqual(park_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
+        self.assertEqual(airport_mid["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
+        self.assertEqual(remaining_mid["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
+        self.assertEqual(park_special_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
+        self.assertEqual(park_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
+        self.assertEqual(airport_high["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
+        self.assertEqual(remaining_high["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
+        self.assertEqual(park_mid["minzoom"], 8.0)
+        self.assertEqual(park_mid["maxzoom"], 10.0)
+        self.assertEqual(airport_high["minzoom"], 10.0)
+        self.assertNotIn("maxzoom", airport_high)
+        self.assertEqual(
+            park_mid["filter"],
+            [
+                "all",
+                ["==", ["get", "source"], "test"],
+                ["match", ["get", "class"], "residential", False, True],
+                [
+                    "all",
+                    ["match", ["get", "class"], "park", True, False],
+                    ["match", ["get", "type"], ["garden", "playground", "zoo"], False, True],
+                ],
+            ],
+        )
+        self.assertEqual(
+            park_special_mid["filter"][-1],
+            [
+                "all",
+                ["match", ["get", "class"], "park", True, False],
+                ["match", ["get", "type"], ["garden", "playground", "zoo"], True, False],
+            ],
+        )
+        self.assertEqual(
+            airport_mid["filter"][-1],
+            ["match", ["get", "class"], "airport", True, False],
+        )
+        self.assertEqual(
+            remaining_mid["filter"][-1],
+            ["match", ["get", "class"], ["park", "airport"], False, True],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-airport"),
+            "landuse",
+        )
+
     def test_landuse_fill_opacity_uses_effective_zoom_band_midpoints(self):
         layer = self._landuse_layer()
         layer["minzoom"] = 9.5
@@ -2249,6 +2318,26 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[4]["id"], "landuse-other-below-z8")
         self.assertEqual(result[5]["id"], "landuse-other-z8-to-z10")
         self.assertEqual(result[6]["id"], "landuse-other-z10-plus")
+
+    def test_landuse_fill_color_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        split_layer = self._landuse_layer()
+        split_layer["id"] = "landuse-other-z10-plus"
+        split_layer["paint"]["fill-color"] = copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION)
+        mixed_layers = ["not-a-layer", self._landuse_layer(), split_layer]
+
+        self.assertIs(
+            mapbox_config._split_landuse_class_fill_color_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_landuse_class_fill_color_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "landuse")
+        self.assertEqual(result[2]["id"], "landuse-other-z10-plus-park-special")
+        self.assertEqual(result[3]["id"], "landuse-other-z10-plus-park")
+        self.assertEqual(result[4]["id"], "landuse-other-z10-plus-airport")
+        self.assertEqual(result[5]["id"], "landuse-other-z10-plus-remaining")
 
     def _national_park_layer(self, fill_opacity=None):
         if fill_opacity is None:
