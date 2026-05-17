@@ -1206,6 +1206,8 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("grass", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
     ("glacier", ["match", ["get", "class"], "glacier", True, False], _LANDUSE_GLACIER_FILL_COLOR),
     ("sand", ["match", ["get", "class"], "sand", True, False], _LANDUSE_SAND_FILL_COLOR),
+    ("rock-low-zoom", ["match", ["get", "class"], "rock", True, False], _LANDUSE_ROCK_FILL_COLOR),
+    ("rock-high-zoom", ["match", ["get", "class"], "rock", True, False], _LANDUSE_ROCK_HIGH_ZOOM_FILL_COLOR),
     (
         "park-special",
         [
@@ -1246,6 +1248,7 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
                 "grass",
                 "glacier",
                 "sand",
+                "rock",
                 "park",
                 "airport",
                 "cemetery",
@@ -1261,6 +1264,11 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
         _LANDUSE_FALLBACK_FILL_COLOR,
     ),
 )
+_LANDUSE_CLASS_FILL_COLOR_VARIANT_ZOOM_BOUNDS = {
+    # Match the live Outdoors z16 rock-color stop without recoloring lower zooms.
+    "rock-low-zoom": (None, 16.0),
+    "rock-high-zoom": (16.0, None),
+}
 _LANDCOVER_CROP_FILL_COLOR = "hsla(68, 55%, 70%, 0.6)"
 _LANDCOVER_FALLBACK_FILL_COLOR = "hsl(98, 48%, 67%)"
 _LANDCOVER_FILL_COLOR_EXPRESSION = [
@@ -3625,9 +3633,24 @@ def _landuse_class_fill_color_layer_variants(layer: dict[str, object]) -> list[d
         return None
 
     variants: list[dict[str, object]] = []
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
     for suffix, class_filter, fill_color in _LANDUSE_CLASS_FILL_COLOR_VARIANTS:
+        band_minzoom, band_maxzoom = _LANDUSE_CLASS_FILL_COLOR_VARIANT_ZOOM_BOUNDS.get(
+            suffix,
+            (None, None),
+        )
+        effective_zoom_band = _effective_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if effective_zoom_band is None:
+            continue
         variant = copy.deepcopy(layer)
         variant["id"] = f"{layer_id}-{suffix}"
+        _set_zoom_bounds(variant, *effective_zoom_band)
         variant["filter"] = _with_additional_filter_clauses(layer.get("filter"), class_filter)
         variant_paint = variant["paint"]
         assert isinstance(variant_paint, dict)

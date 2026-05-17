@@ -3142,7 +3142,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
             {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
         )
-        self.assertEqual(len(result["layers"]), 34)
+        self.assertEqual(len(result["layers"]), 37)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
         stable_class_variants = {
@@ -3162,6 +3162,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         park_mid = by_id["landuse-other-z8-to-z10-park"]
         airport_mid = by_id["landuse-other-z8-to-z10-airport"]
         remaining_mid = by_id["landuse-other-z8-to-z10-remaining"]
+        rock_mid = by_id["landuse-other-z8-to-z10-rock-low-zoom"]
+        rock_high_low = by_id["landuse-other-z10-plus-rock-low-zoom"]
+        rock_high = by_id["landuse-other-z10-plus-rock-high-zoom"]
         park_special_high = by_id["landuse-other-z10-plus-park-special"]
         park_high = by_id["landuse-other-z10-plus-park"]
         airport_high = by_id["landuse-other-z10-plus-airport"]
@@ -3174,6 +3177,15 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     natural_layer["filter"][-1],
                     ["match", ["get", "class"], class_filter, True, False],
                 )
+        self.assertNotIn("landuse-other-z8-to-z10-rock-high-zoom", by_id)
+        self.assertEqual(rock_mid["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
+        self.assertEqual(rock_high_low["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
+        self.assertEqual(rock_high["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_HIGH_ZOOM_FILL_COLOR)
+        for rock_layer in (rock_mid, rock_high_low, rock_high):
+            self.assertEqual(
+                rock_layer["filter"][-1],
+                ["match", ["get", "class"], "rock", True, False],
+            )
         self.assertEqual(park_special_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
         self.assertEqual(park_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
         self.assertEqual(airport_mid["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
@@ -3192,6 +3204,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(park_mid["maxzoom"], 10.0)
         self.assertEqual(airport_high["minzoom"], 10.0)
         self.assertNotIn("maxzoom", airport_high)
+        self.assertEqual(rock_mid["minzoom"], 8.0)
+        self.assertEqual(rock_mid["maxzoom"], 10.0)
+        self.assertEqual(rock_high_low["minzoom"], 10.0)
+        self.assertEqual(rock_high_low["maxzoom"], 16.0)
+        self.assertEqual(rock_high["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", rock_high)
         self.assertEqual(
             park_mid["filter"],
             [
@@ -3229,6 +3247,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     "grass",
                     "glacier",
                     "sand",
+                    "rock",
                     "park",
                     "airport",
                     "cemetery",
@@ -3244,6 +3263,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-airport"),
+            "landuse",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-rock-high-zoom"),
             "landuse",
         )
 
@@ -3325,6 +3348,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "landuse-other-z10-plus-grass",
                 "landuse-other-z10-plus-glacier",
                 "landuse-other-z10-plus-sand",
+                "landuse-other-z10-plus-rock-low-zoom",
+                "landuse-other-z10-plus-rock-high-zoom",
                 "landuse-other-z10-plus-park-special",
                 "landuse-other-z10-plus-park",
                 "landuse-other-z10-plus-airport",
