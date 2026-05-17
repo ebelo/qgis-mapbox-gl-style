@@ -1757,6 +1757,34 @@ def _road_shield_icon_match(field_name: str, reflen: int) -> list[object]:
     ]
 
 
+def _road_shield_reflen_filter(reflen: int) -> list[object]:
+    return ["match", ["get", "reflen"], reflen, True, str(reflen), True, False]
+
+
+def _road_shield_reflen_range_filter(max_reflen: int) -> list[object]:
+    return [
+        "match",
+        ["get", "reflen"],
+        *(value for reflen in range(1, max_reflen + 1) for value in (reflen, True, str(reflen), True)),
+        False,
+    ]
+
+
+def _road_shield_filter_with_string_reflen_range(filter_value: object) -> object:
+    if not isinstance(filter_value, list):
+        return filter_value
+    if filter_value[:1] == ["<="] and len(filter_value) == 3 and filter_value[1] == ["get", "reflen"]:
+        max_reflen = filter_value[2]
+        if isinstance(max_reflen, int) and not isinstance(max_reflen, bool) and max_reflen > 0:
+            return _road_shield_reflen_range_filter(max_reflen)
+    if filter_value[:1] == ["all"]:
+        return [
+            "all",
+            *(_road_shield_filter_with_string_reflen_range(child) for child in filter_value[1:]),
+        ]
+    return filter_value
+
+
 def _with_additional_filter_clauses(filter_value: object, *clauses: object) -> object:
     filter_copy = copy.deepcopy(filter_value)
     if isinstance(filter_copy, list) and filter_copy[:1] == ["all"]:
@@ -2104,12 +2132,13 @@ def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[st
         return None
 
     variants: list[dict[str, object]] = []
+    base_filter = _road_shield_filter_with_string_reflen_range(layer.get("filter"))
     for reflen in sorted(_ROAD_SHIELD_SPRITE_BASES_BY_REFLEN):
         beta_layer = copy.deepcopy(layer)
         beta_layer["id"] = f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-{reflen}-beta"
         beta_layer["filter"] = _with_additional_filter_clauses(
-            layer.get("filter"),
-            ["==", ["get", "reflen"], reflen],
+            base_filter,
+            _road_shield_reflen_filter(reflen),
             ["has", "shield_beta"],
         )
         beta_layer["layout"]["icon-image"] = _road_shield_icon_match("shield_beta", reflen)
@@ -2118,8 +2147,8 @@ def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[st
         shield_layer = copy.deepcopy(layer)
         shield_layer["id"] = f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-{reflen}"
         shield_layer["filter"] = _with_additional_filter_clauses(
-            layer.get("filter"),
-            ["==", ["get", "reflen"], reflen],
+            base_filter,
+            _road_shield_reflen_filter(reflen),
             ["!", ["has", "shield_beta"]],
         )
         shield_layer["layout"]["icon-image"] = _road_shield_icon_match("shield", reflen)

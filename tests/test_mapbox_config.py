@@ -1700,8 +1700,36 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             [
                 "all",
                 ["has", "reflen"],
-                ["<=", ["get", "reflen"], 6],
-                ["==", ["get", "reflen"], 2],
+                [
+                    "match",
+                    ["get", "reflen"],
+                    1,
+                    True,
+                    "1",
+                    True,
+                    2,
+                    True,
+                    "2",
+                    True,
+                    3,
+                    True,
+                    "3",
+                    True,
+                    4,
+                    True,
+                    "4",
+                    True,
+                    5,
+                    True,
+                    "5",
+                    True,
+                    6,
+                    True,
+                    "6",
+                    True,
+                    False,
+                ],
+                ["match", ["get", "reflen"], 2, True, "2", True, False],
                 ["has", "shield_beta"],
             ],
         )
@@ -1723,7 +1751,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(beta_layer["layout"]["icon-image"][-1], "default-2")
 
         shield_layer = result["layers"][2]
-        self.assertEqual(shield_layer["filter"][-2:], [["==", ["get", "reflen"], 2], ["!", ["has", "shield_beta"]]])
+        self.assertEqual(
+            shield_layer["filter"][-2:],
+            [
+                ["match", ["get", "reflen"], 2, True, "2", True, False],
+                ["!", ["has", "shield_beta"]],
+            ],
+        )
         self.assertEqual(shield_layer["layout"]["icon-image"][:2], ["match", ["get", "shield"]])
         self.assertIn("rectangle-yellow-2", shield_layer["layout"]["icon-image"])
         self.assertIn("au-national-highway-3", by_id["road-number-shield-3-beta"]["layout"]["icon-image"])
@@ -1786,8 +1820,43 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(low_layer["maxzoom"], 11.0)
         self.assertEqual(low_layer["layout"]["symbol-placement"], "point")
         self.assertAlmostEqual(low_layer["layout"]["symbol-spacing"], 400.0)
+        self.assertIn(
+            [
+                "match",
+                ["get", "reflen"],
+                1,
+                True,
+                "1",
+                True,
+                2,
+                True,
+                "2",
+                True,
+                3,
+                True,
+                "3",
+                True,
+                4,
+                True,
+                "4",
+                True,
+                5,
+                True,
+                "5",
+                True,
+                6,
+                True,
+                "6",
+                True,
+                False,
+            ],
+            low_layer["filter"],
+        )
         self.assertIn(["==", ["geometry-type"], "Point"], low_layer["filter"])
-        self.assertIn(["==", ["get", "reflen"], 2], low_layer["filter"])
+        self.assertIn(
+            ["match", ["get", "reflen"], 2, True, "2", True, False],
+            low_layer["filter"],
+        )
         self.assertIn(["has", "shield_beta"], low_layer["filter"])
 
         high_layer = by_id["road-number-shield-2-beta-z11-plus"]
@@ -1798,7 +1867,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             466.66666666666663,
         )
         self.assertIn([">", ["get", "len"], 2500], high_layer["filter"])
-        self.assertIn(["==", ["get", "reflen"], 2], high_layer["filter"])
+        self.assertIn(
+            ["match", ["get", "reflen"], 2, True, "2", True, False],
+            high_layer["filter"],
+        )
         self.assertIn(["has", "shield_beta"], high_layer["filter"])
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit(
