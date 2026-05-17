@@ -4552,7 +4552,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[9]["id"], "water-point-label-other-name-en")
         self.assertEqual(result[10]["id"], "water-point-label-other-name")
 
-    def _contour_line_layer(self, line_opacity=None, minzoom=11):
+    def _contour_line_layer(self, line_opacity=None, line_width=None, minzoom=11):
         if line_opacity is None:
             line_opacity = [
                 "interpolate",
@@ -4563,6 +4563,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 13,
                 ["match", ["get", "index"], [1, 2], 0.3, 0.5],
             ]
+        if line_width is None:
+            line_width = [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                13,
+                ["match", ["get", "index"], [1, 2], 0.5, 0.6],
+                16,
+                ["match", ["get", "index"], [1, 2], 0.8, 1.2],
+            ]
         return {
             "id": "contour-line",
             "type": "line",
@@ -4572,6 +4582,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             "paint": {
                 "line-color": "hsl(33, 20%, 50%)",
                 "line-opacity": line_opacity,
+                "line-width": line_width,
             },
         }
 
@@ -4580,25 +4591,37 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(len(result["layers"]), 4)
+        self.assertEqual(len(result["layers"]), 6)
         by_id = {layer["id"]: layer for layer in result["layers"]}
         minor_fade = by_id["contour-line-index-minor-z11-to-z13"]
-        minor_full = by_id["contour-line-index-minor-z13-plus"]
+        minor_mid = by_id["contour-line-index-minor-z13-to-z16"]
+        minor_full = by_id["contour-line-index-minor-z16-plus"]
         major_fade = by_id["contour-line-index-major-z11-to-z13"]
-        major_full = by_id["contour-line-index-major-z13-plus"]
+        major_mid = by_id["contour-line-index-major-z13-to-z16"]
+        major_full = by_id["contour-line-index-major-z16-plus"]
         self.assertEqual(minor_fade["minzoom"], 11)
         self.assertEqual(minor_fade["maxzoom"], 13.0)
-        self.assertEqual(minor_full["minzoom"], 13.0)
+        self.assertEqual((minor_mid["minzoom"], minor_mid["maxzoom"]), (13.0, 16.0))
+        self.assertEqual(minor_full["minzoom"], 16.0)
         self.assertNotIn("maxzoom", minor_full)
         self.assertEqual(major_fade["minzoom"], 11)
         self.assertEqual(major_fade["maxzoom"], 13.0)
-        self.assertEqual(major_full["minzoom"], 13.0)
+        self.assertEqual((major_mid["minzoom"], major_mid["maxzoom"]), (13.0, 16.0))
+        self.assertEqual(major_full["minzoom"], 16.0)
         self.assertNotIn("maxzoom", major_full)
         self.assertAlmostEqual(minor_fade["paint"]["line-opacity"], 0.225)
+        self.assertAlmostEqual(minor_mid["paint"]["line-opacity"], 0.3)
         self.assertAlmostEqual(minor_full["paint"]["line-opacity"], 0.3)
         self.assertAlmostEqual(major_fade["paint"]["line-opacity"], 0.4)
+        self.assertAlmostEqual(major_mid["paint"]["line-opacity"], 0.5)
         self.assertAlmostEqual(major_full["paint"]["line-opacity"], 0.5)
-        for layer in (minor_fade, minor_full):
+        self.assertAlmostEqual(minor_fade["paint"]["line-width"], 0.5 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(minor_mid["paint"]["line-width"], 0.65 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(minor_full["paint"]["line-width"], 0.8 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_fade["paint"]["line-width"], 0.6 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_mid["paint"]["line-width"], 0.9 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_full["paint"]["line-width"], 1.2 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        for layer in (minor_fade, minor_mid, minor_full):
             self.assertEqual(
                 layer["filter"],
                 [
@@ -4608,7 +4631,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 ],
             )
             self.assertEqual(layer["paint"]["line-color"], "hsl(33, 20%, 50%)")
-        for layer in (major_fade, major_full):
+        for layer in (major_fade, major_mid, major_full):
             self.assertEqual(
                 layer["filter"],
                 [
@@ -4624,7 +4647,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(len(result["layers"]), 6)
+        self.assertEqual(len(result["layers"]), 8)
         by_id = {layer["id"]: layer for layer in result["layers"]}
         minor_below = by_id["contour-line-index-minor-below-z11"]
         major_below = by_id["contour-line-index-major-below-z11"]
@@ -4634,6 +4657,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(major_below["maxzoom"], 11.0)
         self.assertAlmostEqual(minor_below["paint"]["line-opacity"], 0.15)
         self.assertAlmostEqual(major_below["paint"]["line-opacity"], 0.3)
+        self.assertAlmostEqual(minor_below["paint"]["line-width"], 0.5 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_below["paint"]["line-width"], 0.6 * mapbox_config._MAPBOX_PIXEL_TO_MM)
         self.assertEqual(
             minor_below["filter"],
             [
@@ -4661,21 +4686,48 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][0]["id"], "contour-line")
         self.assertEqual(result["layers"][0]["paint"]["line-opacity"], line_opacity)
 
-    def test_contour_line_opacity_helpers_keep_passthrough_inputs(self):
+    def test_contour_line_width_is_not_overwritten_when_shape_changes(self):
+        line_width = ["interpolate", ["linear"], ["zoom"], 13, 2.0, 16, 2.0]
+        style = {"layers": [self._contour_line_layer(line_width=line_width)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 6)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            by_id["contour-line-index-minor-z11-to-z13"]["paint"]["line-opacity"],
+            0.225,
+        )
+        self.assertEqual(
+            by_id["contour-line-index-major-z13-to-z16"]["paint"]["line-opacity"],
+            0.5,
+        )
+        self.assertEqual(
+            by_id["contour-line-index-minor-z11-to-z13"]["paint"]["line-width"],
+            2.0 * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertAlmostEqual(
+            by_id["contour-line-index-major-z16-plus"]["paint"]["line-width"],
+            2.0 * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+
+    def test_contour_line_helpers_keep_passthrough_inputs(self):
         unchanged_layers = "not-a-layer-list"
         mixed_layers = ["not-a-layer", self._contour_line_layer()]
 
         self.assertIs(
-            mapbox_config._split_contour_line_opacity_layers_for_qgis(unchanged_layers),
+            mapbox_config._split_contour_line_layers_for_qgis(unchanged_layers),
             unchanged_layers,
         )
-        result = mapbox_config._split_contour_line_opacity_layers_for_qgis(mixed_layers)
+        result = mapbox_config._split_contour_line_layers_for_qgis(mixed_layers)
 
         self.assertEqual(result[0], "not-a-layer")
         self.assertEqual(result[1]["id"], "contour-line-index-minor-z11-to-z13")
-        self.assertEqual(result[2]["id"], "contour-line-index-minor-z13-plus")
-        self.assertEqual(result[3]["id"], "contour-line-index-major-z11-to-z13")
-        self.assertEqual(result[4]["id"], "contour-line-index-major-z13-plus")
+        self.assertEqual(result[2]["id"], "contour-line-index-minor-z13-to-z16")
+        self.assertEqual(result[3]["id"], "contour-line-index-minor-z16-plus")
+        self.assertEqual(result[4]["id"], "contour-line-index-major-z11-to-z13")
+        self.assertEqual(result[5]["id"], "contour-line-index-major-z13-to-z16")
+        self.assertEqual(result[6]["id"], "contour-line-index-major-z16-plus")
 
     def test_filter_simplification_snapshots_terrain_fill_filters(self):
         landuse_filter = [
