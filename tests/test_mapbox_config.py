@@ -3364,6 +3364,88 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "water-shadow-z13-to-z16")
         self.assertEqual(result[3]["id"], "water-shadow-z16-plus")
 
+    def _aeroway_line_layer(self, line_width=None):
+        if line_width is None:
+            line_width = copy.deepcopy(mapbox_config._AEROWAY_LINE_WIDTH_EXPRESSION)
+        return {
+            "id": "aeroway-line",
+            "type": "line",
+            "minzoom": 9,
+            "source-layer": "aeroway",
+            "filter": ["==", ["geometry-type"], "LineString"],
+            "paint": {
+                "line-color": "hsl(230, 24%, 87%)",
+                "line-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
+                "line-width": line_width,
+            },
+        }
+
+    def test_aeroway_line_width_splits_runway_and_zoom_bands(self):
+        style = {"layers": [self._aeroway_line_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            list(by_id),
+            [
+                "aeroway-line-runway-z9-to-z14",
+                "aeroway-line-other-z9-to-z14",
+                "aeroway-line-runway-z14-to-z16",
+                "aeroway-line-other-z14-to-z16",
+                "aeroway-line-runway-z16-plus",
+                "aeroway-line-other-z16-plus",
+            ],
+        )
+        low_runway = by_id["aeroway-line-runway-z9-to-z14"]
+        low_other = by_id["aeroway-line-other-z9-to-z14"]
+        mid_runway = by_id["aeroway-line-runway-z14-to-z16"]
+        mid_other = by_id["aeroway-line-other-z14-to-z16"]
+        high_runway = by_id["aeroway-line-runway-z16-plus"]
+        high_other = by_id["aeroway-line-other-z16-plus"]
+        self.assertEqual(low_runway["minzoom"], 9)
+        self.assertEqual(low_runway["maxzoom"], 14.0)
+        self.assertEqual(mid_runway["minzoom"], 14.0)
+        self.assertEqual(mid_runway["maxzoom"], 16.0)
+        self.assertEqual(high_runway["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", high_runway)
+        self.assertIn(["match", ["get", "type"], "runway", True, False], low_runway["filter"])
+        self.assertIn(["match", ["get", "type"], "runway", False, True], low_other["filter"])
+        self.assertAlmostEqual(low_runway["paint"]["line-width"], 1.2446579272796943)
+        self.assertAlmostEqual(low_other["paint"]["line-width"], 0.3742088132736798)
+        self.assertAlmostEqual(mid_runway["paint"]["line-width"], 3.0)
+        self.assertAlmostEqual(mid_other["paint"]["line-width"], 1.5640310125536836)
+        self.assertAlmostEqual(high_runway["paint"]["line-width"], 3.0)
+        self.assertAlmostEqual(high_other["paint"]["line-width"], 2.3487964134195747)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("aeroway-line-other-z16-plus"),
+            "aeroway-line",
+        )
+
+    def test_aeroway_line_width_is_not_split_when_shape_changes(self):
+        line_width = ["interpolate", ["linear"], ["zoom"], 9, 0.5, 18, 20]
+        layers = [self._aeroway_line_layer(line_width=line_width)]
+
+        result = mapbox_config._split_aeroway_line_width_layers_for_qgis(layers)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "aeroway-line")
+        self.assertEqual(result[0]["paint"]["line-width"], line_width)
+
+    def test_aeroway_line_width_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._aeroway_line_layer()]
+
+        self.assertIs(
+            mapbox_config._split_aeroway_line_width_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_aeroway_line_width_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "aeroway-line-runway-z9-to-z14")
+        self.assertEqual(result[2]["id"], "aeroway-line-other-z9-to-z14")
+
     def test_waterway_line_width_splits_classes_and_zoom_bands(self):
         style = {
             "layers": [
