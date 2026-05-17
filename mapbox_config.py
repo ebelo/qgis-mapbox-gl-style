@@ -2609,7 +2609,17 @@ def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[s
         _set_settlement_high_zoom_text_layout(text_layer)
         variants.append(text_layer)
 
-    return variants or None
+    if not variants:
+        return None
+    field_variants: list[dict[str, object]] = []
+    for variant in variants:
+        field_variants.extend(
+            _name_en_fallback_text_field_variants(
+                variant,
+                fallback_layer_id=base_layer_id,
+            )
+        )
+    return field_variants
 
 
 def _split_settlement_dot_icon_layers_for_qgis(layers: object) -> object:

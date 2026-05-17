@@ -2130,6 +2130,78 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertNotIn("symbol-sort-key", by_id["settlement-minor-label-z8-plus"]["layout"])
         self.assertEqual(by_id["settlement-minor-label-z8-plus"]["filter"][-1], town_filter)
 
+    def test_filter_simplification_splits_settlement_label_name_en_fallbacks(self):
+        base_filter = ["<=", ["get", "filterrank"], 3]
+        text_field = ["coalesce", ["get", "name_en"], ["get", "name"]]
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-major-label",
+                    "type": "symbol",
+                    "minzoom": 8,
+                    "maxzoom": 9,
+                    "filter": base_filter,
+                    "layout": {
+                        **self._settlement_dot_icon_layout(),
+                        "text-field": copy.deepcopy(text_field),
+                    },
+                },
+                {
+                    "id": "settlement-minor-label",
+                    "type": "symbol",
+                    "minzoom": 8,
+                    "maxzoom": 9,
+                    "filter": base_filter,
+                    "layout": {
+                        **self._settlement_dot_icon_layout(),
+                        "text-field": copy.deepcopy(text_field),
+                    },
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            list(by_id),
+            [
+                "settlement-major-label-z8-plus-name-en",
+                "settlement-major-label-z8-plus-name",
+                "settlement-minor-label-z8-plus-name-en",
+                "settlement-minor-label-z8-plus-name",
+            ],
+        )
+        city_filter = ["match", ["get", "type"], ["city"], True, False]
+        town_filter = ["match", ["get", "type"], ["town"], True, False]
+        for base_id, settlement_filter in (
+            ("settlement-major-label-z8-plus", city_filter),
+            ("settlement-minor-label-z8-plus", town_filter),
+        ):
+            name_en_layer = by_id[f"{base_id}-name-en"]
+            name_layer = by_id[f"{base_id}-name"]
+            self.assertEqual(name_en_layer["layout"]["text-field"], ["get", "name_en"])
+            self.assertEqual(name_layer["layout"]["text-field"], ["get", "name"])
+            self.assertNotIn("icon-image", name_en_layer["layout"])
+            self.assertEqual(name_en_layer["layout"]["text-anchor"], "center")
+            self.assertEqual(name_en_layer["layout"]["text-radial-offset"], 0)
+            self.assertEqual(name_en_layer["filter"][1][-1], ["has", "name_en"])
+            self.assertEqual(name_layer["filter"][1][-1], ["!", ["has", "name_en"]])
+            self.assertEqual(name_en_layer["filter"][-1], settlement_filter)
+            self.assertEqual(name_layer["filter"][-1], settlement_filter)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                "settlement-major-label-z8-plus-name-en"
+            ),
+            "settlement-major-label",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                "settlement-minor-label-z8-plus-name"
+            ),
+            "settlement-minor-label",
+        )
+
     def test_settlement_symbol_sort_key_removal_is_exact_shape_gated(self):
         style = {
             "layers": [
