@@ -1726,12 +1726,6 @@ def _path_background_line_color_layer_variants(layer: dict[str, object]) -> list
         or paint.get("line-color") != _PATH_BACKGROUND_LINE_COLOR_EXPRESSION
     ):
         return None
-    maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
-    # Keep z16+ path backgrounds on the conservative fallback until QGIS can
-    # approximate Mapbox's high-zoom pedestrian/path casing stack more fully.
-    if maxzoom is None or maxzoom > _PATH_TYPE_FILTER_SPLIT_ZOOM:
-        return None
-
     layer_id = str(layer.get("id") or base_layer_id)
     variants: list[dict[str, object]] = []
     for suffix, type_filter, line_color in _PATH_BACKGROUND_LINE_COLOR_VARIANTS:

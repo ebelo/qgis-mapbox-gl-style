@@ -4306,21 +4306,25 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-path-bg-below-z16-piste",
                 "road-path-bg-below-z16-outdoor",
                 "road-path-bg-below-z16-remaining",
-                "road-path-bg-z16-plus",
+                "road-path-bg-z16-plus-piste",
+                "road-path-bg-z16-plus-outdoor",
+                "road-path-bg-z16-plus-remaining",
                 "bridge-path-bg-below-z16-piste",
                 "bridge-path-bg-below-z16-outdoor",
                 "bridge-path-bg-below-z16-remaining",
-                "bridge-path-bg-z16-plus",
+                "bridge-path-bg-z16-plus-piste",
+                "bridge-path-bg-z16-plus-outdoor",
+                "bridge-path-bg-z16-plus-remaining",
             ],
         )
         by_id = {layer["id"]: layer for layer in result["layers"]}
         for layer_id in ("road-path-bg", "bridge-path-bg"):
+            for band in ("below-z16", "z16-plus"):
+                self.assertEqual(by_id[f"{layer_id}-{band}-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
+                self.assertEqual(by_id[f"{layer_id}-{band}-outdoor"]["paint"]["line-color"], "hsl(35, 80%, 48%)")
+                self.assertEqual(by_id[f"{layer_id}-{band}-remaining"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
             self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["maxzoom"], 16.0)
-            self.assertEqual(by_id[f"{layer_id}-z16-plus"]["minzoom"], 16.0)
-            self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
-            self.assertEqual(by_id[f"{layer_id}-below-z16-outdoor"]["paint"]["line-color"], "hsl(35, 80%, 48%)")
-            self.assertEqual(by_id[f"{layer_id}-below-z16-remaining"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
-            self.assertEqual(by_id[f"{layer_id}-z16-plus"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
+            self.assertEqual(by_id[f"{layer_id}-z16-plus-piste"]["minzoom"], 16.0)
         self.assertEqual(by_id["road-path-bg-below-z16-piste"]["minzoom"], 12)
         self.assertEqual(by_id["bridge-path-bg-below-z16-piste"]["minzoom"], 14)
         self.assertEqual(
