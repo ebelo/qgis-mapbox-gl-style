@@ -1211,6 +1211,9 @@ _WATER_SHADOW_TRANSLATE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None]
     ("z13-to-z16", 13.0, 16.0),
     ("z16-plus", 16.0, None),
 )
+_AEROWAY_POLYGON_LAYER_ID = "aeroway-polygon"
+_AEROWAY_POLYGON_FILL_COLOR = "hsl(230, 36%, 74%)"
+_AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR = "hsl(230, 36%, 70%)"
 _AEROWAY_LINE_LAYER_ID = "aeroway-line"
 _AEROWAY_LINE_WIDTH_EXPRESSION = [
     "interpolate",
@@ -5036,6 +5039,13 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
             if _should_zoom_normalize_filter_for_qgis(layer):
                 filter_value = _zoom_normalized_filter_expression_for_qgis(layer, filter_value)
             layer["filter"] = _simplify_filter_expression_for_qgis(filter_value)
+
+        if base_layer_id == _AEROWAY_POLYGON_LAYER_ID and layer.get("type") == "fill":
+            paint = layer.get("paint")
+            if isinstance(paint, dict) and paint.get("fill-color") == _AEROWAY_POLYGON_FILL_COLOR:
+                # QGIS renders Mapbox's airport aeroway fill too close to the
+                # surrounding airport landuse in the Geneva z14 comparison.
+                paint["fill-color"] = _AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR
 
         for section in ("paint", "layout"):
             props = layer.get(section)
