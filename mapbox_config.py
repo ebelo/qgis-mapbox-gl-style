@@ -659,6 +659,11 @@ _POI_LABEL_LAYER_ID = "poi-label"
 _GATE_LABEL_LAYER_ID = "gate-label"
 _CONTINENT_LABEL_LAYER_ID = "continent-label"
 _COUNTRY_LABEL_LAYER_ID = "country-label"
+_NAME_EN_FALLBACK_TEXT_FIELD_EXPRESSION = [
+    "coalesce",
+    ["get", "name_en"],
+    ["get", "name"],
+]
 _SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
 _SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
 _GATE_LABEL_ICON_IMAGE_EXPRESSION = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
@@ -2666,6 +2671,38 @@ def _country_label_low_zoom_text_justify_variants(
     return variants
 
 
+def _country_label_name_field_variants(
+    layer: dict[str, object],
+) -> list[dict[str, object]]:
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return [layer]
+    if layout.get("text-field") != _NAME_EN_FALLBACK_TEXT_FIELD_EXPRESSION:
+        return [layer]
+
+    layer_id = str(layer.get("id") or _COUNTRY_LABEL_LAYER_ID)
+    name_en_layer = copy.deepcopy(layer)
+    name_en_layer["id"] = f"{layer_id}-name-en"
+    name_en_layer["filter"] = _with_additional_filter_clauses(
+        layer.get("filter"),
+        ["has", "name_en"],
+    )
+    name_en_layout = name_en_layer.get("layout")
+    if isinstance(name_en_layout, dict):
+        name_en_layout["text-field"] = ["get", "name_en"]
+
+    name_layer = copy.deepcopy(layer)
+    name_layer["id"] = f"{layer_id}-name"
+    name_layer["filter"] = _with_additional_filter_clauses(
+        layer.get("filter"),
+        ["!", ["has", "name_en"]],
+    )
+    name_layout = name_layer.get("layout")
+    if isinstance(name_layout, dict):
+        name_layout["text-field"] = ["get", "name"]
+    return [name_en_layer, name_layer]
+
+
 def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited country-label zoom/layout expressions into QGIS-safe static variants."""
     if not _has_country_label_layout_expression(layer):
@@ -2698,7 +2735,12 @@ def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[
             )
             has_static_variant = True
         variants.append(variant)
-    return variants if has_static_variant else None
+    if not has_static_variant:
+        return None
+    field_variants: list[dict[str, object]] = []
+    for variant in variants:
+        field_variants.extend(_country_label_name_field_variants(variant))
+    return field_variants
 
 
 def _split_country_label_layout_layers_for_qgis(layers: object) -> object:

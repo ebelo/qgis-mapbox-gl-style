@@ -2191,51 +2191,88 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(len(result["layers"]), 5)
+        self.assertEqual(len(result["layers"]), 10)
         by_id = {layer["id"]: layer for layer in result["layers"]}
-        low_left_layer = by_id["country-label-below-z7-left"]
-        low_right_layer = by_id["country-label-below-z7-right"]
-        low_center_layer = by_id["country-label-below-z7-center"]
-        mid_layer = by_id["country-label-z7-to-z8"]
-        high_layer = by_id["country-label-z8-plus"]
-        for low_layer, text_justify, text_anchor_filter in (
-            (
-                low_left_layer,
-                "left",
-                ["match", ["get", "text_anchor"], ["left", "bottom-left", "top-left"], True, False],
-            ),
-            (
-                low_right_layer,
-                "right",
-                ["match", ["get", "text_anchor"], ["right", "bottom-right", "top-right"], True, False],
-            ),
-            (
-                low_center_layer,
-                "center",
-                [
-                    "match",
-                    ["get", "text_anchor"],
-                    ["left", "bottom-left", "top-left", "right", "bottom-right", "top-right"],
-                    False,
-                    True,
-                ],
-            ),
+        for name_suffix, text_field, name_filter in (
+            ("name-en", ["get", "name_en"], ["has", "name_en"]),
+            ("name", ["get", "name"], ["!", ["has", "name_en"]]),
         ):
-            self.assertEqual(low_layer["minzoom"], 1)
-            self.assertEqual(low_layer["maxzoom"], 7.0)
-            self.assertEqual(low_layer["filter"], ["all", country_filter, text_anchor_filter])
-            self.assertEqual(low_layer["layout"]["text-justify"], text_justify)
-            self.assertEqual(low_layer["layout"]["text-radial-offset"], 0.6)
-            self.assertNotIn("icon-image", low_layer["layout"])
-        self.assertEqual(mid_layer["minzoom"], 7.0)
-        self.assertEqual(mid_layer["maxzoom"], 8.0)
-        self.assertEqual(high_layer["minzoom"], 8.0)
-        self.assertEqual(high_layer["maxzoom"], 10)
-        self.assertEqual(mid_layer["layout"]["text-justify"], "auto")
-        self.assertEqual(mid_layer["layout"]["text-radial-offset"], 0.6)
-        self.assertEqual(high_layer["layout"]["text-justify"], "auto")
-        self.assertEqual(high_layer["layout"]["text-radial-offset"], 0.0)
+            low_left_layer = by_id[f"country-label-below-z7-left-{name_suffix}"]
+            low_right_layer = by_id[f"country-label-below-z7-right-{name_suffix}"]
+            low_center_layer = by_id[f"country-label-below-z7-center-{name_suffix}"]
+            mid_layer = by_id[f"country-label-z7-to-z8-{name_suffix}"]
+            high_layer = by_id[f"country-label-z8-plus-{name_suffix}"]
+            for low_layer, text_justify, text_anchor_filter in (
+                (
+                    low_left_layer,
+                    "left",
+                    [
+                        "match",
+                        ["get", "text_anchor"],
+                        ["left", "bottom-left", "top-left"],
+                        True,
+                        False,
+                    ],
+                ),
+                (
+                    low_right_layer,
+                    "right",
+                    [
+                        "match",
+                        ["get", "text_anchor"],
+                        ["right", "bottom-right", "top-right"],
+                        True,
+                        False,
+                    ],
+                ),
+                (
+                    low_center_layer,
+                    "center",
+                    [
+                        "match",
+                        ["get", "text_anchor"],
+                        [
+                            "left",
+                            "bottom-left",
+                            "top-left",
+                            "right",
+                            "bottom-right",
+                            "top-right",
+                        ],
+                        False,
+                        True,
+                    ],
+                ),
+            ):
+                self.assertEqual(low_layer["minzoom"], 1)
+                self.assertEqual(low_layer["maxzoom"], 7.0)
+                self.assertEqual(
+                    low_layer["filter"],
+                    ["all", country_filter, text_anchor_filter, name_filter],
+                )
+                self.assertEqual(low_layer["layout"]["text-field"], text_field)
+                self.assertEqual(low_layer["layout"]["text-justify"], text_justify)
+                self.assertEqual(low_layer["layout"]["text-radial-offset"], 0.6)
+                self.assertNotIn("icon-image", low_layer["layout"])
+            self.assertEqual(mid_layer["minzoom"], 7.0)
+            self.assertEqual(mid_layer["maxzoom"], 8.0)
+            self.assertEqual(mid_layer["filter"], ["all", country_filter, name_filter])
+            self.assertEqual(high_layer["minzoom"], 8.0)
+            self.assertEqual(high_layer["maxzoom"], 10)
+            self.assertEqual(high_layer["filter"], ["all", country_filter, name_filter])
+            self.assertEqual(mid_layer["layout"]["text-field"], text_field)
+            self.assertEqual(high_layer["layout"]["text-field"], text_field)
+            self.assertEqual(mid_layer["layout"]["text-justify"], "auto")
+            self.assertEqual(mid_layer["layout"]["text-radial-offset"], 0.6)
+            self.assertEqual(high_layer["layout"]["text-justify"], "auto")
+            self.assertEqual(high_layer["layout"]["text-radial-offset"], 0.0)
         self.assertEqual({layer["layout"]["text-size"] for layer in result["layers"]}, {16.0})
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                "country-label-below-z7-left-name-en"
+            ),
+            "country-label",
+        )
 
     def test_country_label_layout_is_not_split_when_shape_changes(self):
         style = {
