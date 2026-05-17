@@ -1912,6 +1912,116 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(style["layers"][0]["filter"], filter_expression)
 
+    def test_filter_simplification_splits_road_label_zoom_filter(self):
+        text_field = ["coalesce", ["get", "name_en"], ["get", "name"]]
+        low_zoom_filter = [
+            "match",
+            ["get", "class"],
+            ["motorway", "trunk", "primary", "secondary", "tertiary"],
+            True,
+            False,
+        ]
+        mid_zoom_filter = [
+            "match",
+            ["get", "class"],
+            [
+                "motorway",
+                "trunk",
+                "primary",
+                "secondary",
+                "tertiary",
+                "street",
+                "street_limited",
+                "track",
+            ],
+            True,
+            False,
+        ]
+        high_zoom_filter = [
+            "match",
+            ["get", "class"],
+            ["path", "pedestrian", "golf", "ferry", "aerialway"],
+            False,
+            True,
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "minzoom": 10,
+                    "filter": [
+                        "all",
+                        ["has", "name"],
+                        [
+                            "step",
+                            ["zoom"],
+                            copy.deepcopy(low_zoom_filter),
+                            12,
+                            copy.deepcopy(mid_zoom_filter),
+                            15,
+                            copy.deepcopy(high_zoom_filter),
+                        ],
+                    ],
+                    "layout": {
+                        "symbol-placement": "line",
+                        "text-field": copy.deepcopy(text_field),
+                        "text-size": [
+                            "interpolate",
+                            ["linear"],
+                            ["zoom"],
+                            10,
+                            9,
+                            18,
+                            14,
+                        ],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            list(by_id),
+            ["road-label-below-z12", "road-label-z12-to-z15", "road-label-z15-plus"],
+        )
+        self.assertEqual(by_id["road-label-below-z12"]["minzoom"], 10)
+        self.assertEqual(by_id["road-label-below-z12"]["maxzoom"], 12.0)
+        self.assertEqual(by_id["road-label-z12-to-z15"]["minzoom"], 12.0)
+        self.assertEqual(by_id["road-label-z12-to-z15"]["maxzoom"], 15.0)
+        self.assertEqual(by_id["road-label-z15-plus"]["minzoom"], 15.0)
+        self.assertNotIn("maxzoom", by_id["road-label-z15-plus"])
+        self.assertEqual(by_id["road-label-below-z12"]["filter"], ["all", ["has", "name"], low_zoom_filter])
+        self.assertEqual(by_id["road-label-z12-to-z15"]["filter"], ["all", ["has", "name"], mid_zoom_filter])
+        self.assertEqual(by_id["road-label-z15-plus"]["filter"], ["all", ["has", "name"], high_zoom_filter])
+        for layer in by_id.values():
+            self.assertEqual(layer["layout"]["text-field"], ["get", "name"])
+            self.assertEqual(layer["layout"]["text-size"], 10.0)
+        for layer_id in by_id:
+            self.assertEqual(
+                mapbox_config.base_mapbox_style_layer_id_for_qfit(layer_id),
+                "road-label",
+            )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-label-alt"),
+            "road-label-alt",
+        )
+
+        lower_bound_style = copy.deepcopy(style)
+        lower_bound_style["layers"][0]["minzoom"] = 8
+        lower_bound_style["layers"][0]["maxzoom"] = 11
+
+        lower_bound_result = simplify_mapbox_style_expressions(lower_bound_style)
+
+        self.assertEqual(len(lower_bound_result["layers"]), 1)
+        lower_bound_layer = lower_bound_result["layers"][0]
+        self.assertEqual(lower_bound_layer["id"], "road-label-below-z12")
+        self.assertEqual(lower_bound_layer["minzoom"], 8)
+        self.assertEqual(lower_bound_layer["maxzoom"], 11)
+        self.assertEqual(lower_bound_layer["filter"], ["all", ["has", "name"], low_zoom_filter])
+
     def test_filter_simplification_snapshots_settlement_label_filters(self):
         major_filter = [
             "all",

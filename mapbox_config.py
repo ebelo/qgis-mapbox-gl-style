@@ -515,6 +515,7 @@ _ZOOM_BOUND_EPSILON = 1e-9
 _FULL_OPACITY = 1.0
 _FULL_OPACITY_EPSILON = 1e-9
 _FULL_OPACITY_PROPS = {"fill-opacity", "line-opacity"}
+_ROAD_LABEL_LAYER_ID = "road-label"
 _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS = {
     "bridge-oneway-arrow-blue",
     "path-pedestrian-label",
@@ -617,6 +618,44 @@ _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
     "road-path-bg",
+}
+_ROAD_LABEL_LOW_ZOOM_CLASS_FILTER = [
+    "match",
+    ["get", "class"],
+    ["motorway", "trunk", "primary", "secondary", "tertiary"],
+    True,
+    False,
+]
+_ROAD_LABEL_MID_ZOOM_CLASS_FILTER = [
+    "match",
+    ["get", "class"],
+    [
+        "motorway",
+        "trunk",
+        "primary",
+        "secondary",
+        "tertiary",
+        "street",
+        "street_limited",
+        "track",
+    ],
+    True,
+    False,
+]
+_ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER = [
+    "match",
+    ["get", "class"],
+    ["path", "pedestrian", "golf", "ferry", "aerialway"],
+    False,
+    True,
+]
+_ROAD_LABEL_FILTER_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, object], ...] = (
+    ("below-z12", None, 12.0, _ROAD_LABEL_LOW_ZOOM_CLASS_FILTER),
+    ("z12-to-z15", 12.0, 15.0, _ROAD_LABEL_MID_ZOOM_CLASS_FILTER),
+    ("z15-plus", 15.0, None, _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER),
+)
+_ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS = {
+    f"{_ROAD_LABEL_LAYER_ID}-{suffix}" for suffix, _band_minzoom, _band_maxzoom, _class_filter in _ROAD_LABEL_FILTER_ZOOM_BANDS
 }
 _PATH_BACKGROUND_LINE_COLOR_EXPRESSION = [
     "match",
@@ -1747,6 +1786,79 @@ def _split_path_type_filter_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _road_label_zoom_step_filter_clause(value: object) -> list[object] | None:
+    if (
+        not isinstance(value, list)
+        or len(value) != 7
+        or value[0] != "step"
+        or value[1] != ["zoom"]
+        or value[2] != _ROAD_LABEL_LOW_ZOOM_CLASS_FILTER
+        or value[4] != _ROAD_LABEL_MID_ZOOM_CLASS_FILTER
+        or value[6] != _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER
+    ):
+        return None
+    first_threshold = _numeric_zoom_bound(value[3])
+    second_threshold = _numeric_zoom_bound(value[5])
+    if first_threshold is None or second_threshold is None:
+        return None
+    if (
+        abs(first_threshold - 12.0) > _ZOOM_BOUND_EPSILON
+        or abs(second_threshold - 15.0) > _ZOOM_BOUND_EPSILON
+    ):
+        return None
+    return value
+
+
+def _road_label_filter_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split the audited road-label zoom filter into static QGIS zoom bands."""
+    if str(layer.get("id") or "") != _ROAD_LABEL_LAYER_ID or layer.get("type") != "symbol":
+        return None
+    filter_value = layer.get("filter")
+    if not isinstance(filter_value, list) or filter_value[:1] != ["all"]:
+        return None
+
+    for clause_index, clause in enumerate(filter_value[1:], start=1):
+        if _road_label_zoom_step_filter_clause(clause) is None:
+            continue
+
+        existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+        existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+        variants: list[dict[str, object]] = []
+        for suffix, band_minzoom, band_maxzoom, class_filter in _ROAD_LABEL_FILTER_ZOOM_BANDS:
+            zoom_band = _effective_zoom_band(
+                existing_minzoom,
+                existing_maxzoom,
+                band_minzoom,
+                band_maxzoom,
+            )
+            if zoom_band is None:
+                continue
+            variant = copy.deepcopy(layer)
+            variant["id"] = f"{_ROAD_LABEL_LAYER_ID}-{suffix}"
+            _set_zoom_bounds(variant, *zoom_band)
+            variant["filter"] = _filter_with_replaced_clause(
+                filter_value,
+                clause_index,
+                class_filter,
+            )
+            variants.append(variant)
+        return variants or None
+    return None
+
+
+def _split_road_label_filter_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _road_label_filter_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _path_background_line_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited path background casing colors into QGIS-safe type layers."""
     base_layer_id = _path_background_line_color_base_layer_id(layer.get("id"))
@@ -1989,6 +2101,11 @@ def _is_gate_label_layer_id(layer_id: object) -> bool:
     return normalized == _GATE_LABEL_LAYER_ID or normalized.startswith(f"{_GATE_LABEL_LAYER_ID}-")
 
 
+def _is_road_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized == _ROAD_LABEL_LAYER_ID or normalized in _ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS
+
+
 def _is_natural_point_label_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _NATURAL_POINT_LABEL_LAYER_ID or normalized.startswith(f"{_NATURAL_POINT_LABEL_LAYER_ID}-")
@@ -2131,6 +2248,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
     for matches_layer_id, base_layer_id in (
         (_is_waterway_label_layer_id, _WATERWAY_LABEL_LAYER_ID),
         (_is_road_number_shield_layer_id, _ROAD_NUMBER_SHIELD_LAYER_ID),
+        (_is_road_label_layer_id, _ROAD_LABEL_LAYER_ID),
         (_is_poi_label_layer_id, _POI_LABEL_LAYER_ID),
         (_is_gate_label_layer_id, _GATE_LABEL_LAYER_ID),
         (_is_natural_point_label_layer_id, _NATURAL_POINT_LABEL_LAYER_ID),
@@ -5119,6 +5237,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
         style.get("layers")
     )
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_road_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
