@@ -219,6 +219,9 @@ _ROAD_NUMBER_SHIELD_POINT_TO_LINE_FILTER_EXPRESSION = [
 _ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
 _ROAD_EXIT_SHIELD_ICON_IMAGE = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
 _BOUNDARY_BG_LINE_OPACITY_LAYER_IDS = {"admin-0-boundary-bg", "admin-1-boundary-bg"}
+# QGIS renders Mapbox's blurred country/admin boundary background too bright in
+# the z5 Switzerland-Alps comparison; keep the nudge limited to that halo layer.
+_BOUNDARY_BG_QGIS_LINE_OPACITY_SCALE = 0.7
 _AIRPORT_LABEL_LAYER_ID = "airport-label"
 _TRANSIT_LABEL_LAYER_ID = "transit-label"
 _TRANSIT_LABEL_STOP_TYPE_EXCLUSION = ["!=", ["get", "stop_type"], "entrance"]
@@ -5506,7 +5509,9 @@ def _boundary_bg_line_opacity(
     if base_layer_id not in _BOUNDARY_BG_LINE_OPACITY_LAYER_IDS or prop != "line-opacity":
         return None
     opacity = _extract_zoom_scalar_size(expr, minzoom=minzoom, maxzoom=maxzoom)
-    return _clamp_opacity_value(opacity)
+    if opacity is None:
+        return None
+    return _clamp_opacity_value(opacity * _BOUNDARY_BG_QGIS_LINE_OPACITY_SCALE)
 
 
 def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> dict[str, object]:

@@ -1219,8 +1219,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(result["layers"][0]["paint"]["line-opacity"], 0.5)
-        self.assertEqual(result["layers"][1]["paint"]["line-opacity"], 0.5)
+        self.assertAlmostEqual(result["layers"][0]["paint"]["line-opacity"], 0.35)
+        self.assertAlmostEqual(result["layers"][1]["paint"]["line-opacity"], 0.35)
         self.assertEqual(result["layers"][2]["paint"]["line-opacity"], boundary_opacity)
         self.assertEqual(result["layers"][3]["paint"]["line-opacity"], mixed_opacity)
 
