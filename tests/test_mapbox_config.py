@@ -1675,6 +1675,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "after",
             ],
         )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
         beta_layer = result["layers"][1]
         self.assertEqual(
             beta_layer["filter"],
@@ -1691,12 +1692,19 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(beta_layer["layout"]["symbol-spacing"], 466.66666666666663)
         self.assertEqual(beta_layer["layout"]["icon-image"][:2], ["match", ["get", "shield_beta"]])
         self.assertIn("ch-motorway-2", beta_layer["layout"]["icon-image"])
+        self.assertIn("gr-motorway-2", beta_layer["layout"]["icon-image"])
+        self.assertIn("hu-main-2", beta_layer["layout"]["icon-image"])
+        self.assertIn("pk-national-highway-2", beta_layer["layout"]["icon-image"])
+        self.assertIn("th-highway-2", beta_layer["layout"]["icon-image"])
         self.assertEqual(beta_layer["layout"]["icon-image"][-1], "default-2")
 
         shield_layer = result["layers"][2]
         self.assertEqual(shield_layer["filter"][-2:], [["==", ["get", "reflen"], 2], ["!", ["has", "shield_beta"]]])
         self.assertEqual(shield_layer["layout"]["icon-image"][:2], ["match", ["get", "shield"]])
         self.assertIn("rectangle-yellow-2", shield_layer["layout"]["icon-image"])
+        self.assertIn("pk-national-highway-3", by_id["road-number-shield-3-beta"]["layout"]["icon-image"])
+        self.assertIn("th-highway-4", by_id["road-number-shield-4-beta"]["layout"]["icon-image"])
+        self.assertIn("hu-main-5", by_id["road-number-shield-5-beta"]["layout"]["icon-image"])
         self.assertEqual(result["layers"][-1]["layout"]["icon-image"], shield_icon)
 
     def test_road_number_shield_point_layers_stay_visible_below_z11(self):
