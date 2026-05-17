@@ -103,17 +103,23 @@ _NO_OPERATOR_SIGNATURE = "(none)"
 _ALL_ZOOMS_BAND = "all zooms"
 _LINE_DASHARRAY_PROPERTY = "paint.line-dasharray"
 _SYMBOL_SPACING_PROPERTY = "layout.symbol-spacing"
+_LABEL_DENSITY_CONTROLS_BY_PROPERTY_KEY = "label_density_controls_by_property"
+_LABEL_DENSITY_QGIS_DEPENDENT_BY_PROPERTY_KEY = "label_density_qgis_dependent_by_property"
 _LABEL_DENSITY_CONTROL_PROPERTIES = (
     "layout.icon-allow-overlap",
     "layout.icon-ignore-placement",
     "layout.icon-optional",
+    "layout.symbol-avoid-edges",
+    "layout.symbol-placement",
     "layout.symbol-sort-key",
     _SYMBOL_SPACING_PROPERTY,
+    "layout.symbol-z-order",
     "layout.text-allow-overlap",
     "layout.text-anchor",
     "layout.text-field",
     "layout.text-ignore-placement",
     "layout.text-justify",
+    "layout.text-keep-upright",
     "layout.text-max-angle",
     "layout.text-offset",
     "layout.text-optional",
@@ -3256,6 +3262,14 @@ def build_style_audit(
                 _filter_expression_signature_group_summary(layers)
             ),
             "label_density_candidates_by_layer_group": _count_rows_by_key(label_density_candidates, "group"),
+            _LABEL_DENSITY_CONTROLS_BY_PROPERTY_KEY: _count_row_values(
+                label_density_candidates,
+                "label_control_properties",
+            ),
+            _LABEL_DENSITY_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                label_density_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
             "label_density_candidates": label_density_candidates,
             _ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
                 road_trail_hierarchy_candidates,
@@ -5049,6 +5063,20 @@ def _markdown_label_density_summary(summary: dict[str, object]) -> list[str]:
             _summary_rows(summary, "label_density_candidates_by_layer_group"),
             key="group",
             label=_MARKDOWN_LAYER_GROUP_LABEL,
+        ),
+        "#### Label density controls by property",
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _LABEL_DENSITY_CONTROLS_BY_PROPERTY_KEY),
+            key="property",
+            label="Property",
+        ),
+        "#### Label density QGIS-dependent controls",
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _LABEL_DENSITY_QGIS_DEPENDENT_BY_PROPERTY_KEY),
+            key="property",
+            label="Property",
         ),
         *_markdown_label_density_candidate_table(_summary_rows(summary, "label_density_candidates")),
     ]

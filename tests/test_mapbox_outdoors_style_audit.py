@@ -359,8 +359,12 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         "layout": {
                             "text-field": ["get", "name"],
                             "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 14, 14],
+                            "symbol-avoid-edges": True,
+                            "symbol-placement": "line",
                             "symbol-sort-key": ["get", "rank"],
                             "symbol-spacing": ["step", ["zoom"], 150, 14, 250],
+                            "symbol-z-order": "source",
+                            "text-keep-upright": False,
                         },
                     },
                     {
@@ -400,7 +404,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(road_candidate["filter_operator_signature"], "==, all, get, has")
         self.assertEqual(
             road_candidate["label_control_properties"],
-            ["filter", "layout.symbol-sort-key", "layout.symbol-spacing", "layout.text-field", "layout.text-size"],
+            [
+                "filter",
+                "layout.symbol-avoid-edges",
+                "layout.symbol-placement",
+                "layout.symbol-sort-key",
+                "layout.symbol-spacing",
+                "layout.symbol-z-order",
+                "layout.text-field",
+                "layout.text-keep-upright",
+                "layout.text-size",
+            ],
         )
         self.assertEqual(
             road_candidate["qgis_dependent_control_properties"],
@@ -416,10 +430,36 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             audit["summary"]["label_density_candidates_by_layer_group"],
             [{"group": "roads/trails", "count": 1}, {"group": "settlements/places", "count": 1}],
         )
+        self.assertEqual(
+            audit["summary"]["label_density_controls_by_property"],
+            [
+                {"property": "filter", "count": 2},
+                {"property": "layout.text-field", "count": 2},
+                {"property": "layout.symbol-avoid-edges", "count": 1},
+                {"property": "layout.symbol-placement", "count": 1},
+                {"property": "layout.symbol-sort-key", "count": 1},
+                {"property": "layout.symbol-spacing", "count": 1},
+                {"property": "layout.symbol-z-order", "count": 1},
+                {"property": "layout.text-keep-upright", "count": 1},
+                {"property": "layout.text-size", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["label_density_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 2},
+                {"property": "layout.symbol-sort-key", "count": 1},
+                {"property": "layout.symbol-spacing", "count": 1},
+            ],
+        )
 
         markdown = build_audit_markdown(audit)
         self.assertIn("### Label density candidates", markdown)
         self.assertIn("Visible symbol layers with text labels", markdown)
+        self.assertIn("#### Label density controls by property", markdown)
+        self.assertIn("| `layout.symbol-placement` | 1 |", markdown)
+        self.assertIn("#### Label density QGIS-dependent controls", markdown)
+        self.assertIn("| `layout.symbol-spacing` | 1 |", markdown)
         self.assertIn("| `roads/trails` | `road-label` | `road` | z≥10 | `==, all, get, has` |", markdown)
         self.assertIn("| `settlements/places` | `settlement-major-label` | `place_label` | all zooms | `get, match` |", markdown)
         self.assertNotIn("settlement-subdivision-label` |", markdown)
@@ -1316,7 +1356,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(aerialway_candidate["filter_operator_signature"], "get, match")
         self.assertEqual(
             aerialway_candidate["route_overlay_control_properties"],
-            ["filter", "layout.text-field", "layout.text-padding", "layout.symbol-placement", "paint.text-color"],
+            ["filter", "layout.symbol-placement", "layout.text-field", "layout.text-padding", "paint.text-color"],
         )
         self.assertEqual(aerialway_candidate["qfit_simplified_control_properties"], [])
         self.assertEqual(aerialway_candidate["qgis_dependent_control_properties"], ["filter"])
