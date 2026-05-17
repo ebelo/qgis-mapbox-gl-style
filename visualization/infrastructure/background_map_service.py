@@ -176,10 +176,10 @@ class BackgroundMapService:
             "water-point-label": 7,
             "water-line-label": 6,
             "natural-line-label": 4,
-            "natural-point-label": 2,
-            "poi-label": 2,
-            "road-label": 5,
-            "airport-label": 5,
+            "natural-point-label": 4,
+            "poi-label": 5,
+            "road-label": 4,
+            "airport-label": 8,
         }
         _SETTLEMENT_LAYERS = {"settlement-major-label", "settlement-minor-label"}
 
