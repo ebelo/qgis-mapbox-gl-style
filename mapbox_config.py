@@ -2087,6 +2087,15 @@ def _should_sample_path_high_zoom_line_width(layer_id: object, prop: str, minzoo
     )
 
 
+def _path_high_zoom_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
+    if not _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
+        return None
+    target_zoom = _zoom_in_layer_range(_PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM, minzoom, maxzoom)
+    if target_zoom is None:
+        return None
+    return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
+
+
 def _regional_major_road_width_scale(layer_id: object) -> float:
     base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
     if base_layer_id in _REGIONAL_CORE_ROAD_WIDTH_LAYER_IDS:
@@ -5122,11 +5131,13 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         props[prop] = fallback
                 elif prop in _WIDTH_PROPS:
                     width = None
-                    if _should_sample_path_high_zoom_line_width(layer_id, prop, layer.get("minzoom")):
-                        width = _extract_zoom_scalar_size_at_zoom(
-                            val,
-                            _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM,
-                        )
+                    width = _path_high_zoom_line_width(
+                        val,
+                        layer_id,
+                        prop,
+                        layer.get("minzoom"),
+                        layer.get("maxzoom"),
+                    )
                     is_regional_road_width_variant = (
                         prop in _REGIONAL_MAJOR_ROAD_STROKE_WIDTH_PROPS
                         and _is_regional_major_road_width_variant(layer_id)
