@@ -78,6 +78,13 @@ _ROUTE_OVERLAY_QGIS_DEPENDENT_BY_PROPERTY_KEY = "route_overlay_qgis_dependent_by
 _ROUTE_OVERLAY_CONTROL_PROPERTIES_KEY = "route_overlay_control_properties"
 _ROUTE_OVERLAY_MARKER_KEY = "route_overlay_marker"
 _ROUTE_OVERLAY_MARKERS_KEY = "route_overlay_markers"
+_AIRPORT_SPECIAL_LANDUSE_CANDIDATES_KEY = "airport_special_landuse_candidates"
+_AIRPORT_SPECIAL_LANDUSE_CANDIDATES_BY_SOURCE_LAYER_KEY = "airport_special_landuse_candidates_by_source_layer"
+_AIRPORT_SPECIAL_LANDUSE_CANDIDATES_BY_TYPE_KEY = "airport_special_landuse_candidates_by_type"
+_AIRPORT_SPECIAL_LANDUSE_SIMPLIFIED_BY_PROPERTY_KEY = "airport_special_landuse_simplified_by_property"
+_AIRPORT_SPECIAL_LANDUSE_QGIS_DEPENDENT_BY_PROPERTY_KEY = "airport_special_landuse_qgis_dependent_by_property"
+_AIRPORT_SPECIAL_LANDUSE_CONTROL_PROPERTIES_KEY = "airport_special_landuse_control_properties"
+_QFIT_SPLIT_VARIANT_KEY = "qfit_split_variant"
 _FILTER_OPERATOR_SIGNATURE_KEY = "filter_operator_signature"
 _ICON_IMAGE_OPERATOR_SIGNATURE_KEY = "icon_image_operator_signature"
 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY = "qfit_simplified_control_properties"
@@ -215,6 +222,27 @@ _TERRAIN_LANDCOVER_CONTROL_PROPERTIES = (
 # deliberately without changing the other diagnostic domains.
 _WATER_FLOW_LAYER_TYPES = _ROAD_TRAIL_HIERARCHY_LAYER_TYPES
 _WATER_FLOW_CONTROL_PROPERTIES = _TERRAIN_LANDCOVER_CONTROL_PROPERTIES
+_AIRPORT_SPECIAL_LANDUSE_LAYER_TYPES = frozenset({"fill", "line", "symbol"})
+_AIRPORT_SPECIAL_LANDUSE_MARKERS = (
+    "aeroway",
+    "airport",
+    "airfield",
+    "heliport",
+    "helipad",
+    "runway",
+    "taxiway",
+    "apron",
+)
+_AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES = frozenset({"class", "kind", "maki", "subclass", "type"})
+_AIRPORT_SPECIAL_LANDUSE_EXCLUSION_FILTER_PROPERTIES = frozenset({"class", "kind"})
+_AIRPORT_SPECIAL_LANDUSE_CONTROL_PROPERTIES = tuple(
+    dict.fromkeys(
+        _TERRAIN_LANDCOVER_CONTROL_PROPERTIES
+        + _LABEL_DENSITY_CONTROL_PROPERTIES
+        + _ICON_SPRITE_CONTROL_PROPERTIES
+        + _ROUTE_OVERLAY_TEXT_PAINT_PROPERTIES
+    )
+)
 
 if str(PACKAGE_PARENT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_PARENT))
@@ -222,6 +250,7 @@ if str(PACKAGE_PARENT) not in sys.path:
 from qfit.mapbox_config import (  # noqa: E402
     MapboxSpriteResources,
     QGIS_TEXT_FONT_FALLBACK,
+    base_mapbox_style_layer_id_for_qfit,
     fetch_mapbox_style_definition,
     fetch_mapbox_sprite_resources,
     simplify_mapbox_style_expressions,
@@ -615,6 +644,46 @@ def _simplified_layers_by_original_id_for_audit(
     return by_original_id
 
 
+def _qfit_split_variant_audit_layers_for_original_id(
+    original_layers: list[dict[str, object]],
+    simplified_layers: list[dict[str, object]],
+    original_id: str,
+) -> list[dict[str, object]]:
+    original_layer = next(
+        (layer for layer in original_layers if str(layer.get("id") or "") == original_id),
+        None,
+    )
+    if original_layer is None:
+        return []
+
+    split_audits: list[dict[str, object]] = []
+    for simplified_layer in simplified_layers:
+        simplified_id = str(simplified_layer.get("id") or "")
+        if not simplified_id or simplified_id == original_id:
+            continue
+        if base_mapbox_style_layer_id_for_qfit(simplified_id) != original_id:
+            continue
+
+        layer_audit = build_layer_audit(layer=original_layer, simplified_layer=simplified_layer)
+        layer_audit.update(
+            {
+                "id": simplified_id,
+                "type": str(simplified_layer.get("type") or ""),
+                "group": _layer_group(simplified_layer),
+                "source": str(simplified_layer.get("source") or ""),
+                "source_layer": str(simplified_layer.get("source-layer") or ""),
+                "zoom_band": _zoom_band(simplified_layer),
+                "filter": simplified_layer.get("filter"),
+                "qgis_filter": simplified_layer.get("filter"),
+                "paint": _section_properties(simplified_layer, "paint"),
+                "layout": _section_properties(simplified_layer, "layout"),
+                _QFIT_SPLIT_VARIANT_KEY: True,
+            }
+        )
+        split_audits.append(layer_audit)
+    return split_audits
+
+
 def build_layer_audit(
     *,
     layer: dict[str, object],
@@ -938,6 +1007,191 @@ def _route_overlay_control_properties(layer: dict[str, object]) -> list[str]:
     return _control_properties(layer, _ROUTE_OVERLAY_CONTROL_PROPERTIES, include_filter=True)
 
 
+def _airport_special_landuse_has_marker(value: object) -> bool:
+    if isinstance(value, str):
+        normalized = value.replace("-", "_").lower()
+        return any(marker in normalized for marker in _AIRPORT_SPECIAL_LANDUSE_MARKERS)
+    if isinstance(value, list):
+        if value and value[0] == "literal" and len(value) > 1:
+            return _airport_special_landuse_has_marker(value[1])
+        return any(_airport_special_landuse_has_marker(item) for item in value)
+    return False
+
+
+def _airport_special_landuse_property_name(
+    value: object,
+    *,
+    allowed_properties: frozenset[str] = _AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES,
+) -> str:
+    if isinstance(value, str):
+        normalized = value.replace("-", "_").lower()
+        return normalized if normalized in allowed_properties else ""
+    if (
+        isinstance(value, list)
+        and len(value) >= 2
+        and value[0] == "get"
+        and isinstance(value[1], str)
+    ):
+        normalized = value[1].replace("-", "_").lower()
+        return normalized if normalized in allowed_properties else ""
+    return ""
+
+
+def _airport_special_landuse_filter_output_is_truthy(value: object) -> bool:
+    return value is True or value == 1
+
+
+def _airport_special_landuse_filter_output_is_falsey(value: object) -> bool:
+    return value is False or value == 0
+
+
+def _airport_special_landuse_positive_comparison(
+    value: list[object],
+    *,
+    allowed_properties: frozenset[str] = _AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES,
+) -> bool:
+    return (
+        len(value) >= 3
+        and bool(_airport_special_landuse_property_name(value[1], allowed_properties=allowed_properties))
+        and any(_airport_special_landuse_has_marker(item) for item in value[2:])
+    )
+
+
+def _airport_special_landuse_positive_match(
+    value: list[object],
+    *,
+    allowed_properties: frozenset[str] = _AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES,
+) -> bool:
+    if len(value) < 5 or not _airport_special_landuse_property_name(
+        value[1],
+        allowed_properties=allowed_properties,
+    ):
+        return False
+    for label_index in range(2, len(value) - 1, 2):
+        if _airport_special_landuse_has_marker(
+            value[label_index]
+        ) and _airport_special_landuse_filter_output_is_truthy(value[label_index + 1]):
+            return True
+    return False
+
+
+def _airport_special_landuse_negative_match(
+    value: list[object],
+    *,
+    allowed_properties: frozenset[str] = _AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES,
+) -> bool:
+    if len(value) < 5 or not _airport_special_landuse_property_name(
+        value[1],
+        allowed_properties=allowed_properties,
+    ):
+        return False
+    for label_index in range(2, len(value) - 1, 2):
+        if _airport_special_landuse_has_marker(
+            value[label_index]
+        ) and _airport_special_landuse_filter_output_is_falsey(value[label_index + 1]):
+            return True
+    return False
+
+
+def _airport_special_landuse_filter_has_positive_marker(
+    value: object,
+    *,
+    allowed_properties: frozenset[str] = _AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES,
+) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    operator = value[0]
+    if operator in {"all", "any"}:
+        return any(
+            _airport_special_landuse_filter_has_positive_marker(
+                item,
+                allowed_properties=allowed_properties,
+            )
+            for item in value[1:]
+        )
+    if operator in {"!", "!=", "!in", "none"}:
+        return False
+    if operator in {"==", "in"}:
+        return _airport_special_landuse_positive_comparison(value, allowed_properties=allowed_properties)
+    if operator == "match":
+        return _airport_special_landuse_positive_match(value, allowed_properties=allowed_properties)
+    if operator == "case":
+        for predicate_index in range(1, len(value) - 1, 2):
+            if _airport_special_landuse_filter_output_is_truthy(value[predicate_index + 1]) and (
+                _airport_special_landuse_filter_has_positive_marker(
+                    value[predicate_index],
+                    allowed_properties=allowed_properties,
+                )
+            ):
+                return True
+    return False
+
+
+def _airport_special_landuse_filter_excludes_marker(value: object) -> bool:
+    if not isinstance(value, list) or not value:
+        return False
+    operator = value[0]
+    if operator == "all":
+        return any(_airport_special_landuse_filter_excludes_marker(item) for item in value[1:])
+    if operator in {"!", "none"}:
+        return any(
+            _airport_special_landuse_filter_has_positive_marker(
+                item,
+                allowed_properties=_AIRPORT_SPECIAL_LANDUSE_EXCLUSION_FILTER_PROPERTIES,
+            )
+            for item in value[1:]
+        )
+    if operator in {"!=", "!in"}:
+        return _airport_special_landuse_positive_comparison(
+            value,
+            allowed_properties=_AIRPORT_SPECIAL_LANDUSE_EXCLUSION_FILTER_PROPERTIES,
+        )
+    if operator == "match":
+        return _airport_special_landuse_negative_match(
+            value,
+            allowed_properties=_AIRPORT_SPECIAL_LANDUSE_EXCLUSION_FILTER_PROPERTIES,
+        )
+    if operator == "case":
+        for predicate_index in range(1, len(value) - 1, 2):
+            if _airport_special_landuse_filter_output_is_falsey(value[predicate_index + 1]) and (
+                _airport_special_landuse_filter_has_positive_marker(
+                    value[predicate_index],
+                    allowed_properties=_AIRPORT_SPECIAL_LANDUSE_EXCLUSION_FILTER_PROPERTIES,
+                )
+            ):
+                return True
+    return False
+
+
+def _is_qfit_split_airport_special_landuse_variant(layer: dict[str, object]) -> bool:
+    if layer.get(_QFIT_SPLIT_VARIANT_KEY) is not True:
+        return False
+    layer_id = str(layer.get("id") or "").replace("_", "-").lower()
+    return any(layer_id.endswith(f"-{marker}") for marker in _AIRPORT_SPECIAL_LANDUSE_MARKERS)
+
+
+def _is_airport_special_landuse_candidate_layer(layer: dict[str, object]) -> bool:
+    source_layer = str(layer.get("source_layer") or "").replace("-", "_").lower()
+    filter_value = _qgis_filter_value(layer)
+    is_airport_layer = source_layer in {"aeroway", "airport_label"}
+    if source_layer == "landuse":
+        if layer.get(_QFIT_SPLIT_VARIANT_KEY) is True:
+            is_airport_layer = _is_qfit_split_airport_special_landuse_variant(layer)
+        else:
+            is_airport_layer = _airport_special_landuse_filter_has_positive_marker(filter_value)
+        is_airport_layer = is_airport_layer and not _airport_special_landuse_filter_excludes_marker(filter_value)
+    return (
+        str(layer.get("type") or "") in _AIRPORT_SPECIAL_LANDUSE_LAYER_TYPES
+        and is_airport_layer
+        and not _is_source_hidden_layer(layer)
+        and not _is_qfit_hidden_layer(layer)
+    )
+
+
+def _airport_special_landuse_control_properties(layer: dict[str, object]) -> list[str]:
+    return _control_properties(layer, _AIRPORT_SPECIAL_LANDUSE_CONTROL_PROPERTIES, include_filter=True)
+
+
 def _qfit_simplified_control_properties(layer: dict[str, object], controls: set[str]) -> list[str]:
     simplified = layer.get("qfit_simplifies")
     if not isinstance(simplified, list):
@@ -1092,6 +1346,30 @@ def _route_overlay_candidate_rows(layers: list[dict[str, object]]) -> list[dict[
         rows,
         key=lambda row: (str(row[_ROUTE_OVERLAY_MARKER_KEY]), str(row["type"]), str(row["layer"])),
     )
+
+
+def _airport_special_landuse_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_airport_special_landuse_candidate_layer(layer):
+            continue
+        controls = _airport_special_landuse_control_properties(layer)
+        if not controls:
+            continue
+        control_set = set(controls)
+        rows.append(
+            {
+                "layer": str(layer.get("id") or ""),
+                "type": str(layer.get("type") or ""),
+                "source_layer": str(layer.get("source_layer") or ""),
+                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
+                _AIRPORT_SPECIAL_LANDUSE_CONTROL_PROPERTIES_KEY: controls,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
+            }
+        )
+    return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
 
 
 def _label_density_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -2930,6 +3208,26 @@ def build_style_audit(
     water_flow_candidates = _water_flow_candidate_rows(layers)
     icon_sprite_candidates = _icon_sprite_candidate_rows(layers)
     route_overlay_candidates = _route_overlay_candidate_rows(layers)
+    split_landuse_layers = _qfit_split_variant_audit_layers_for_original_id(
+        original_layers,
+        simplified_layers,
+        "landuse",
+    )
+    split_landuse_original_ids = {
+        base_mapbox_style_layer_id_for_qfit(str(layer.get("id") or ""))
+        for layer in split_landuse_layers
+        if _is_airport_special_landuse_candidate_layer(layer)
+    }
+    base_airport_special_landuse_layers = [
+        layer
+        for layer in layers
+        if str(layer.get("id") or "") not in split_landuse_original_ids
+    ]
+    airport_special_landuse_layers = [
+        *base_airport_special_landuse_layers,
+        *split_landuse_layers,
+    ]
+    airport_special_landuse_candidates = _airport_special_landuse_candidate_rows(airport_special_landuse_layers)
     generated_at = resolved_config.generated_at or dt.datetime.now(dt.timezone.utc)
     audit = {
         "style": {
@@ -3053,6 +3351,23 @@ def build_style_audit(
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
             ),
             _ROUTE_OVERLAY_CANDIDATES_KEY: route_overlay_candidates,
+            _AIRPORT_SPECIAL_LANDUSE_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
+                airport_special_landuse_candidates,
+                "source_layer",
+            ),
+            _AIRPORT_SPECIAL_LANDUSE_CANDIDATES_BY_TYPE_KEY: _count_rows_by_key(
+                airport_special_landuse_candidates,
+                "type",
+            ),
+            _AIRPORT_SPECIAL_LANDUSE_SIMPLIFIED_BY_PROPERTY_KEY: _count_row_values(
+                airport_special_landuse_candidates,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY,
+            ),
+            _AIRPORT_SPECIAL_LANDUSE_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                airport_special_landuse_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
+            _AIRPORT_SPECIAL_LANDUSE_CANDIDATES_KEY: airport_special_landuse_candidates,
         },
         "layers": layers,
     }
@@ -3393,6 +3708,40 @@ def _markdown_route_overlay_candidate_table(rows: list[dict[str, object]], *, em
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
                 filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
                 controls=_markdown_list(list(row.get(_ROUTE_OVERLAY_CONTROL_PROPERTIES_KEY) or [])),
+                simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
+                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
+            )
+        )
+    lines.append("")
+    return lines
+
+
+def _markdown_airport_special_landuse_candidate_table(
+    rows: list[dict[str, object]],
+    *,
+    empty: str = "—",
+) -> list[str]:
+    if not rows:
+        return [empty, ""]
+    lines = [
+        (
+            "| Layer | Type | Source layer | Zoom | Filter operators | Airport/special landuse controls | "
+            "Simplified/substituted by qfit | QGIS-dependent controls |"
+        ),
+        _MARKDOWN_TYPED_CANDIDATE_SEPARATOR,
+    ]
+    for row in rows:
+        lines.append(
+            (
+                _MARKDOWN_TYPED_CANDIDATE_ROW_PREFIX
+                + _MARKDOWN_TYPED_CANDIDATE_ROW_SUFFIX
+            ).format(
+                layer=row.get("layer", ""),
+                layer_type=row.get("type", ""),
+                source_layer=row.get("source_layer", ""),
+                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
+                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
+                controls=_markdown_list(list(row.get(_AIRPORT_SPECIAL_LANDUSE_CONTROL_PROPERTIES_KEY) or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
             )
@@ -4866,6 +5215,38 @@ def _markdown_route_overlay_summary(summary: dict[str, object]) -> list[str]:
     ]
 
 
+def _markdown_airport_special_landuse_summary(summary: dict[str, object]) -> list[str]:
+    return [
+        "### Airport/special landuse candidates",
+        "",
+        (
+            "Visible aeroway, airport label, and airport-related landuse layers. Use this diagnostic with "
+            "live screenshots before changing runway, taxiway, helipad, airport polygon, or airport label "
+            "preprocessing."
+        ),
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _AIRPORT_SPECIAL_LANDUSE_CANDIDATES_BY_SOURCE_LAYER_KEY),
+            key="source_layer",
+            label=_MARKDOWN_SOURCE_LAYER_LABEL,
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _AIRPORT_SPECIAL_LANDUSE_CANDIDATES_BY_TYPE_KEY),
+            key="type",
+            label=_MARKDOWN_LAYER_TYPE_LABEL,
+        ),
+        "#### Airport/special landuse candidates simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _AIRPORT_SPECIAL_LANDUSE_SIMPLIFIED_BY_PROPERTY_KEY)),
+        "#### Airport/special landuse candidates QGIS-dependent controls",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _AIRPORT_SPECIAL_LANDUSE_QGIS_DEPENDENT_BY_PROPERTY_KEY)),
+        *_markdown_airport_special_landuse_candidate_table(
+            _summary_rows(summary, _AIRPORT_SPECIAL_LANDUSE_CANDIDATES_KEY)
+        ),
+    ]
+
+
 def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: object) -> list[str]:
     return [
         "## Summary",
@@ -4901,6 +5282,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_water_flow_summary(summary),
         *_markdown_icon_sprite_summary(summary),
         *_markdown_route_overlay_summary(summary),
+        *_markdown_airport_special_landuse_summary(summary),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
 

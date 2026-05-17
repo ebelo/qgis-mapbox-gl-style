@@ -1,3 +1,4 @@
+import copy
 import datetime as dt
 import json
 import os
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 from tests import _path  # noqa: F401
 
+from qfit import mapbox_config
 from qfit.mapbox_config import MapboxSpriteResources
 from qfit.validation import mapbox_outdoors_style_audit
 from qfit.validation.mapbox_outdoors_style_audit import (
@@ -733,6 +735,358 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("paint.fill-antialias<br>paint.fill-color<br>paint.fill-opacity", markdown)
         self.assertIn("filter<br>paint.line-opacity", markdown)
         self.assertNotIn("hidden-water` |", markdown)
+
+    def test_build_style_audit_reports_airport_special_landuse_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "aeroway-polygon",
+                        "type": "fill",
+                        "source-layer": "aeroway",
+                        "minzoom": 11,
+                        "filter": [
+                            "all",
+                            ["match", ["get", "type"], ["runway", "taxiway", "helipad"], True, False],
+                            ["==", ["geometry-type"], "Polygon"],
+                        ],
+                        "paint": {
+                            "fill-color": "#f7f1e3",
+                            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
+                        },
+                    },
+                    {
+                        "id": "aeroway-line",
+                        "type": "line",
+                        "source-layer": "aeroway",
+                        "minzoom": 9,
+                        "filter": ["==", ["geometry-type"], "LineString"],
+                        "paint": {
+                            "line-color": "#f7f1e3",
+                            "line-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
+                            "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1, 18, 80],
+                        },
+                    },
+                    {
+                        "id": "airport-label",
+                        "type": "symbol",
+                        "source-layer": "airport_label",
+                        "minzoom": 8,
+                        "filter": ["match", ["get", "class"], ["military", "civil"], True, False],
+                        "layout": {
+                            "icon-image": ["get", "maki"],
+                            "text-field": ["get", "name"],
+                            "text-size": ["step", ["get", "sizerank"], 18, 9, 12],
+                        },
+                        "paint": {"text-color": "#666", "text-halo-color": "#fff"},
+                    },
+                    {
+                        "id": "landuse-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["==", ["get", "class"], "airport"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-before-apron-boundary",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["==", ["get", "class"], "park"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-not-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["!=", ["get", "class"], "airport"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "hidden-aeroway",
+                        "type": "fill",
+                        "source-layer": "aeroway",
+                        "layout": {"visibility": "none"},
+                        "paint": {"fill-color": "#fff"},
+                    },
+                    {
+                        "id": "road-runway-name",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["airport_special_landuse_candidates"]
+        self.assertEqual(
+            [candidate["layer"] for candidate in candidates],
+            ["aeroway-polygon", "landuse-airport", "aeroway-line", "airport-label"],
+        )
+        polygon_candidate, landuse_candidate, line_candidate, label_candidate = candidates
+        self.assertEqual(polygon_candidate["type"], "fill")
+        self.assertEqual(polygon_candidate["source_layer"], "aeroway")
+        self.assertEqual(polygon_candidate["zoom_band"], "z≥11")
+        self.assertEqual(polygon_candidate["filter_operator_signature"], "==, all, geometry-type, get, match")
+        self.assertEqual(
+            polygon_candidate["airport_special_landuse_control_properties"],
+            ["filter", "paint.fill-color", "paint.fill-opacity"],
+        )
+        self.assertEqual(polygon_candidate["qfit_simplified_control_properties"], ["paint.fill-opacity"])
+        self.assertEqual(polygon_candidate["qgis_dependent_control_properties"], ["filter"])
+        self.assertEqual(landuse_candidate["source_layer"], "landuse")
+        self.assertEqual(
+            landuse_candidate["airport_special_landuse_control_properties"],
+            ["filter", "paint.fill-color"],
+        )
+        self.assertEqual(line_candidate["type"], "line")
+        self.assertEqual(
+            line_candidate["airport_special_landuse_control_properties"],
+            ["filter", "paint.line-color", "paint.line-opacity", "paint.line-width"],
+        )
+        self.assertEqual(line_candidate["qfit_simplified_control_properties"], ["paint.line-opacity", "paint.line-width"])
+        self.assertEqual(label_candidate["type"], "symbol")
+        self.assertEqual(label_candidate["source_layer"], "airport_label")
+        self.assertEqual(
+            label_candidate["airport_special_landuse_control_properties"],
+            [
+                "filter",
+                "layout.text-field",
+                "layout.text-size",
+                "layout.icon-image",
+                "paint.text-color",
+                "paint.text-halo-color",
+            ],
+        )
+        self.assertEqual(label_candidate["qfit_simplified_control_properties"], ["layout.icon-image", "layout.text-size"])
+        self.assertEqual(label_candidate["qgis_dependent_control_properties"], ["filter", "layout.icon-image"])
+        self.assertEqual(
+            audit["summary"]["airport_special_landuse_candidates_by_source_layer"],
+            [
+                {"source_layer": "aeroway", "count": 2},
+                {"source_layer": "airport_label", "count": 1},
+                {"source_layer": "landuse", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["airport_special_landuse_candidates_by_type"],
+            [{"type": "fill", "count": 2}, {"type": "line", "count": 1}, {"type": "symbol", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["airport_special_landuse_simplified_by_property"],
+            [
+                {"property": "layout.icon-image", "count": 1},
+                {"property": "layout.text-size", "count": 1},
+                {"property": "paint.fill-opacity", "count": 1},
+                {"property": "paint.line-opacity", "count": 1},
+                {"property": "paint.line-width", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["airport_special_landuse_qgis_dependent_by_property"],
+            [{"property": "filter", "count": 4}, {"property": "layout.icon-image", "count": 1}],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Airport/special landuse candidates", markdown)
+        self.assertIn("Visible aeroway, airport label, and airport-related landuse layers", markdown)
+        self.assertIn("#### Airport/special landuse candidates QGIS-dependent controls", markdown)
+        self.assertIn("aeroway-polygon", markdown)
+        self.assertIn("airport-label", markdown)
+        self.assertIn("paint.line-color<br>paint.line-opacity<br>paint.line-width", markdown)
+        airport_section = markdown.split("### Airport/special landuse candidates", 1)[1].split(
+            "## Layers",
+            1,
+        )[0]
+        self.assertNotIn("| `hidden-aeroway` |", markdown)
+        self.assertNotIn("| `landuse-before-apron-boundary` |", airport_section)
+        self.assertNotIn("| `landuse-not-airport` |", airport_section)
+
+    def test_airport_special_landuse_landuse_filter_requires_positive_marker_predicate(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "landuse-all-literal-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": [
+                            "all",
+                            [">=", ["get", "sizerank"], 0],
+                            ["match", ["get", "class"], ["literal", ["airport"]], True, False],
+                        ],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-case-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["case", ["==", ["get", "class"], "airport"], True, False],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-in-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["in", "class", "airport", "school"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-match-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["match", ["get", "class"], ["airport"], True, False],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-airport-except-apron",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": [
+                            "all",
+                            ["==", ["get", "class"], "airport"],
+                            ["!=", ["get", "type"], "apron"],
+                        ],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-apron-name-only",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["==", ["get", "class"], "park"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-negated-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["!=", ["get", "class"], "airport"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-match-excludes-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["match", ["get", "class"], ["airport"], False, True],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                    {
+                        "id": "landuse-name-airport",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "filter": ["==", ["get", "name"], "airport"],
+                        "paint": {"fill-color": "#dde0ee"},
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(
+            [candidate["layer"] for candidate in audit["summary"]["airport_special_landuse_candidates"]],
+            [
+                "landuse-airport-except-apron",
+                "landuse-all-literal-airport",
+                "landuse-case-airport",
+                "landuse-in-airport",
+                "landuse-match-airport",
+            ],
+        )
+
+    def test_airport_special_landuse_reports_qfit_split_landuse_airport_variants(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "landuse",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 5,
+                        "filter": [">=", ["get", "sizerank"], 0],
+                        "paint": {
+                            "fill-color": copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION),
+                            "fill-opacity": copy.deepcopy(mapbox_config._LANDUSE_FILL_OPACITY_EXPRESSION),
+                        },
+                    }
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["airport_special_landuse_candidates"]
+        self.assertEqual(
+            [candidate["layer"] for candidate in candidates],
+            ["landuse-other-z10-plus-airport", "landuse-other-z8-to-z10-airport"],
+        )
+        for candidate in candidates:
+            self.assertEqual(candidate["source_layer"], "landuse")
+            self.assertEqual(candidate["type"], "fill")
+            self.assertEqual(
+                candidate["airport_special_landuse_control_properties"],
+                ["filter", "paint.fill-color", "paint.fill-opacity"],
+            )
+            self.assertEqual(
+                candidate["qfit_simplified_control_properties"],
+                ["filter", "paint.fill-color", "paint.fill-opacity"],
+            )
+            self.assertEqual(candidate["qgis_dependent_control_properties"], ["filter"])
+
+        markdown = build_audit_markdown(audit)
+        airport_section = markdown.split("### Airport/special landuse candidates", 1)[1].split(
+            "## Layers",
+            1,
+        )[0]
+        self.assertIn("| `landuse-other-z8-to-z10-airport` | `fill` | `landuse` | z8–z10 |", airport_section)
+        self.assertIn("| `landuse-other-z10-plus-airport` | `fill` | `landuse` | z≥10 |", airport_section)
+        self.assertNotIn("| `landuse` | `fill` |", airport_section)
+
+    def test_airport_special_landuse_prefers_qfit_split_variants_for_split_positive_landuse(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "landuse",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 5,
+                        "filter": ["==", ["get", "class"], "airport"],
+                        "paint": {
+                            "fill-color": copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION),
+                            "fill-opacity": copy.deepcopy(mapbox_config._LANDUSE_FILL_OPACITY_EXPRESSION),
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            [candidate["layer"] for candidate in audit["summary"]["airport_special_landuse_candidates"]],
+            ["landuse-other-z10-plus-airport", "landuse-other-z8-to-z10-airport"],
+        )
+
+    def test_airport_special_landuse_omits_qfit_split_variants_when_filter_excludes_airport(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "landuse",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 5,
+                        "filter": ["match", ["get", "class"], ["airport"], False, True],
+                        "paint": {
+                            "fill-color": copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION),
+                            "fill-opacity": copy.deepcopy(mapbox_config._LANDUSE_FILL_OPACITY_EXPRESSION),
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(audit["summary"]["airport_special_landuse_candidates"], [])
 
     def test_build_style_audit_reports_icon_sprite_candidates(self):
         audit = build_style_audit(
