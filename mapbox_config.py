@@ -596,6 +596,8 @@ _MAJOR_LINK_WIDTH_MINIMUM_MM_BY_PROP = {
     "line-width": 0.1,
     "line-gap-width": 0.0,
 }
+_FERRY_LINE_LAYER_IDS = {"ferry", "ferry-auto"}
+_FERRY_LINE_QGIS_WIDTH_SCALE = 1.5
 _ROAD_CLASS_LINE_COLOR_VARIANTS_BY_LAYER_ID = {
     "bridge-major-link": (("motorway_link", "motorway-link"), ("trunk_link", "trunk-link")),
     "bridge-major-link-2": (("motorway_link", "motorway-link"), ("trunk_link", "trunk-link")),
@@ -5726,6 +5728,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if width is not None:
                         if is_regional_road_width_variant:
                             width *= _regional_major_road_width_scale(layer_id)
+                        if base_layer_id in _FERRY_LINE_LAYER_IDS and prop == "line-width":
+                            # Thin Lake Geneva ferry routes nearly disappear after
+                            # px-to-mm conversion in the z10 comparison camera.
+                            width *= _FERRY_LINE_QGIS_WIDTH_SCALE
                         # Convert px → mm (96 DPI) and clamp to sane range
                         width_mm = width * _MAPBOX_PIXEL_TO_MM
                         if is_regional_road_width_variant and prop == "line-width":

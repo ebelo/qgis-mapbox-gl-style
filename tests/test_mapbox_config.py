@@ -1847,6 +1847,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][3]["paint"]["line-dasharray"], [5, 2])
         self.assertIsInstance(style["layers"][0]["paint"]["line-dasharray"][2], list)
 
+    def test_ferry_line_widths_keep_lake_routes_visible(self):
+        ferry_width = ["interpolate", ["exponential", 1.5], ["zoom"], 14, 0.5, 20, 1]
+        style = {
+            "layers": [
+                {"id": "ferry", "paint": {"line-width": copy.deepcopy(ferry_width)}},
+                {"id": "ferry-auto", "paint": {"line-width": copy.deepcopy(ferry_width)}},
+                {"id": "road-path", "paint": {"line-width": copy.deepcopy(ferry_width)}},
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertAlmostEqual(result["layers"][0]["paint"]["line-width"], 0.1984375)
+        self.assertAlmostEqual(result["layers"][1]["paint"]["line-width"], 0.1984375)
+        self.assertAlmostEqual(result["layers"][2]["paint"]["line-width"], 0.13229166666666667)
+
     def test_data_driven_line_dasharray_expressions_use_safe_literal_fallbacks(self):
         style = {
             "layers": [
