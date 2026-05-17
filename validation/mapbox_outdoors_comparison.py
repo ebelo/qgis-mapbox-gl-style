@@ -125,6 +125,18 @@ CAMERAS: dict[str, MapboxComparisonCamera] = {
         width=1280,
         height=900,
     ),
+    "zermatt-piste-z17-outdoors": MapboxComparisonCamera(
+        name="zermatt-piste-z17-outdoors",
+        description=(
+            "z17 Zermatt ski-piste stress target for colored path casings, "
+            "cycleway/piste overlays, and high-zoom outdoor route legibility."
+        ),
+        longitude=7.71664,
+        latitude=46.01270,
+        zoom=17.0,
+        width=1280,
+        height=900,
+    ),
     "zermatt-trails-z18-outdoors": MapboxComparisonCamera(
         name="zermatt-trails-z18-outdoors",
         description=(

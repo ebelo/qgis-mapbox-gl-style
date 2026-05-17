@@ -72,6 +72,9 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(9.0 <= CAMERAS["lausanne-lavaux-z10-outdoors"].zoom <= 11.0)
         self.assertTrue(14.0 <= CAMERAS["geneva-airport-motorway-z14-outdoors"].zoom <= 14.5)
         self.assertTrue(13.0 <= CAMERAS["chamonix-trails-z14-outdoors"].zoom <= 14.5)
+        self.assertTrue(16.5 <= CAMERAS["zermatt-piste-z17-outdoors"].zoom <= 17.5)
+        self.assertIn("piste", CAMERAS["zermatt-piste-z17-outdoors"].description)
+        self.assertIn("cycleway", CAMERAS["zermatt-piste-z17-outdoors"].description)
         self.assertGreaterEqual(CAMERAS["zermatt-trails-z18-outdoors"].zoom, 18.0)
 
         listed = list_cameras()
