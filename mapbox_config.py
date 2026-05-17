@@ -1051,6 +1051,12 @@ _LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
     if not residential and suffix not in _LANDUSE_CLASS_FILL_COLOR_EXCLUDED_OPACITY_SUFFIXES
 }
 _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
+    ("wood", ["match", ["get", "class"], "wood", True, False], _LANDUSE_WOOD_FILL_COLOR),
+    ("scrub", ["match", ["get", "class"], "scrub", True, False], _LANDUSE_SCRUB_FILL_COLOR),
+    ("agriculture", ["match", ["get", "class"], "agriculture", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
+    ("grass", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
+    ("glacier", ["match", ["get", "class"], "glacier", True, False], _LANDUSE_GLACIER_FILL_COLOR),
+    ("sand", ["match", ["get", "class"], "sand", True, False], _LANDUSE_SAND_FILL_COLOR),
     (
         "park-special",
         [
@@ -1070,7 +1076,17 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
         _LANDUSE_PARK_FILL_COLOR,
     ),
     ("airport", ["match", ["get", "class"], "airport", True, False], _LANDUSE_AIRPORT_FILL_COLOR),
-    ("remaining", ["match", ["get", "class"], ["park", "airport"], False, True], _LANDUSE_FALLBACK_FILL_COLOR),
+    (
+        "remaining",
+        [
+            "match",
+            ["get", "class"],
+            ["wood", "scrub", "agriculture", "grass", "glacier", "sand", "park", "airport"],
+            False,
+            True,
+        ],
+        _LANDUSE_FALLBACK_FILL_COLOR,
+    ),
 )
 _LANDCOVER_CROP_FILL_COLOR = "hsla(68, 55%, 70%, 0.6)"
 _LANDCOVER_FALLBACK_FILL_COLOR = "hsl(98, 48%, 67%)"
