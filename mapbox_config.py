@@ -1404,6 +1404,9 @@ _WATERWAY_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], .
     ("z13-to-z16", 13.0, 16.0),
     ("z16-plus", 16.0, None),
 )
+# QGIS renders high-zoom stream-like waterways slightly too faint after the
+# px-to-mm conversion; keep the contrast nudge out of canal/river and shadow.
+_WATERWAY_OTHER_HIGH_ZOOM_QGIS_WIDTH_SCALE = 1.5
 _TURNING_FEATURE_LAYER_ID = "turning-feature"
 _TURNING_FEATURE_OUTLINE_LAYER_ID = "turning-feature-outline"
 _TURNING_FEATURE_CIRCLE_RADIUS_EXPRESSION = [
@@ -4065,6 +4068,12 @@ def _waterway_line_width_layer_variants(layer: dict[str, object]) -> list[dict[s
             if width is None:
                 continue
             line_width, effective_minzoom, effective_maxzoom = width
+            if (
+                base_layer_id == _WATERWAY_LAYER_ID
+                and class_suffix == "other"
+                and band_suffix == "z16-plus"
+            ):
+                line_width *= _WATERWAY_OTHER_HIGH_ZOOM_QGIS_WIDTH_SCALE
             variant = copy.deepcopy(layer)
             variant["id"] = _waterway_line_width_layer_id(layer_id, class_suffix, band_suffix)
             _set_zoom_bounds(variant, effective_minzoom, effective_maxzoom)

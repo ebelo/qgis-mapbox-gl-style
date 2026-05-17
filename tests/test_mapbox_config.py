@@ -4007,7 +4007,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         low_other = by_id["waterway-other-z8-to-z13"]
         mid_major = by_id["waterway-canal-river-z13-to-z16"]
         high_major = by_id["waterway-canal-river-z16-plus"]
+        high_other = by_id["waterway-other-z16-plus"]
         shadow_low_major = by_id["waterway-shadow-z10-to-z13-canal-river"]
+        shadow_high_other = by_id["waterway-shadow-z16-plus-other"]
         self.assertEqual(low_major["minzoom"], 8)
         self.assertEqual(low_major["maxzoom"], 13.0)
         self.assertEqual(mid_major["minzoom"], 13.0)
@@ -4022,7 +4024,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(low_other["paint"]["line-width"], 0.022620108479255864)
         self.assertAlmostEqual(mid_major["paint"]["line-width"], 0.42585675726411115)
         self.assertAlmostEqual(high_major["paint"]["line-width"], 0.6780241671213343)
+        self.assertAlmostEqual(high_other["paint"]["line-width"], 0.37114509519569676)
         self.assertAlmostEqual(shadow_low_major["paint"]["line-width"], 0.14095142330582108)
+        self.assertAlmostEqual(shadow_high_other["paint"]["line-width"], 0.24743006346379784)
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("waterway-shadow-z16-plus-other"),
             "waterway-shadow",
