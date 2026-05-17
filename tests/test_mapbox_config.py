@@ -2807,23 +2807,42 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(
             [layer["id"] for layer in result["layers"]],
-            ["hillshade-shadow", "hillshade-highlight", "hillshade-z13-plus"],
+            [
+                "hillshade-shadow",
+                "hillshade-highlight",
+                "hillshade-shadow-z13-plus",
+                "hillshade-highlight-z13-plus",
+            ],
         )
         by_id = {layer["id"]: layer for layer in result["layers"]}
         shadow = by_id["hillshade-shadow"]
         highlight = by_id["hillshade-highlight"]
-        high_zoom = by_id["hillshade-z13-plus"]
+        high_zoom_shadow = by_id["hillshade-shadow-z13-plus"]
+        high_zoom_highlight = by_id["hillshade-highlight-z13-plus"]
         self.assertEqual(shadow["minzoom"], 0)
         self.assertEqual(shadow["maxzoom"], 13.0)
         self.assertEqual(highlight["minzoom"], 11.0)
         self.assertEqual(highlight["maxzoom"], 13.0)
-        self.assertEqual(high_zoom["minzoom"], 13.0)
-        self.assertEqual(high_zoom["maxzoom"], 16)
+        self.assertEqual(high_zoom_shadow["minzoom"], 13.0)
+        self.assertEqual(high_zoom_shadow["maxzoom"], 16)
+        self.assertEqual(high_zoom_highlight["minzoom"], 13.0)
+        self.assertEqual(high_zoom_highlight["maxzoom"], 16)
         self.assertEqual(shadow["paint"]["fill-color"], "hsla(66, 38%, 17%, 0.08)")
         self.assertEqual(highlight["paint"]["fill-color"], "hsla(60, 20%, 95%, 0.14)")
-        self.assertEqual(high_zoom["paint"]["fill-color"], "hsla(60, 20%, 95%, 0.14)")
+        self.assertEqual(high_zoom_shadow["paint"]["fill-color"], "hsla(66, 38%, 17%, 0.08)")
+        self.assertEqual(high_zoom_highlight["paint"]["fill-color"], "hsla(60, 20%, 95%, 0.14)")
         self.assertIn(["==", ["get", "class"], "shadow"], shadow["filter"])
         self.assertIn(["!=", ["get", "class"], "shadow"], highlight["filter"])
+        self.assertIn(["==", ["get", "class"], "shadow"], high_zoom_shadow["filter"])
+        self.assertIn(["!=", ["get", "class"], "shadow"], high_zoom_highlight["filter"])
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("hillshade-shadow-z13-plus"),
+            "hillshade",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("hillshade-highlight-z13-plus"),
+            "hillshade",
+        )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("hillshade-z13-plus"),
             "hillshade",
@@ -2861,7 +2880,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "hillshade")
         self.assertEqual(result[2]["id"], "hillshade-shadow")
         self.assertEqual(result[3]["id"], "hillshade-highlight")
-        self.assertEqual(result[4]["id"], "hillshade-z13-plus")
+        self.assertEqual(result[4]["id"], "hillshade-shadow-z13-plus")
+        self.assertEqual(result[5]["id"], "hillshade-highlight-z13-plus")
 
     def _landcover_layer(self, fill_opacity=None):
         if fill_opacity is None:

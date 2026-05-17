@@ -2218,6 +2218,8 @@ def _hillshade_base_layer_id(layer_id: object) -> str | None:
         f"{_HILLSHADE_LAYER_ID}-shadow",
         f"{_HILLSHADE_LAYER_ID}-highlight",
         f"{_HILLSHADE_LAYER_ID}-z13-plus",
+        f"{_HILLSHADE_LAYER_ID}-shadow-z13-plus",
+        f"{_HILLSHADE_LAYER_ID}-highlight-z13-plus",
     }:
         return _HILLSHADE_LAYER_ID
     return None
@@ -3198,6 +3200,12 @@ def _hillshade_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
     variants: list[dict[str, object]] = []
 
+    def variant_paint(variant: dict[str, object]) -> dict[str, object]:
+        variant_paint = variant["paint"]
+        if not isinstance(variant_paint, dict):
+            raise TypeError("Hillshade layer paint must be a dictionary.")
+        return variant_paint
+
     split_zoom_band = _effective_zoom_band(
         existing_minzoom,
         existing_maxzoom,
@@ -3212,8 +3220,7 @@ def _hillshade_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[
             layer.get("filter"),
             ["==", ["get", "class"], "shadow"],
         )
-        shadow_paint = shadow_layer["paint"]
-        assert isinstance(shadow_paint, dict)
+        shadow_paint = variant_paint(shadow_layer)
         shadow_paint["fill-color"] = _HILLSHADE_SHADOW_FILL_COLOR
         variants.append(shadow_layer)
 
@@ -3231,8 +3238,7 @@ def _hillshade_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[
             layer.get("filter"),
             ["!=", ["get", "class"], "shadow"],
         )
-        highlight_paint = highlight_layer["paint"]
-        assert isinstance(highlight_paint, dict)
+        highlight_paint = variant_paint(highlight_layer)
         highlight_paint["fill-color"] = _HILLSHADE_HIGHLIGHT_FILL_COLOR
         variants.append(highlight_layer)
 
@@ -3243,13 +3249,27 @@ def _hillshade_fill_color_layer_variants(layer: dict[str, object]) -> list[dict[
         None,
     )
     if high_zoom_band is not None:
-        high_zoom_layer = copy.deepcopy(layer)
-        high_zoom_layer["id"] = f"{_HILLSHADE_LAYER_ID}-z13-plus"
-        _set_zoom_bounds(high_zoom_layer, *high_zoom_band)
-        high_zoom_paint = high_zoom_layer["paint"]
-        assert isinstance(high_zoom_paint, dict)
-        high_zoom_paint["fill-color"] = _HILLSHADE_HIGHLIGHT_FILL_COLOR
-        variants.append(high_zoom_layer)
+        high_zoom_shadow_layer = copy.deepcopy(layer)
+        high_zoom_shadow_layer["id"] = f"{_HILLSHADE_LAYER_ID}-shadow-z13-plus"
+        _set_zoom_bounds(high_zoom_shadow_layer, *high_zoom_band)
+        high_zoom_shadow_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["==", ["get", "class"], "shadow"],
+        )
+        high_zoom_shadow_paint = variant_paint(high_zoom_shadow_layer)
+        high_zoom_shadow_paint["fill-color"] = _HILLSHADE_SHADOW_FILL_COLOR
+        variants.append(high_zoom_shadow_layer)
+
+        high_zoom_highlight_layer = copy.deepcopy(layer)
+        high_zoom_highlight_layer["id"] = f"{_HILLSHADE_LAYER_ID}-highlight-z13-plus"
+        _set_zoom_bounds(high_zoom_highlight_layer, *high_zoom_band)
+        high_zoom_highlight_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            ["!=", ["get", "class"], "shadow"],
+        )
+        high_zoom_highlight_paint = variant_paint(high_zoom_highlight_layer)
+        high_zoom_highlight_paint["fill-color"] = _HILLSHADE_HIGHLIGHT_FILL_COLOR
+        variants.append(high_zoom_highlight_layer)
 
     return variants or None
 
