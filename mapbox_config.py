@@ -630,6 +630,15 @@ _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     # width relationship instead of clamping both strokes to the same value.
     ("z16-plus", 16.0, None, 17.0),
 )
+_PATH_TRAIL_LINE_WIDTH_LAYER_IDS = {
+    "bridge-path-trail",
+    "road-path-trail",
+    "tunnel-path-trail",
+}
+_PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
+    ("below-z16", None, 16.0, 15.0),
+    ("z16-plus", 16.0, None, 18.0),
+)
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
     "road-path-bg",
@@ -2204,17 +2213,38 @@ def _path_background_line_color_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
-def _pedestrian_line_width_base_layer_id(layer_id: object) -> str | None:
+def _line_width_zoom_band_base_layer_id(
+    layer_id: object,
+    *,
+    layer_ids: set[str],
+    zoom_bands: tuple[tuple[str, float | None, float | None, float], ...],
+) -> str | None:
     normalized = str(layer_id or "")
-    if normalized in _PEDESTRIAN_LINE_WIDTH_LAYER_IDS:
+    if normalized in layer_ids:
         return normalized
-    for suffix, _band_minzoom, _band_maxzoom, _target_zoom in _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS:
+    for suffix, _band_minzoom, _band_maxzoom, _target_zoom in zoom_bands:
         band_suffix = f"-{suffix}"
         if normalized.endswith(band_suffix):
             base_layer_id = normalized[: -len(band_suffix)]
-            if base_layer_id in _PEDESTRIAN_LINE_WIDTH_LAYER_IDS:
+            if base_layer_id in layer_ids:
                 return base_layer_id
     return None
+
+
+def _pedestrian_line_width_base_layer_id(layer_id: object) -> str | None:
+    return _line_width_zoom_band_base_layer_id(
+        layer_id,
+        layer_ids=_PEDESTRIAN_LINE_WIDTH_LAYER_IDS,
+        zoom_bands=_PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS,
+    )
+
+
+def _path_trail_line_width_base_layer_id(layer_id: object) -> str | None:
+    return _line_width_zoom_band_base_layer_id(
+        layer_id,
+        layer_ids=_PATH_TRAIL_LINE_WIDTH_LAYER_IDS,
+        zoom_bands=_PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS,
+    )
 
 
 def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
@@ -2295,6 +2325,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         _landcover_fill_opacity_base_layer_id(layer_id),
         _landuse_fill_opacity_base_layer_id(layer_id),
         _path_background_line_color_base_layer_id(layer_id),
+        _path_trail_line_width_base_layer_id(layer_id),
         _pedestrian_line_width_base_layer_id(layer_id),
     ):
         if resolved_layer_id is not None:
@@ -2350,19 +2381,23 @@ def _path_high_zoom_line_width(expr: object, layer_id: object, prop: str, minzoo
     return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
 
 
-def _pedestrian_line_width_mm(expr: object, target_zoom: float) -> float | None:
+def _line_width_mm_at_zoom(expr: object, target_zoom: float) -> float | None:
     width_px = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
     if width_px is None:
         return None
     return max(0.1, min(width_px * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
 
 
-def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
-    """Split audited pedestrian widths into static QGIS zoom bands."""
+def _line_width_zoom_band_layer_variants(
+    layer: dict[str, object],
+    *,
+    layer_ids: set[str],
+    zoom_bands: tuple[tuple[str, float | None, float | None, float], ...],
+) -> list[dict[str, object]] | None:
     layer_id = str(layer.get("id") or "")
     paint = layer.get("paint")
     if (
-        layer_id not in _PEDESTRIAN_LINE_WIDTH_LAYER_IDS
+        layer_id not in layer_ids
         or layer.get("type") != "line"
         or not isinstance(paint, dict)
     ):
@@ -2374,7 +2409,7 @@ def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
     variants: list[dict[str, object]] = []
-    for suffix, band_minzoom, band_maxzoom, target_zoom in _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS:
+    for suffix, band_minzoom, band_maxzoom, target_zoom in zoom_bands:
         effective_zoom_band = _effective_zoom_band(
             existing_minzoom,
             existing_maxzoom,
@@ -2386,7 +2421,7 @@ def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict
         sampled_zoom = _zoom_in_layer_range(target_zoom, *effective_zoom_band)
         if sampled_zoom is None:
             continue
-        line_width_mm = _pedestrian_line_width_mm(line_width, sampled_zoom)
+        line_width_mm = _line_width_mm_at_zoom(line_width, sampled_zoom)
         if line_width_mm is None:
             continue
 
@@ -2400,7 +2435,32 @@ def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict
     return variants or None
 
 
-def _split_pedestrian_line_width_layers_for_qgis(layers: object) -> object:
+def _path_trail_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited hiking trail overlay widths into static QGIS zoom bands."""
+    return _line_width_zoom_band_layer_variants(
+        layer,
+        layer_ids=_PATH_TRAIL_LINE_WIDTH_LAYER_IDS,
+        zoom_bands=_PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS,
+    )
+
+
+def _split_path_trail_line_width_layers_for_qgis(layers: object) -> object:
+    return _split_line_width_zoom_band_layers_for_qgis(
+        layers,
+        variants_for_layer=_path_trail_line_width_layer_variants,
+    )
+
+
+def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited pedestrian widths into static QGIS zoom bands."""
+    return _line_width_zoom_band_layer_variants(
+        layer,
+        layer_ids=_PEDESTRIAN_LINE_WIDTH_LAYER_IDS,
+        zoom_bands=_PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS,
+    )
+
+
+def _split_line_width_zoom_band_layers_for_qgis(layers: object, *, variants_for_layer) -> object:
     if not isinstance(layers, list):
         return layers
     expanded_layers: list[object] = []
@@ -2408,9 +2468,16 @@ def _split_pedestrian_line_width_layers_for_qgis(layers: object) -> object:
         if not isinstance(layer, dict):
             expanded_layers.append(layer)
             continue
-        variants = _pedestrian_line_width_layer_variants(layer)
+        variants = variants_for_layer(layer)
         expanded_layers.extend(variants if variants is not None else [layer])
     return expanded_layers
+
+
+def _split_pedestrian_line_width_layers_for_qgis(layers: object) -> object:
+    return _split_line_width_zoom_band_layers_for_qgis(
+        layers,
+        variants_for_layer=_pedestrian_line_width_layer_variants,
+    )
 
 
 def _regional_major_road_width_scale(layer_id: object) -> float:
@@ -5412,6 +5479,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_path_trail_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_pedestrian_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))

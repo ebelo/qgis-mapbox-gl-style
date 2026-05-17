@@ -5007,6 +5007,96 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ],
         )
 
+    def test_path_trail_line_width_splits_high_zoom_widths(self):
+        trail_width = ["interpolate", ["exponential", 1.5], ["zoom"], 15, 1, 18, 4]
+        style = {
+            "layers": [
+                {
+                    "id": "road-path-trail",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": copy.deepcopy(trail_width),
+                    },
+                },
+                {
+                    "id": "bridge-path-trail",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": copy.deepcopy(trail_width)},
+                },
+                {
+                    "id": "tunnel-path-trail",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": copy.deepcopy(trail_width)},
+                },
+                {
+                    "id": "road-minor",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": copy.deepcopy(trail_width)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-path-trail-below-z16",
+                "road-path-trail-z16-plus",
+                "bridge-path-trail-below-z16",
+                "bridge-path-trail-z16-plus",
+                "tunnel-path-trail-below-z16",
+                "tunnel-path-trail-z16-plus",
+                "road-minor",
+            ],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(trail_width, 15.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        high_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(trail_width, 18.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+
+        self.assertAlmostEqual(
+            by_id["road-path-trail-below-z16"]["paint"]["line-width"],
+            low_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["road-path-trail-z16-plus"]["paint"]["line-width"],
+            high_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-path-trail-z16-plus"]["paint"]["line-width"],
+            high_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["tunnel-path-trail-z16-plus"]["paint"]["line-width"],
+            high_width_mm,
+        )
+        self.assertEqual(by_id["road-path-trail-below-z16"]["maxzoom"], 16.0)
+        self.assertEqual(by_id["road-path-trail-z16-plus"]["minzoom"], 16.0)
+        self.assertEqual(by_id["bridge-path-trail-below-z16"]["minzoom"], 14)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-path-trail-z16-plus"),
+            "road-path-trail",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("tunnel-path-trail-z16-plus"),
+            "tunnel-path-trail",
+        )
+        self.assertAlmostEqual(
+            by_id["road-minor"]["paint"]["line-width"],
+            low_width_mm,
+        )
+
     def test_pedestrian_line_width_splits_high_zoom_widths(self):
         pedestrian_width = [
             "interpolate",
