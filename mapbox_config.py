@@ -672,6 +672,7 @@ _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("below-z16", None, 16.0, 15.0),
     ("z16-plus", 16.0, None, 18.0),
 )
+_PATH_TRAIL_LINE_WIDTH_QGIS_SCALE = 1.35
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
     "road-path-bg",
@@ -2547,6 +2548,7 @@ def _line_width_zoom_band_layer_variants(
     *,
     layer_ids: set[str],
     zoom_bands: tuple[tuple[str, float | None, float | None, float], ...],
+    line_width_scale: float = 1.0,
 ) -> list[dict[str, object]] | None:
     layer_id = str(layer.get("id") or "")
     paint = layer.get("paint")
@@ -2578,6 +2580,7 @@ def _line_width_zoom_band_layer_variants(
         line_width_mm = _line_width_mm_at_zoom(line_width, sampled_zoom)
         if line_width_mm is None:
             continue
+        line_width_mm = max(0.1, min(line_width_mm * line_width_scale, _MAX_LINE_WIDTH_MM))
 
         variant = copy.deepcopy(layer)
         variant["id"] = f"{layer_id}-{suffix}"
@@ -2595,6 +2598,7 @@ def _path_trail_line_width_layer_variants(layer: dict[str, object]) -> list[dict
         layer,
         layer_ids=_PATH_TRAIL_LINE_WIDTH_LAYER_IDS,
         zoom_bands=_PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS,
+        line_width_scale=_PATH_TRAIL_LINE_WIDTH_QGIS_SCALE,
     )
 
 

@@ -5263,10 +5263,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         low_width_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(trail_width, 15.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
+            * mapbox_config._PATH_TRAIL_LINE_WIDTH_QGIS_SCALE
         )
         high_width_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(trail_width, 18.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
+            * mapbox_config._PATH_TRAIL_LINE_WIDTH_QGIS_SCALE
         )
 
         self.assertAlmostEqual(
@@ -5298,7 +5300,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertAlmostEqual(
             by_id["road-minor"]["paint"]["line-width"],
-            low_width_mm,
+            (
+                mapbox_config._extract_zoom_scalar_size_at_zoom(trail_width, 15.0)
+                * mapbox_config._MAPBOX_PIXEL_TO_MM
+            ),
         )
 
     def test_pedestrian_line_width_splits_high_zoom_widths(self):
