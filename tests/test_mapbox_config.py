@@ -879,7 +879,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "road-major-link-z12-to-z16")
         self.assertEqual(result[3]["id"], "road-major-link-z16-plus")
 
-    def test_motorway_trunk_line_color_splits_only_at_high_zoom(self):
+    def test_motorway_trunk_line_color_splits_from_z6_up(self):
         line_color = [
             "step",
             ["zoom"],
@@ -924,14 +924,32 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             [
                 "road-motorway-trunk-z3-to-z5",
                 "road-motorway-trunk-z5-to-z6",
-                "road-motorway-trunk-z6-to-z9",
-                "road-motorway-trunk-z9-to-z12",
+                "road-motorway-trunk-z6-to-z9-motorway",
+                "road-motorway-trunk-z6-to-z9-trunk",
+                "road-motorway-trunk-z9-to-z12-motorway",
+                "road-motorway-trunk-z9-to-z12-trunk",
                 "road-motorway-trunk-motorway",
                 "road-motorway-trunk-trunk",
             ],
         )
         self.assertEqual(
-            by_id["road-motorway-trunk-z6-to-z9"]["paint"]["line-color"],
+            by_id["road-motorway-trunk-z5-to-z6"]["paint"]["line-color"],
+            "hsl(35, 89%, 75%)",
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-z6-to-z9-motorway"]["paint"]["line-color"],
+            "hsl(15, 88%, 69%)",
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-z6-to-z9-trunk"]["paint"]["line-color"],
+            "hsl(35, 81%, 59%)",
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-z9-to-z12-motorway"]["paint"]["line-color"],
+            "hsl(15, 100%, 75%)",
+        )
+        self.assertEqual(
+            by_id["road-motorway-trunk-z9-to-z12-trunk"]["paint"]["line-color"],
             "hsl(35, 89%, 75%)",
         )
         self.assertEqual(
@@ -942,9 +960,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             by_id["road-motorway-trunk-trunk"]["paint"]["line-color"],
             "hsl(35, 89%, 75%)",
         )
+        self.assertIn(
+            ["==", ["get", "class"], "motorway"],
+            by_id["road-motorway-trunk-z6-to-z9-motorway"]["filter"],
+        )
         self.assertIn(["==", ["get", "class"], "motorway"], by_id["road-motorway-trunk-motorway"]["filter"])
         self.assertEqual(
-            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-motorway-trunk-motorway"),
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-motorway-trunk-z6-to-z9-motorway"),
             "road-motorway-trunk",
         )
 

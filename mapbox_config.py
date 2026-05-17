@@ -588,7 +588,7 @@ _ROAD_CLASS_LINE_COLOR_SUFFIXES = tuple(
         reverse=True,
     )
 )
-_ROAD_CLASS_LINE_COLOR_MIN_ZOOM = 12.0
+_ROAD_CLASS_LINE_COLOR_MIN_ZOOM = 6.0
 _MAJOR_LINK_WIDTH_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("z12-to-z16", 12.0, 16.0, 14.0),
     ("z16-plus", 16.0, None, 16.0),
