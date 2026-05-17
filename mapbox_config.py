@@ -195,6 +195,27 @@ _POI_LABEL_MAKI_ICON_VALUES = (
 )
 
 _ROAD_NUMBER_SHIELD_LAYER_ID = "road-number-shield"
+_ROAD_NUMBER_SHIELD_POINT_TO_LINE_ZOOM = 11.0
+_ROAD_NUMBER_SHIELD_SYMBOL_PLACEMENT_EXPRESSION = [
+    "step",
+    ["zoom"],
+    "point",
+    11,
+    "line",
+]
+_ROAD_NUMBER_SHIELD_POINT_TO_LINE_FILTER_EXPRESSION = [
+    "step",
+    ["zoom"],
+    ["==", ["geometry-type"], "Point"],
+    11,
+    [">", ["get", "len"], 5000],
+    12,
+    [">", ["get", "len"], 2500],
+    13,
+    [">", ["get", "len"], 1000],
+    14,
+    True,
+]
 _ROAD_EXIT_SHIELD_LAYER_ID = "road-exit-shield"
 _ROAD_EXIT_SHIELD_ICON_IMAGE = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
 _BOUNDARY_BG_LINE_OPACITY_LAYER_IDS = {"admin-0-boundary-bg", "admin-1-boundary-bg"}
@@ -1890,6 +1911,62 @@ def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[st
         shield_layer["layout"]["icon-image"] = _road_shield_icon_match("shield", reflen)
         variants.append(shield_layer)
     return variants
+
+
+def _road_number_shield_zoom_layer_variants(
+    layer: dict[str, object],
+) -> list[dict[str, object]] | None:
+    if (
+        not _is_road_number_shield_layer_id(layer.get("id"))
+        or layer.get("type") != "symbol"
+    ):
+        return None
+    layout = layer.get("layout")
+    if not isinstance(layout, dict):
+        return None
+    if (
+        layout.get("symbol-placement")
+        != _ROAD_NUMBER_SHIELD_SYMBOL_PLACEMENT_EXPRESSION
+    ):
+        return None
+    filter_value = layer.get("filter")
+    if not _filter_contains_clause(
+        filter_value,
+        _ROAD_NUMBER_SHIELD_POINT_TO_LINE_FILTER_EXPRESSION,
+    ):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    split_zoom = _ROAD_NUMBER_SHIELD_POINT_TO_LINE_ZOOM
+    if existing_maxzoom is not None and existing_maxzoom <= split_zoom:
+        return None
+    if existing_minzoom is not None and existing_minzoom >= split_zoom:
+        return None
+
+    zoom_label = _zoom_band_label(split_zoom)
+    layer_id = str(layer.get("id") or _ROAD_NUMBER_SHIELD_LAYER_ID)
+    low_layer = copy.deepcopy(layer)
+    low_layer["id"] = f"{layer_id}-below-z{zoom_label}"
+    low_layer["maxzoom"] = split_zoom
+
+    high_layer = copy.deepcopy(layer)
+    high_layer["id"] = f"{layer_id}-z{zoom_label}-plus"
+    high_layer["minzoom"] = split_zoom
+    return [low_layer, high_layer]
+
+
+def _split_road_number_shield_zoom_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _road_number_shield_zoom_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _is_road_number_shield_layer_id(layer_id: object) -> bool:
@@ -4963,6 +5040,9 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_major_link_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_class_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_road_number_shield_zoom_layers_for_qgis(
+        style.get("layers")
+    )
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))

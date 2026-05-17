@@ -1584,17 +1584,37 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][1]["layout"]["icon-image"], exit_icon)
         self.assertEqual(result["layers"][2]["layout"]["icon-image"], other_concat_icon)
 
-    def test_road_number_shield_icon_case_expands_to_reflen_sprite_matches(self):
-        shield_icon = [
+    @staticmethod
+    def _road_number_shield_icon_case():
+        return [
             "case",
             ["has", "shield_beta"],
             [
                 "coalesce",
-                ["image", ["concat", ["get", "shield_beta"], "-", ["to-string", ["get", "reflen"]]]],
-                ["image", ["concat", "default-", ["to-string", ["get", "reflen"]]]],
+                [
+                    "image",
+                    [
+                        "concat",
+                        ["get", "shield_beta"],
+                        "-",
+                        ["to-string", ["get", "reflen"]],
+                    ],
+                ],
+                [
+                    "image",
+                    ["concat", "default-", ["to-string", ["get", "reflen"]]],
+                ],
             ],
-            ["concat", ["get", "shield"], "-", ["to-string", ["get", "reflen"]]],
+            [
+                "concat",
+                ["get", "shield"],
+                "-",
+                ["to-string", ["get", "reflen"]],
+            ],
         ]
+
+    def test_road_number_shield_icon_case_expands_to_reflen_sprite_matches(self):
+        shield_icon = self._road_number_shield_icon_case()
         style = {
             "layers": [
                 {"id": "before", "type": "background"},
@@ -1656,6 +1676,73 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(shield_layer["layout"]["icon-image"][:2], ["match", ["get", "shield"]])
         self.assertIn("rectangle-yellow-2", shield_layer["layout"]["icon-image"])
         self.assertEqual(result["layers"][-1]["layout"]["icon-image"], shield_icon)
+
+    def test_road_number_shield_point_layers_stay_visible_below_z11(self):
+        shield_icon = self._road_number_shield_icon_case()
+        point_to_line_filter = copy.deepcopy(
+            mapbox_config._ROAD_NUMBER_SHIELD_POINT_TO_LINE_FILTER_EXPRESSION
+        )
+        symbol_placement = copy.deepcopy(
+            mapbox_config._ROAD_NUMBER_SHIELD_SYMBOL_PLACEMENT_EXPRESSION
+        )
+        style = {
+            "layers": [
+                {
+                    "id": "road-number-shield",
+                    "type": "symbol",
+                    "minzoom": 6,
+                    "filter": [
+                        "all",
+                        ["has", "reflen"],
+                        ["<=", ["get", "reflen"], 6],
+                        point_to_line_filter,
+                    ],
+                    "layout": {
+                        "icon-image": shield_icon,
+                        "symbol-placement": symbol_placement,
+                        "symbol-spacing": [
+                            "interpolate",
+                            ["linear"],
+                            ["zoom"],
+                            11,
+                            400,
+                            14,
+                            600,
+                        ],
+                        "text-field": ["get", "ref"],
+                    },
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 20)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["road-number-shield-2-beta-below-z11"]
+        self.assertEqual(low_layer["maxzoom"], 11.0)
+        self.assertEqual(low_layer["layout"]["symbol-placement"], "point")
+        self.assertAlmostEqual(low_layer["layout"]["symbol-spacing"], 400.0)
+        self.assertIn(["==", ["geometry-type"], "Point"], low_layer["filter"])
+        self.assertIn(["==", ["get", "reflen"], 2], low_layer["filter"])
+        self.assertIn(["has", "shield_beta"], low_layer["filter"])
+
+        high_layer = by_id["road-number-shield-2-beta-z11-plus"]
+        self.assertEqual(high_layer["minzoom"], 11.0)
+        self.assertEqual(high_layer["layout"]["symbol-placement"], "line")
+        self.assertAlmostEqual(
+            high_layer["layout"]["symbol-spacing"],
+            466.66666666666663,
+        )
+        self.assertIn([">", ["get", "len"], 2500], high_layer["filter"])
+        self.assertIn(["==", ["get", "reflen"], 2], high_layer["filter"])
+        self.assertIn(["has", "shield_beta"], high_layer["filter"])
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                "road-number-shield-2-beta-below-z11"
+            ),
+            "road-number-shield",
+        )
 
     def test_zoom_only_icon_size_expressions_resolve_to_scalars(self):
         zoom_interpolate = ["interpolate", ["linear"], ["zoom"], 10, 0.5, 14, 1.5]
