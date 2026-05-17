@@ -587,6 +587,12 @@ _PATH_TYPE_FILTER_SPLIT_LAYER_IDS = {
     "road-path",
     "road-path-bg",
 }
+_PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
+    "road-path-z16-plus",
+    "road-path-bg-z16-plus",
+    "bridge-path-bg-z16-plus",
+)
+_PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
     "road-path-bg",
@@ -2066,6 +2072,28 @@ def _is_waterway_label_layer_id(layer_id: object) -> bool:
 
 def _is_regional_major_road_width_variant(layer_id: object) -> bool:
     return _regional_major_road_width_base_layer_id(layer_id) is not None
+
+
+def _should_sample_path_high_zoom_line_width(layer_id: object, prop: str, minzoom: object) -> bool:
+    if prop != "line-width":
+        return False
+    layer_minzoom = _numeric_zoom_bound(minzoom)
+    if layer_minzoom is None or layer_minzoom < _PATH_TYPE_FILTER_SPLIT_ZOOM:
+        return False
+    normalized = str(layer_id or "")
+    return any(
+        normalized == prefix or normalized.startswith(f"{prefix}-")
+        for prefix in _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES
+    )
+
+
+def _path_high_zoom_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
+    if not _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
+        return None
+    target_zoom = _zoom_in_layer_range(_PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM, minzoom, maxzoom)
+    if target_zoom is None:
+        return None
+    return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
 
 
 def _regional_major_road_width_scale(layer_id: object) -> float:
@@ -5103,6 +5131,13 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         props[prop] = fallback
                 elif prop in _WIDTH_PROPS:
                     width = None
+                    width = _path_high_zoom_line_width(
+                        val,
+                        layer_id,
+                        prop,
+                        layer.get("minzoom"),
+                        layer.get("maxzoom"),
+                    )
                     is_regional_road_width_variant = (
                         prop in _REGIONAL_MAJOR_ROAD_STROKE_WIDTH_PROPS
                         and _is_regional_major_road_width_variant(layer_id)
