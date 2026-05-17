@@ -615,6 +615,21 @@ _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
     "bridge-path-bg-z16-plus",
 )
 _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
+_PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
+    "bridge-pedestrian",
+    "bridge-pedestrian-case",
+    "road-pedestrian",
+    "road-pedestrian-case",
+    "tunnel-pedestrian",
+    "tunnel-pedestrian-case",
+}
+_PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
+    ("below-z16", None, 16.0, 14.0),
+    # The live z18 pedestrian case width exceeds qfit's QGIS max line width.
+    # Sampling z17 restores high-zoom prominence while preserving the case/core
+    # width relationship instead of clamping both strokes to the same value.
+    ("z16-plus", 16.0, None, 17.0),
+)
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
     "road-path-bg",
@@ -2189,6 +2204,19 @@ def _path_background_line_color_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _pedestrian_line_width_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    if normalized in _PEDESTRIAN_LINE_WIDTH_LAYER_IDS:
+        return normalized
+    for suffix, _band_minzoom, _band_maxzoom, _target_zoom in _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS:
+        band_suffix = f"-{suffix}"
+        if normalized.endswith(band_suffix):
+            base_layer_id = normalized[: -len(band_suffix)]
+            if base_layer_id in _PEDESTRIAN_LINE_WIDTH_LAYER_IDS:
+                return base_layer_id
+    return None
+
+
 def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     for suffix, _band_minzoom, _band_maxzoom in _REGIONAL_MAJOR_ROAD_WIDTH_BANDS:
@@ -2267,6 +2295,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         _landcover_fill_opacity_base_layer_id(layer_id),
         _landuse_fill_opacity_base_layer_id(layer_id),
         _path_background_line_color_base_layer_id(layer_id),
+        _pedestrian_line_width_base_layer_id(layer_id),
     ):
         if resolved_layer_id is not None:
             return resolved_layer_id
@@ -2319,6 +2348,69 @@ def _path_high_zoom_line_width(expr: object, layer_id: object, prop: str, minzoo
     if target_zoom is None:
         return None
     return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
+
+
+def _pedestrian_line_width_mm(expr: object, target_zoom: float) -> float | None:
+    width_px = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
+    if width_px is None:
+        return None
+    return max(0.1, min(width_px * _MAPBOX_PIXEL_TO_MM, _MAX_LINE_WIDTH_MM))
+
+
+def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited pedestrian widths into static QGIS zoom bands."""
+    layer_id = str(layer.get("id") or "")
+    paint = layer.get("paint")
+    if (
+        layer_id not in _PEDESTRIAN_LINE_WIDTH_LAYER_IDS
+        or layer.get("type") != "line"
+        or not isinstance(paint, dict)
+    ):
+        return None
+    line_width = paint.get("line-width")
+    if not isinstance(line_width, list):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom, target_zoom in _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS:
+        effective_zoom_band = _effective_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if effective_zoom_band is None:
+            continue
+        sampled_zoom = _zoom_in_layer_range(target_zoom, *effective_zoom_band)
+        if sampled_zoom is None:
+            continue
+        line_width_mm = _pedestrian_line_width_mm(line_width, sampled_zoom)
+        if line_width_mm is None:
+            continue
+
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        _set_zoom_bounds(variant, *effective_zoom_band)
+        variant_paint = variant["paint"]
+        assert isinstance(variant_paint, dict)
+        variant_paint["line-width"] = line_width_mm
+        variants.append(variant)
+    return variants or None
+
+
+def _split_pedestrian_line_width_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _pedestrian_line_width_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
 
 
 def _regional_major_road_width_scale(layer_id: object) -> float:
@@ -5320,6 +5412,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_pedestrian_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_label_icon_image_layers_for_qgis(style.get("layers"))

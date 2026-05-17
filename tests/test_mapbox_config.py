@@ -5007,6 +5007,117 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ],
         )
 
+    def test_pedestrian_line_width_splits_high_zoom_widths(self):
+        pedestrian_width = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            0.5,
+            18,
+            12,
+        ]
+        case_width = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            2,
+            18,
+            14.5,
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "road-pedestrian",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": copy.deepcopy(pedestrian_width),
+                    },
+                },
+                {
+                    "id": "road-pedestrian-case",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {
+                        "line-color": "hsl(60, 10%, 70%)",
+                        "line-width": copy.deepcopy(case_width),
+                    },
+                },
+                {
+                    "id": "bridge-pedestrian",
+                    "type": "line",
+                    "minzoom": 13,
+                    "paint": {"line-width": copy.deepcopy(pedestrian_width)},
+                },
+                {
+                    "id": "road-minor",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": copy.deepcopy(pedestrian_width)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-pedestrian-below-z16",
+                "road-pedestrian-z16-plus",
+                "road-pedestrian-case-below-z16",
+                "road-pedestrian-case-z16-plus",
+                "bridge-pedestrian-below-z16",
+                "bridge-pedestrian-z16-plus",
+                "road-minor",
+            ],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        pedestrian_low_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(pedestrian_width, 14.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        pedestrian_high_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(pedestrian_width, 17.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        case_high_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(case_width, 17.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+
+        self.assertAlmostEqual(
+            by_id["road-pedestrian-below-z16"]["paint"]["line-width"],
+            pedestrian_low_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["road-pedestrian-z16-plus"]["paint"]["line-width"],
+            pedestrian_high_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["road-pedestrian-case-z16-plus"]["paint"]["line-width"],
+            case_high_mm,
+        )
+        self.assertGreater(case_high_mm, pedestrian_high_mm)
+        self.assertEqual(by_id["road-pedestrian-below-z16"]["maxzoom"], 16.0)
+        self.assertEqual(by_id["road-pedestrian-z16-plus"]["minzoom"], 16.0)
+        self.assertEqual(by_id["road-pedestrian-case-below-z16"]["minzoom"], 14)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-z16-plus"),
+            "road-pedestrian",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z16-plus"),
+            "road-pedestrian-case",
+        )
+        self.assertAlmostEqual(
+            by_id["road-minor"]["paint"]["line-width"],
+            pedestrian_low_mm,
+        )
+
     def test_filter_simplification_splits_poi_filterrank_filter_by_zoom_band(self):
         class_rank_match = [
             "match",
