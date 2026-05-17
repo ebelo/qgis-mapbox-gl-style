@@ -705,6 +705,29 @@ _NAME_EN_FALLBACK_TEXT_FIELD_EXPRESSION = [
 ]
 _SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
 _SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
+_SETTLEMENT_MINOR_SYMBOLRANK_FILTER_ZOOM_STEP = [
+    "step",
+    ["zoom"],
+    [">", ["get", "symbolrank"], 6],
+    4,
+    [">=", ["get", "symbolrank"], 7],
+    6,
+    [">=", ["get", "symbolrank"], 8],
+    7,
+    [">=", ["get", "symbolrank"], 10],
+    10,
+    [">=", ["get", "symbolrank"], 11],
+    11,
+    [">=", ["get", "symbolrank"], 13],
+    12,
+    [">=", ["get", "symbolrank"], 15],
+]
+_SETTLEMENT_MINOR_TEXT_FILTER_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, object], ...] = (
+    ("z8-to-z10", 8.0, 10.0, [">=", ["get", "symbolrank"], 10]),
+    ("z10-to-z11", 10.0, 11.0, [">=", ["get", "symbolrank"], 11]),
+    ("z11-to-z12", 11.0, 12.0, [">=", ["get", "symbolrank"], 13]),
+    ("z12-plus", 12.0, None, [">=", ["get", "symbolrank"], 15]),
+)
 _GATE_LABEL_ICON_IMAGE_EXPRESSION = ["match", ["get", "type"], "gate", "gate", "lift_gate", "lift-gate", ""]
 _GATE_LABEL_ICON_IMAGE_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("gate", ["==", ["get", "type"], "gate"], "gate"),
@@ -2677,6 +2700,44 @@ def _set_settlement_high_zoom_text_layout(layer: dict[str, object]) -> None:
         layout["text-justify"] = "center"
 
 
+def _settlement_minor_symbolrank_step_filter_clause_index(filter_value: object) -> int | None:
+    if not isinstance(filter_value, list) or filter_value[:1] != ["all"]:
+        return None
+    for index, clause in enumerate(filter_value[1:], start=1):
+        if clause == _SETTLEMENT_MINOR_SYMBOLRANK_FILTER_ZOOM_STEP:
+            return index
+    return None
+
+
+def _settlement_minor_text_filter_zoom_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    if base_mapbox_style_layer_id_for_qfit(layer.get("id")) != _SETTLEMENT_MINOR_LABEL_LAYER_ID:
+        return None
+    if layer.get("type") != "symbol":
+        return None
+    layout = layer.get("layout")
+    if not isinstance(layout, dict) or "icon-image" in layout:
+        return None
+    clause_index = _settlement_minor_symbolrank_step_filter_clause_index(layer.get("filter"))
+    if clause_index is None:
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom, symbolrank_filter in _SETTLEMENT_MINOR_TEXT_FILTER_ZOOM_BANDS:
+        if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
+            continue
+        variant = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
+        variant["id"] = f"{_SETTLEMENT_MINOR_LABEL_LAYER_ID}-{suffix}"
+        variant["filter"] = _filter_with_replaced_clause(
+            variant.get("filter"),
+            clause_index,
+            symbolrank_filter,
+        )
+        variants.append(variant)
+    return variants or None
+
+
 def _settlement_major_low_zoom_text_justify_variants(layer: dict[str, object]) -> list[dict[str, object]]:
     layout = layer.get("layout")
     if not isinstance(layout, dict) or layout.get("text-justify") != _SETTLEMENT_DOT_TEXT_JUSTIFY_LOW_ZOOM:
@@ -2725,7 +2786,7 @@ def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[s
         text_layer = _apply_zoom_band_bounds(layer, _SETTLEMENT_DOT_ICON_SPLIT_ZOOM, None)
         text_layer["id"] = f"{layer_id}-z8-plus"
         _set_settlement_high_zoom_text_layout(text_layer)
-        variants.append(text_layer)
+        variants.extend(_settlement_minor_text_filter_zoom_variants(text_layer) or [text_layer])
 
     if not variants:
         return None

@@ -2312,6 +2312,84 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             "settlement-minor-label",
         )
 
+    def test_filter_simplification_splits_minor_settlement_text_filter_by_zoom(self):
+        base_filter = ["<=", ["get", "filterrank"], 3]
+        symbolrank_step_filter = [
+            "step",
+            ["zoom"],
+            [">", ["get", "symbolrank"], 6],
+            4,
+            [">=", ["get", "symbolrank"], 7],
+            6,
+            [">=", ["get", "symbolrank"], 8],
+            7,
+            [">=", ["get", "symbolrank"], 10],
+            10,
+            [">=", ["get", "symbolrank"], 11],
+            11,
+            [">=", ["get", "symbolrank"], 13],
+            12,
+            [">=", ["get", "symbolrank"], 15],
+        ]
+        text_field = ["coalesce", ["get", "name_en"], ["get", "name"]]
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-minor-label",
+                    "type": "symbol",
+                    "minzoom": 8,
+                    "maxzoom": 13,
+                    "filter": ["all", base_filter, symbolrank_step_filter],
+                    "layout": {
+                        **self._settlement_dot_icon_layout(),
+                        "text-field": copy.deepcopy(text_field),
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            list(by_id),
+            [
+                "settlement-minor-label-z8-to-z10-name-en",
+                "settlement-minor-label-z8-to-z10-name",
+                "settlement-minor-label-z10-to-z11-name-en",
+                "settlement-minor-label-z10-to-z11-name",
+                "settlement-minor-label-z11-to-z12-name-en",
+                "settlement-minor-label-z11-to-z12-name",
+                "settlement-minor-label-z12-plus-name-en",
+                "settlement-minor-label-z12-plus-name",
+            ],
+        )
+        town_filter = ["match", ["get", "type"], ["town"], True, False]
+        expected_bands = {
+            "z8-to-z10": (8, 10.0, [">=", ["get", "symbolrank"], 10]),
+            "z10-to-z11": (10.0, 11.0, [">=", ["get", "symbolrank"], 11]),
+            "z11-to-z12": (11.0, 12.0, [">=", ["get", "symbolrank"], 13]),
+            "z12-plus": (12.0, 13, [">=", ["get", "symbolrank"], 15]),
+        }
+        for suffix, (minzoom, maxzoom, rank_filter) in expected_bands.items():
+            name_en_layer = by_id[f"settlement-minor-label-{suffix}-name-en"]
+            name_layer = by_id[f"settlement-minor-label-{suffix}-name"]
+            self.assertEqual(name_en_layer["minzoom"], minzoom)
+            self.assertEqual(name_en_layer["maxzoom"], maxzoom)
+            self.assertEqual(name_en_layer["filter"][1][2], rank_filter)
+            self.assertEqual(name_layer["filter"][1][2], rank_filter)
+            self.assertEqual(name_en_layer["filter"][1][-1], ["has", "name_en"])
+            self.assertEqual(name_layer["filter"][1][-1], ["!", ["has", "name_en"]])
+            self.assertEqual(name_en_layer["filter"][-1], town_filter)
+            self.assertEqual(name_layer["filter"][-1], town_filter)
+            self.assertEqual(name_en_layer["layout"]["text-field"], ["get", "name_en"])
+            self.assertEqual(name_layer["layout"]["text-field"], ["get", "name"])
+            self.assertNotIn("icon-image", name_en_layer["layout"])
+            self.assertEqual(
+                mapbox_config.base_mapbox_style_layer_id_for_qfit(name_en_layer["id"]),
+                "settlement-minor-label",
+            )
+
     def test_settlement_symbol_sort_key_removal_is_exact_shape_gated(self):
         style = {
             "layers": [
