@@ -465,6 +465,197 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertNotIn("settlement-subdivision-label` |", markdown)
         self.assertNotIn("hidden-label` |", markdown)
 
+    def test_build_style_audit_reports_line_label_repetition_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "road-label",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "minzoom": 10,
+                        "filter": ["all", ["==", ["get", "class"], "primary"], ["has", "name"]],
+                        "layout": {
+                            "symbol-placement": "line",
+                            "symbol-spacing": ["step", ["zoom"], 150, 14, 250],
+                            "text-field": ["get", "name"],
+                            "text-size": 10,
+                        },
+                    },
+                    {
+                        "id": "waterway-label",
+                        "type": "symbol",
+                        "source-layer": "natural_label",
+                        "minzoom": 13,
+                        "filter": ["==", ["get", "class"], "river"],
+                        "layout": {
+                            "symbol-placement": "line",
+                            "symbol-spacing": ["interpolate", ["linear", 1], ["zoom"], 15, 250, 17, 400],
+                            "text-field": ["get", "name"],
+                            "text-max-angle": 30,
+                            "text-size": 10,
+                        },
+                    },
+                    {
+                        "id": "road-shield",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "minzoom": 6,
+                        "filter": ["all", ["has", "reflen"], ["<=", ["get", "reflen"], 6]],
+                        "layout": {
+                            "symbol-placement": ["step", ["zoom"], "point", 11, "line"],
+                            "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 10, 120, 16, 400],
+                            "text-field": ["get", "ref"],
+                        },
+                    },
+                    {
+                        "id": "road-shield-low-zoom",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "maxzoom": 10,
+                        "filter": ["all", ["has", "reflen"], ["<=", ["get", "reflen"], 6]],
+                        "layout": {
+                            "symbol-placement": ["step", ["zoom"], "point", 11, "line"],
+                            "symbol-spacing": ["interpolate", ["linear"], ["zoom"], 10, 120, 16, 400],
+                            "text-field": ["get", "ref"],
+                        },
+                    },
+                    {
+                        "id": "poi-label",
+                        "type": "symbol",
+                        "source-layer": "poi_label",
+                        "layout": {"text-field": ["get", "name"]},
+                    },
+                    {
+                        "id": "hidden-line-label",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "layout": {"symbol-placement": "line", "text-field": ["get", "name"], "visibility": "none"},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["line_label_repetition_candidates"]
+        self.assertEqual(
+            [candidate["layer"] for candidate in candidates],
+            ["road-label", "road-shield", "waterway-label"],
+        )
+        road_candidate, shield_candidate, waterway_candidate = candidates
+        self.assertEqual(road_candidate["group"], "roads/trails")
+        self.assertEqual(road_candidate["source_layer"], "road")
+        self.assertEqual(road_candidate["zoom_band"], "z≥10")
+        self.assertEqual(road_candidate["filter_operator_signature"], "==, all, get, has")
+        self.assertEqual(
+            road_candidate["line_label_control_properties"],
+            ["filter", "layout.symbol-placement", "layout.symbol-spacing", "layout.text-field", "layout.text-size"],
+        )
+        self.assertEqual(road_candidate["qfit_simplified_control_properties"], [])
+        self.assertEqual(road_candidate["qgis_dependent_control_properties"], ["filter", "layout.symbol-spacing"])
+        self.assertEqual(shield_candidate["group"], "roads/trails")
+        self.assertEqual(shield_candidate["source_layer"], "road")
+        self.assertEqual(shield_candidate["zoom_band"], "z≥6")
+        self.assertEqual(shield_candidate["filter_operator_signature"], "<=, all, get, has")
+        self.assertEqual(
+            shield_candidate["line_label_control_properties"],
+            ["filter", "layout.symbol-placement", "layout.symbol-spacing", "layout.text-field"],
+        )
+        self.assertEqual(shield_candidate["qfit_simplified_control_properties"], [])
+        self.assertEqual(
+            shield_candidate["qgis_dependent_control_properties"],
+            ["filter", "layout.symbol-placement", "layout.symbol-spacing"],
+        )
+        self.assertEqual(waterway_candidate["group"], "water")
+        self.assertEqual(waterway_candidate["source_layer"], "natural_label")
+        self.assertEqual(waterway_candidate["qfit_simplified_control_properties"], ["layout.symbol-spacing"])
+        self.assertEqual(waterway_candidate["qgis_dependent_control_properties"], ["filter"])
+        self.assertEqual(
+            audit["summary"]["line_label_repetition_candidates_by_layer_group"],
+            [{"group": "roads/trails", "count": 2}, {"group": "water", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["line_label_repetition_controls_by_property"],
+            [
+                {"property": "filter", "count": 3},
+                {"property": "layout.symbol-placement", "count": 3},
+                {"property": "layout.symbol-spacing", "count": 3},
+                {"property": "layout.text-field", "count": 3},
+                {"property": "layout.text-size", "count": 2},
+                {"property": "layout.text-max-angle", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["line_label_repetition_simplified_by_property"],
+            [{"property": "layout.symbol-spacing", "count": 1}],
+        )
+        self.assertEqual(
+            audit["summary"]["line_label_repetition_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 3},
+                {"property": "layout.symbol-spacing", "count": 2},
+                {"property": "layout.symbol-placement", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Line label repetition candidates", markdown)
+        self.assertIn("QGIS may repeat labels per feature segment", markdown)
+        self.assertIn("#### Line label repetition controls by property", markdown)
+        self.assertIn("#### Line label repetition controls simplified/substituted by qfit", markdown)
+        self.assertIn("#### Line label repetition QGIS-dependent controls", markdown)
+        self.assertIn("| `roads/trails` | `road-label` | `road` | z≥10 | `==, all, get, has` |", markdown)
+        self.assertIn("| `roads/trails` | `road-shield` | `road` | z≥6 | `<=, all, get, has` |", markdown)
+        self.assertIn("| `water` | `waterway-label` | `natural_label` | z≥13 | `==, get` |", markdown)
+        self.assertIn("poi-label` |", markdown)
+        line_label_section = markdown.split("### Line label repetition candidates", 1)[1].split(
+            "### Road/trail hierarchy candidates",
+            1,
+        )[0]
+        self.assertNotIn("poi-label` |", line_label_section)
+        self.assertNotIn("hidden-line-label` |", line_label_section)
+        self.assertNotIn("road-shield-low-zoom` |", line_label_section)
+
+    def test_symbol_placement_may_be_line_handles_expression_outputs(self):
+        cases = [
+            ("literal-line", "line", True),
+            ("literal-point", "point", False),
+            ("literal-expression", ["literal", "line"], True),
+            ("step-line-output", ["step", ["zoom"], "point", 11, "line"], True),
+            ("step-point-only", ["step", ["zoom"], "point", 11, "point"], False),
+            ("data-driven-step-line-output", ["step", ["get", "rank"], "point", 3, "line"], True),
+            ("interpolate-line-output", ["interpolate", ["linear"], ["zoom"], 10, "point", 12, "line"], True),
+            ("case-line-output", ["case", [">=", ["zoom"], 11], "line", "point"], True),
+            ("case-line-default", ["case", [">=", ["zoom"], 11], "point", "line"], True),
+            ("match-line-output", ["match", ["get", "class"], "primary", "line", "point"], True),
+            ("match-line-default", ["match", ["get", "class"], "primary", "point", "line"], True),
+            ("coalesce-line-output", ["coalesce", ["get", "placement"], "line"], True),
+            ("let-line-output", ["let", "placement", "point", "line"], True),
+            ("get-expression", ["get", "placement"], False),
+        ]
+
+        for label, value, expected in cases:
+            with self.subTest(label=label):
+                self.assertIs(mapbox_outdoors_style_audit._symbol_placement_may_be_line(value), expected)
+
+        zoom_step_placement = ["step", ["zoom"], "point", 11, "line"]
+        self.assertIs(
+            mapbox_outdoors_style_audit._symbol_placement_may_be_line(
+                zoom_step_placement,
+                min_zoom=0,
+                max_zoom=10,
+            ),
+            False,
+        )
+        self.assertIs(
+            mapbox_outdoors_style_audit._symbol_placement_may_be_line(
+                zoom_step_placement,
+                min_zoom=10,
+                max_zoom=12,
+            ),
+            True,
+        )
+
     def test_build_style_audit_reports_road_trail_hierarchy_candidates(self):
         audit = build_style_audit(
             {
