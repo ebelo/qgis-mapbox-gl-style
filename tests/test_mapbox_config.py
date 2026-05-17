@@ -3936,38 +3936,74 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = simplify_mapbox_style_expressions(style)
 
         by_id = {layer["id"]: layer for layer in result["layers"]}
+        expected_base_ids = [
+            "water-line-label-ocean",
+            "water-line-label-sea-bay",
+            "water-line-label-other",
+            "water-point-label-ocean",
+            "water-point-label-sea",
+            "water-point-label-bay",
+            "water-point-label-water",
+            "water-point-label-other",
+        ]
         self.assertEqual(
             list(by_id),
             [
-                "water-line-label-ocean",
-                "water-line-label-sea-bay",
-                "water-line-label-other",
-                "water-point-label-ocean",
-                "water-point-label-sea",
-                "water-point-label-bay",
-                "water-point-label-water",
-                "water-point-label-other",
+                f"{base_id}-{name_suffix}"
+                for base_id in expected_base_ids
+                for name_suffix in ("name-en", "name")
             ],
         )
-        self.assertEqual(by_id["water-line-label-ocean"]["layout"]["text-letter-spacing"], 0.25)
-        self.assertEqual(by_id["water-line-label-sea-bay"]["layout"]["text-letter-spacing"], 0.15)
-        self.assertEqual(by_id["water-line-label-other"]["layout"]["text-letter-spacing"], 0.0)
-        self.assertEqual(by_id["water-point-label-ocean"]["layout"]["text-letter-spacing"], 0.25)
-        self.assertEqual(by_id["water-point-label-ocean"]["layout"]["text-max-width"], 4.0)
-        self.assertEqual(by_id["water-point-label-sea"]["layout"]["text-letter-spacing"], 0.15)
-        self.assertEqual(by_id["water-point-label-sea"]["layout"]["text-max-width"], 5.0)
-        self.assertEqual(by_id["water-point-label-bay"]["layout"]["text-letter-spacing"], 0.15)
-        self.assertEqual(by_id["water-point-label-bay"]["layout"]["text-max-width"], 7.0)
-        self.assertEqual(by_id["water-point-label-water"]["layout"]["text-letter-spacing"], 0.01)
-        self.assertEqual(by_id["water-point-label-water"]["layout"]["text-max-width"], 7.0)
-        self.assertEqual(by_id["water-point-label-other"]["layout"]["text-letter-spacing"], 0.01)
-        self.assertEqual(by_id["water-point-label-other"]["layout"]["text-max-width"], 10.0)
-        self.assertEqual(by_id["water-line-label-ocean"]["layout"]["text-size"], 11.0)
-        self.assertEqual(by_id["water-point-label-ocean"]["layout"]["text-size"], 12.0)
-        self.assertIn(["match", ["get", "class"], ["ocean"], True, False], by_id["water-point-label-ocean"]["filter"])
+
+        def assert_name_field_variants(base_id):
+            name_en_layer = by_id[f"{base_id}-name-en"]
+            name_layer = by_id[f"{base_id}-name"]
+            self.assertEqual(name_en_layer["layout"]["text-field"], ["get", "name_en"])
+            self.assertEqual(name_layer["layout"]["text-field"], ["get", "name"])
+            self.assertEqual(name_en_layer["filter"][:-1], name_layer["filter"][:-1])
+            self.assertEqual(name_en_layer["filter"][-1], ["has", "name_en"])
+            self.assertEqual(name_layer["filter"][-1], ["!", ["has", "name_en"]])
+            return name_en_layer
+
+        water_line_ocean = assert_name_field_variants("water-line-label-ocean")
+        water_line_sea_bay = assert_name_field_variants("water-line-label-sea-bay")
+        water_line_other = assert_name_field_variants("water-line-label-other")
+        water_point_ocean = assert_name_field_variants("water-point-label-ocean")
+        water_point_sea = assert_name_field_variants("water-point-label-sea")
+        water_point_bay = assert_name_field_variants("water-point-label-bay")
+        water_point_water = assert_name_field_variants("water-point-label-water")
+        water_point_other = assert_name_field_variants("water-point-label-other")
+
+        self.assertEqual(water_line_ocean["layout"]["text-letter-spacing"], 0.25)
+        self.assertEqual(water_line_sea_bay["layout"]["text-letter-spacing"], 0.15)
+        self.assertEqual(water_line_other["layout"]["text-letter-spacing"], 0.0)
+        self.assertEqual(water_point_ocean["layout"]["text-letter-spacing"], 0.25)
+        self.assertEqual(water_point_ocean["layout"]["text-max-width"], 4.0)
+        self.assertEqual(water_point_sea["layout"]["text-letter-spacing"], 0.15)
+        self.assertEqual(water_point_sea["layout"]["text-max-width"], 5.0)
+        self.assertEqual(water_point_bay["layout"]["text-letter-spacing"], 0.15)
+        self.assertEqual(water_point_bay["layout"]["text-max-width"], 7.0)
+        self.assertEqual(water_point_water["layout"]["text-letter-spacing"], 0.01)
+        self.assertEqual(water_point_water["layout"]["text-max-width"], 7.0)
+        self.assertEqual(water_point_other["layout"]["text-letter-spacing"], 0.01)
+        self.assertEqual(water_point_other["layout"]["text-max-width"], 10.0)
+        self.assertEqual(water_line_ocean["layout"]["text-size"], 11.0)
+        self.assertEqual(water_point_ocean["layout"]["text-size"], 12.0)
+        self.assertIn(
+            ["match", ["get", "class"], ["ocean"], True, False],
+            water_point_ocean["filter"],
+        )
         self.assertIn(
             ["match", ["get", "class"], ["ocean", "sea", "bay", "water"], False, True],
-            by_id["water-point-label-other"]["filter"],
+            water_point_other["filter"],
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("water-line-label-ocean-name-en"),
+            "water-line-label",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("water-point-label-water-name"),
+            "water-point-label",
         )
 
     def test_water_label_typography_split_is_exact_shape_gated(self):
@@ -3999,11 +4035,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = mapbox_config._split_water_label_typography_layers_for_qgis(mixed_layers)
 
         self.assertEqual(result[0], "not-a-layer")
-        self.assertEqual(result[1]["id"], "water-point-label-ocean")
-        self.assertEqual(result[2]["id"], "water-point-label-sea")
-        self.assertEqual(result[3]["id"], "water-point-label-bay")
-        self.assertEqual(result[4]["id"], "water-point-label-water")
-        self.assertEqual(result[5]["id"], "water-point-label-other")
+        self.assertEqual(result[1]["id"], "water-point-label-ocean-name-en")
+        self.assertEqual(result[2]["id"], "water-point-label-ocean-name")
+        self.assertEqual(result[3]["id"], "water-point-label-sea-name-en")
+        self.assertEqual(result[4]["id"], "water-point-label-sea-name")
+        self.assertEqual(result[5]["id"], "water-point-label-bay-name-en")
+        self.assertEqual(result[6]["id"], "water-point-label-bay-name")
+        self.assertEqual(result[7]["id"], "water-point-label-water-name-en")
+        self.assertEqual(result[8]["id"], "water-point-label-water-name")
+        self.assertEqual(result[9]["id"], "water-point-label-other-name-en")
+        self.assertEqual(result[10]["id"], "water-point-label-other-name")
 
     def _contour_line_layer(self, line_opacity=None, minzoom=11):
         if line_opacity is None:

@@ -2671,8 +2671,10 @@ def _country_label_low_zoom_text_justify_variants(
     return variants
 
 
-def _country_label_name_field_variants(
+def _name_en_fallback_text_field_variants(
     layer: dict[str, object],
+    *,
+    fallback_layer_id: str,
 ) -> list[dict[str, object]]:
     layout = layer.get("layout")
     if not isinstance(layout, dict):
@@ -2680,7 +2682,7 @@ def _country_label_name_field_variants(
     if layout.get("text-field") != _NAME_EN_FALLBACK_TEXT_FIELD_EXPRESSION:
         return [layer]
 
-    layer_id = str(layer.get("id") or _COUNTRY_LABEL_LAYER_ID)
+    layer_id = str(layer.get("id") or fallback_layer_id)
     name_en_layer = copy.deepcopy(layer)
     name_en_layer["id"] = f"{layer_id}-name-en"
     name_en_layer["filter"] = _with_additional_filter_clauses(
@@ -2739,7 +2741,12 @@ def _country_label_layout_layer_variants(layer: dict[str, object]) -> list[dict[
         return None
     field_variants: list[dict[str, object]] = []
     for variant in variants:
-        field_variants.extend(_country_label_name_field_variants(variant))
+        field_variants.extend(
+            _name_en_fallback_text_field_variants(
+                variant,
+                fallback_layer_id=_COUNTRY_LABEL_LAYER_ID,
+            )
+        )
     return field_variants
 
 
@@ -3876,7 +3883,15 @@ def _water_line_label_typography_layer_variants(layer: dict[str, object]) -> lis
         assert isinstance(variant_layout, dict)
         variant_layout["text-letter-spacing"] = text_letter_spacing
         variants.append(variant)
-    return variants
+    field_variants: list[dict[str, object]] = []
+    for variant in variants:
+        field_variants.extend(
+            _name_en_fallback_text_field_variants(
+                variant,
+                fallback_layer_id=_WATER_LINE_LABEL_LAYER_ID,
+            )
+        )
+    return field_variants
 
 
 def _water_point_label_typography_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
@@ -3902,7 +3917,15 @@ def _water_point_label_typography_layer_variants(layer: dict[str, object]) -> li
         variant_layout["text-letter-spacing"] = text_letter_spacing
         variant_layout["text-max-width"] = text_max_width
         variants.append(variant)
-    return variants
+    field_variants: list[dict[str, object]] = []
+    for variant in variants:
+        field_variants.extend(
+            _name_en_fallback_text_field_variants(
+                variant,
+                fallback_layer_id=_WATER_POINT_LABEL_LAYER_ID,
+            )
+        )
+    return field_variants
 
 
 def _water_label_typography_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
