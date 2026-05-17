@@ -68,6 +68,7 @@ _ICON_SPRITE_CANDIDATES_BY_ICON_IMAGE_OPERATOR_SIGNATURE_KEY = (
 _ICON_SPRITE_SIMPLIFIED_BY_PROPERTY_KEY = "icon_sprite_simplified_by_property"
 _ICON_SPRITE_QGIS_DEPENDENT_BY_PROPERTY_KEY = "icon_sprite_qgis_dependent_by_property"
 _ICON_SPRITE_CONTROL_PROPERTIES_KEY = "icon_sprite_control_properties"
+_ROAD_SHIELD_SPRITE_COVERAGE_KEY = "road_shield_sprite_coverage"
 _ROUTE_OVERLAY_CANDIDATES_KEY = "route_overlay_candidates"
 _ROUTE_OVERLAY_CANDIDATES_BY_LAYER_GROUP_KEY = "route_overlay_candidates_by_layer_group"
 _ROUTE_OVERLAY_CANDIDATES_BY_SOURCE_LAYER_KEY = "route_overlay_candidates_by_source_layer"
@@ -205,6 +206,11 @@ _ROUTE_OVERLAY_CONTROL_PROPERTIES = tuple(
         + _ROUTE_OVERLAY_TEXT_PAINT_PROPERTIES
     )
 )
+_ROAD_NUMBER_SHIELD_SPRITE_NAME_RE = re.compile(
+    r"^(?:default|rectangle-(?:blue|green|red|white|yellow)|"
+    r"[a-z]{2}-(?:highway|main|motorway|national-highway)(?:-toll)?)-[2-6]$"
+)
+_MOTORWAY_EXIT_SPRITE_NAME_RE = re.compile(r"^motorway-exit-[1-9]$")
 _TERRAIN_LANDCOVER_LAYER_TYPES = frozenset({"fill", "line"})
 _TERRAIN_LANDCOVER_CONTROL_PROPERTIES = (
     "layout.line-cap",
@@ -261,6 +267,7 @@ if str(PACKAGE_PARENT) not in sys.path:
 from qfit.mapbox_config import (  # noqa: E402
     MapboxSpriteResources,
     QGIS_TEXT_FONT_FALLBACK,
+    _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN,
     base_mapbox_style_layer_id_for_qfit,
     fetch_mapbox_style_definition,
     fetch_mapbox_sprite_resources,
@@ -1068,6 +1075,79 @@ def _icon_image_operator_signature(layer: dict[str, object]) -> str:
     if not isinstance(layout, dict):
         return _NO_OPERATOR_SIGNATURE
     return _operator_signature(layout.get("icon-image"))
+
+
+def _configured_road_number_shield_sprite_outputs() -> list[str]:
+    return sorted(
+        f"{base}-{reflen}"
+        for reflen, bases in _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN.items()
+        for base in bases
+    )
+
+
+def _match_expression_string_outputs(expr: object) -> list[str]:
+    if not isinstance(expr, list) or len(expr) < 4 or expr[0] != "match":
+        return []
+    outputs = [expr[index + 1] for index in range(2, len(expr) - 1, 2)]
+    outputs.append(expr[-1])
+    return sorted({str(output) for output in outputs if isinstance(output, str)})
+
+
+def _qfit_road_number_shield_sprite_outputs(simplified_layers: list[dict[str, object]]) -> list[str]:
+    outputs: set[str] = set()
+    for layer in simplified_layers:
+        if base_mapbox_style_layer_id_for_qfit(layer.get("id")) != "road-number-shield":
+            continue
+        layout = layer.get("layout")
+        if not isinstance(layout, dict):
+            continue
+        outputs.update(_match_expression_string_outputs(layout.get("icon-image")))
+    return sorted(outputs)
+
+
+def _live_road_number_like_shield_sprite_outputs(sprite_definitions: dict[str, object]) -> list[str]:
+    return sorted(
+        name
+        for name in sprite_definitions
+        if _ROAD_NUMBER_SHIELD_SPRITE_NAME_RE.match(str(name))
+    )
+
+
+def _live_motorway_exit_sprite_outputs(sprite_definitions: dict[str, object]) -> list[str]:
+    return sorted(
+        name
+        for name in sprite_definitions
+        if _MOTORWAY_EXIT_SPRITE_NAME_RE.match(str(name))
+    )
+
+
+def _road_shield_sprite_coverage(
+    *,
+    simplified_layers: list[dict[str, object]],
+    sprite_resources: MapboxSpriteResources | None,
+) -> dict[str, object]:
+    configured = set(_configured_road_number_shield_sprite_outputs())
+    generated = set(_qfit_road_number_shield_sprite_outputs(simplified_layers))
+    coverage: dict[str, object] = {
+        "sprite_context_available": sprite_resources is not None,
+        "configured_road_number_sprite_count": len(configured),
+        "qfit_generated_road_number_sprite_count": len(generated),
+    }
+    if sprite_resources is None:
+        return coverage
+
+    live_sprites = set(sprite_resources.definitions)
+    live_road_number_like = set(_live_road_number_like_shield_sprite_outputs(sprite_resources.definitions))
+    coverage.update(
+        {
+            "sprite_definition_count": len(sprite_resources.definitions),
+            "configured_road_number_sprites_missing_from_sprite_sheet": sorted(configured - live_sprites),
+            "qfit_generated_road_number_sprites_missing_from_sprite_sheet": sorted(generated - live_sprites),
+            "live_road_number_like_sprites_not_configured": sorted(live_road_number_like - configured),
+            "live_motorway_exit_sprites": _live_motorway_exit_sprite_outputs(sprite_resources.definitions),
+        }
+    )
+    return coverage
 
 
 def _route_overlay_filter_search_text(layer: dict[str, object]) -> str:
@@ -3337,6 +3417,10 @@ def build_style_audit(
     water_flow_candidates = _water_flow_candidate_rows(layers)
     icon_sprite_candidates = _icon_sprite_candidate_rows(layers)
     route_overlay_candidates = _route_overlay_candidate_rows(layers)
+    road_shield_sprite_coverage = _road_shield_sprite_coverage(
+        simplified_layers=simplified_layers,
+        sprite_resources=resolved_config.sprite_resources,
+    )
     split_landuse_layers = _qfit_split_variant_audit_layers_for_original_id(
         original_layers,
         simplified_layers,
@@ -3483,6 +3567,7 @@ def build_style_audit(
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
             ),
             _ICON_SPRITE_CANDIDATES_KEY: icon_sprite_candidates,
+            _ROAD_SHIELD_SPRITE_COVERAGE_KEY: road_shield_sprite_coverage,
             _ROUTE_OVERLAY_CANDIDATES_BY_LAYER_GROUP_KEY: _count_rows_by_key(
                 route_overlay_candidates,
                 "group",
@@ -5419,6 +5504,70 @@ def _markdown_icon_sprite_summary(summary: dict[str, object]) -> list[str]:
     ]
 
 
+def _markdown_sprite_name_table(
+    heading: str,
+    names: list[object],
+    *,
+    empty: str = "None.",
+) -> list[str]:
+    lines = [f"#### {heading}", ""]
+    if not names:
+        return [*lines, empty, ""]
+    lines.extend(["| Sprite |", "| --- |"])
+    for name in names:
+        lines.append(f"| {html.escape(str(name))} |")
+    lines.append("")
+    return lines
+
+
+def _markdown_road_shield_sprite_coverage(summary: dict[str, object]) -> list[str]:
+    coverage = summary.get(_ROAD_SHIELD_SPRITE_COVERAGE_KEY)
+    if not isinstance(coverage, dict):
+        return []
+    if (
+        coverage.get("sprite_context_available") is not True
+        and coverage.get("qfit_generated_road_number_sprite_count", 0) == 0
+    ):
+        return []
+
+    lines = [
+        "### Road shield sprite coverage",
+        "",
+        (
+            "Compares live sprite sheet entries that look like road-number shield sprites with "
+            "qfit's finite QGIS road-number shield matches."
+        ),
+        "",
+        f"- Sprite context available: {_markdown_yes_no(coverage.get('sprite_context_available'))}",
+        f"- Live sprite definitions: {coverage.get('sprite_definition_count', 'unknown')}",
+        f"- qfit configured road-number shield outputs: {coverage.get('configured_road_number_sprite_count', 0)}",
+        f"- qfit generated road-number shield outputs: {coverage.get('qfit_generated_road_number_sprite_count', 0)}",
+        "",
+    ]
+    if coverage.get("sprite_context_available") is not True:
+        return [*lines, "Sprite coverage lists require live sprite resources.", ""]
+
+    return [
+        *lines,
+        *_markdown_sprite_name_table(
+            "Configured road-number sprites missing from the sprite sheet",
+            list(coverage.get("configured_road_number_sprites_missing_from_sprite_sheet") or []),
+        ),
+        *_markdown_sprite_name_table(
+            "Generated road-number sprites missing from the sprite sheet",
+            list(coverage.get("qfit_generated_road_number_sprites_missing_from_sprite_sheet") or []),
+        ),
+        *_markdown_sprite_name_table(
+            "Live road-number-like sprites not configured by qfit",
+            list(coverage.get("live_road_number_like_sprites_not_configured") or []),
+        ),
+        *_markdown_sprite_name_table(
+            "Live motorway-exit sprites handled separately",
+            list(coverage.get("live_motorway_exit_sprites") or []),
+        ),
+    ]
+
+
 def _markdown_route_overlay_summary(summary: dict[str, object]) -> list[str]:
     return [
         "### Route overlay candidates",
@@ -5526,6 +5675,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_terrain_landcover_summary(summary),
         *_markdown_water_flow_summary(summary),
         *_markdown_icon_sprite_summary(summary),
+        *_markdown_road_shield_sprite_coverage(summary),
         *_markdown_route_overlay_summary(summary),
         *_markdown_airport_special_landuse_summary(summary),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),

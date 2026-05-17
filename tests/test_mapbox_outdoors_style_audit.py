@@ -1471,6 +1471,96 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("filter<br>layout.icon-image<br>layout.symbol-placement", markdown)
         self.assertNotIn("hidden-icon` |", markdown)
 
+    @staticmethod
+    def _road_number_shield_icon_case():
+        return [
+            "case",
+            ["has", "shield_beta"],
+            [
+                "coalesce",
+                [
+                    "image",
+                    [
+                        "concat",
+                        ["get", "shield_beta"],
+                        "-",
+                        ["to-string", ["get", "reflen"]],
+                    ],
+                ],
+                [
+                    "image",
+                    ["concat", "default-", ["to-string", ["get", "reflen"]]],
+                ],
+            ],
+            [
+                "concat",
+                ["get", "shield"],
+                "-",
+                ["to-string", ["get", "reflen"]],
+            ],
+        ]
+
+    def test_build_style_audit_reports_road_shield_sprite_coverage(self):
+        configured_sprites = {
+            f"{base}-{reflen}"
+            for reflen, bases in mapbox_config._ROAD_SHIELD_SPRITE_BASES_BY_REFLEN.items()
+            for base in bases
+        }
+        sprite_definitions = {
+            name: {"x": 0, "y": 0, "width": 8, "height": 8}
+            for name in configured_sprites - {"default-6"}
+        }
+        sprite_definitions["zz-main-2"] = {"x": 0, "y": 0, "width": 8, "height": 8}
+        sprite_definitions["motorway-exit-1"] = {"x": 0, "y": 0, "width": 8, "height": 8}
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "road-number-shield",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "filter": ["all", ["has", "reflen"], ["<=", ["get", "reflen"], 6]],
+                        "layout": {"icon-image": self._road_number_shield_icon_case()},
+                    },
+                ],
+            },
+            config=StyleAuditConfig(
+                sprite_resources=MapboxSpriteResources(
+                    definitions=sprite_definitions,
+                    image_bytes=b"png-bytes",
+                )
+            ),
+        )
+
+        coverage = audit["summary"]["road_shield_sprite_coverage"]
+        self.assertTrue(coverage["sprite_context_available"])
+        self.assertEqual(
+            coverage["configured_road_number_sprite_count"],
+            len(configured_sprites),
+        )
+        self.assertEqual(
+            coverage["qfit_generated_road_number_sprite_count"],
+            len(configured_sprites),
+        )
+        self.assertEqual(
+            coverage["configured_road_number_sprites_missing_from_sprite_sheet"],
+            ["default-6"],
+        )
+        self.assertEqual(
+            coverage["qfit_generated_road_number_sprites_missing_from_sprite_sheet"],
+            ["default-6"],
+        )
+        self.assertEqual(coverage["live_road_number_like_sprites_not_configured"], ["zz-main-2"])
+        self.assertEqual(coverage["live_motorway_exit_sprites"], ["motorway-exit-1"])
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Road shield sprite coverage", markdown)
+        self.assertIn("#### Configured road-number sprites missing from the sprite sheet", markdown)
+        self.assertIn("| default-6 |", markdown)
+        self.assertIn("| zz-main-2 |", markdown)
+        self.assertIn("#### Live motorway-exit sprites handled separately", markdown)
+
     def test_build_style_audit_reports_route_overlay_candidates(self):
         audit = build_style_audit(
             {
