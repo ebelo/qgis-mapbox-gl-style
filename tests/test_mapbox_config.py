@@ -3452,6 +3452,55 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[1]["id"], "aeroway-line-runway-z9-to-z14")
         self.assertEqual(result[2]["id"], "aeroway-line-other-z9-to-z14")
 
+    def test_aeroway_polygon_fill_uses_qgis_contrast_color(self):
+        style = {
+            "layers": [
+                {
+                    "id": "aeroway-polygon",
+                    "type": "fill",
+                    "minzoom": 11,
+                    "source-layer": "aeroway",
+                    "filter": [
+                        "all",
+                        ["match", ["get", "type"], ["runway", "taxiway", "helipad"], True, False],
+                        ["==", ["geometry-type"], "Polygon"],
+                    ],
+                    "paint": {
+                        "fill-color": mapbox_config._AEROWAY_POLYGON_FILL_COLOR,
+                        "fill-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        aeroway_polygon = result["layers"][0]
+        self.assertEqual(
+            aeroway_polygon["paint"]["fill-color"],
+            mapbox_config._AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR,
+        )
+        self.assertAlmostEqual(aeroway_polygon["paint"]["fill-opacity"], 1.0)
+
+    def test_aeroway_polygon_fill_leaves_non_matching_color_unchanged(self):
+        style = {
+            "layers": [
+                {
+                    "id": "aeroway-polygon",
+                    "type": "fill",
+                    "source-layer": "aeroway",
+                    "paint": {
+                        "fill-color": "hsl(230, 36%, 72%)",
+                        "fill-opacity": 1.0,
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["fill-color"], "hsl(230, 36%, 72%)")
+
     def test_waterway_line_width_splits_classes_and_zoom_bands(self):
         style = {
             "layers": [
