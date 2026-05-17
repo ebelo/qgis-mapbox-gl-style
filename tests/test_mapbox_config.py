@@ -4323,34 +4323,55 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 self.assertEqual(by_id[f"{layer_id}-{band}-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
                 self.assertEqual(by_id[f"{layer_id}-{band}-outdoor"]["paint"]["line-color"], "hsl(35, 80%, 48%)")
                 self.assertEqual(by_id[f"{layer_id}-{band}-remaining"]["paint"]["line-color"], "hsl(60, 1%, 64%)")
-            self.assertEqual(by_id[f"{layer_id}-below-z16-piste"]["maxzoom"], 16.0)
-            self.assertEqual(by_id[f"{layer_id}-z16-plus-piste"]["minzoom"], 16.0)
+            for suffix in ("piste", "outdoor", "remaining"):
+                self.assertEqual(by_id[f"{layer_id}-below-z16-{suffix}"]["maxzoom"], 16.0)
+                self.assertEqual(by_id[f"{layer_id}-z16-plus-{suffix}"]["minzoom"], 16.0)
         self.assertEqual(by_id["road-path-bg-below-z16-piste"]["minzoom"], 12)
         self.assertEqual(by_id["bridge-path-bg-below-z16-piste"]["minzoom"], 14)
+        expected_below_z16_outdoor_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+            [
+                "match",
+                ["get", "type"],
+                ["mountain_bike", "hiking", "trail", "cycleway", "footway", "path", "bridleway"],
+                True,
+                False,
+            ],
+        ]
+        expected_z16_plus_outdoor_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            ["!=", ["get", "type"], "steps"],
+            ["match", ["get", "structure"], ["none", "ford"], True, False],
+            ["==", ["geometry-type"], "LineString"],
+            [
+                "match",
+                ["get", "type"],
+                ["mountain_bike", "hiking", "trail", "cycleway", "footway", "path", "bridleway"],
+                True,
+                False,
+            ],
+        ]
         self.assertEqual(
             by_id["road-path-bg-below-z16-outdoor"]["filter"],
-            [
-                "all",
-                ["==", ["get", "class"], "path"],
-                ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
-                ["match", ["get", "structure"], ["none", "ford"], True, False],
-                ["==", ["geometry-type"], "LineString"],
-                [
-                    "match",
-                    ["get", "type"],
-                    ["mountain_bike", "hiking", "trail", "cycleway", "footway", "path", "bridleway"],
-                    True,
-                    False,
-                ],
-            ],
+            expected_below_z16_outdoor_filter,
         )
+        self.assertEqual(by_id["road-path-bg-z16-plus-outdoor"]["filter"], expected_z16_plus_outdoor_filter)
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("road-path-bg-below-z16-outdoor"),
             "road-path-bg",
         )
         self.assertEqual(
             by_id["bridge-path-bg-below-z16-outdoor"]["filter"],
-            by_id["road-path-bg-below-z16-outdoor"]["filter"],
+            expected_below_z16_outdoor_filter,
+        )
+        self.assertEqual(
+            by_id["bridge-path-bg-z16-plus-outdoor"]["filter"],
+            expected_z16_plus_outdoor_filter,
         )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("bridge-path-bg-below-z16-outdoor"),
