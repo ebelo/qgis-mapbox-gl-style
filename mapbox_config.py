@@ -332,6 +332,9 @@ _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN = {
         "tr-motorway",
     ),
 }
+_ROAD_SHIELD_LITERAL_ICON_TEXT_COLORS = {
+    "ch-motorway": "hsl(0, 0%, 100%)",
+}
 
 _BACKGROUND_PRESETS = {
     "Outdoor": {
@@ -1746,9 +1749,14 @@ def _is_road_number_shield_icon_image(expr: object) -> bool:
     )
 
 
-def _road_shield_icon_match(field_name: str, reflen: int) -> list[object]:
+def _road_shield_icon_match(
+    field_name: str,
+    reflen: int,
+    excluded_sprite_bases: Iterable[str] = (),
+) -> list[object]:
     fallback = f"default-{reflen}"
-    values = _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[reflen]
+    excluded = set(excluded_sprite_bases)
+    values = tuple(value for value in _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[reflen] if value not in excluded)
     return [
         "match",
         ["get", field_name],
@@ -1768,6 +1776,61 @@ def _road_shield_reflen_range_filter(max_reflen: int) -> list[object]:
         *(value for reflen in range(1, max_reflen + 1) for value in (reflen, True, str(reflen), True)),
         False,
     ]
+
+
+def _road_shield_literal_icon_bases(reflen: int) -> tuple[str, ...]:
+    return tuple(
+        sprite_base
+        for sprite_base in _ROAD_SHIELD_LITERAL_ICON_TEXT_COLORS
+        if sprite_base in _ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[reflen]
+    )
+
+
+def _road_shield_literal_icon_filter(field_name: str, sprite_base: str) -> list[object]:
+    return ["==", ["get", field_name], sprite_base]
+
+
+def _road_shield_remaining_icon_filter(field_name: str, sprite_bases: tuple[str, ...]) -> list[object]:
+    return ["match", ["get", field_name], list(sprite_bases), False, True]
+
+
+def _road_shield_literal_icon_layer_variants(
+    layer: dict[str, object],
+    *,
+    field_name: str,
+    reflen: int,
+) -> list[dict[str, object]]:
+    literal_bases = _road_shield_literal_icon_bases(reflen)
+    if not literal_bases:
+        return [layer]
+
+    variants: list[dict[str, object]] = []
+    for sprite_base in literal_bases:
+        literal_layer = copy.deepcopy(layer)
+        literal_layer["id"] = f"{layer['id']}-{sprite_base}-icon"
+        literal_layer["filter"] = _with_additional_filter_clauses(
+            layer.get("filter"),
+            _road_shield_literal_icon_filter(field_name, sprite_base),
+        )
+        literal_layer["layout"]["icon-image"] = f"{sprite_base}-{reflen}"
+        paint = literal_layer.setdefault("paint", {})
+        if isinstance(paint, dict):
+            paint["text-color"] = _ROAD_SHIELD_LITERAL_ICON_TEXT_COLORS[sprite_base]
+        variants.append(literal_layer)
+
+    remaining_layer = copy.deepcopy(layer)
+    remaining_layer["id"] = f"{layer['id']}-remaining-icons"
+    remaining_layer["filter"] = _with_additional_filter_clauses(
+        layer.get("filter"),
+        _road_shield_remaining_icon_filter(field_name, literal_bases),
+    )
+    remaining_layer["layout"]["icon-image"] = _road_shield_icon_match(
+        field_name,
+        reflen,
+        literal_bases,
+    )
+    variants.append(remaining_layer)
+    return variants
 
 
 def _road_shield_filter_with_string_reflen_range(filter_value: object) -> object:
@@ -2142,7 +2205,13 @@ def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[st
             ["has", "shield_beta"],
         )
         beta_layer["layout"]["icon-image"] = _road_shield_icon_match("shield_beta", reflen)
-        variants.append(beta_layer)
+        variants.extend(
+            _road_shield_literal_icon_layer_variants(
+                beta_layer,
+                field_name="shield_beta",
+                reflen=reflen,
+            )
+        )
 
         shield_layer = copy.deepcopy(layer)
         shield_layer["id"] = f"{_ROAD_NUMBER_SHIELD_LAYER_ID}-{reflen}"
@@ -2152,7 +2221,13 @@ def _road_number_shield_layer_variants(layer: dict[str, object]) -> list[dict[st
             ["!", ["has", "shield_beta"]],
         )
         shield_layer["layout"]["icon-image"] = _road_shield_icon_match("shield", reflen)
-        variants.append(shield_layer)
+        variants.extend(
+            _road_shield_literal_icon_layer_variants(
+                shield_layer,
+                field_name="shield",
+                reflen=reflen,
+            )
+        )
     return variants
 
 

@@ -1093,6 +1093,12 @@ def _match_expression_string_outputs(expr: object) -> list[str]:
     return sorted({str(output) for output in outputs if isinstance(output, str)})
 
 
+def _icon_image_string_outputs(expr: object) -> list[str]:
+    if isinstance(expr, str) and expr:
+        return [expr]
+    return _match_expression_string_outputs(expr)
+
+
 def _qfit_road_number_shield_sprite_outputs(simplified_layers: list[dict[str, object]]) -> list[str]:
     outputs: set[str] = set()
     for layer in simplified_layers:
@@ -1101,7 +1107,7 @@ def _qfit_road_number_shield_sprite_outputs(simplified_layers: list[dict[str, ob
         layout = layer.get("layout")
         if not isinstance(layout, dict):
             continue
-        outputs.update(_match_expression_string_outputs(layout.get("icon-image")))
+        outputs.update(_icon_image_string_outputs(layout.get("icon-image")))
     return sorted(outputs)
 
 
