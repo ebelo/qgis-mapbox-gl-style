@@ -1050,6 +1050,12 @@ _LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
     for suffix, _class_filter, _band_minzoom, _band_maxzoom, residential in _LANDUSE_FILL_OPACITY_VARIANTS
     if not residential and suffix not in _LANDUSE_CLASS_FILL_COLOR_EXCLUDED_OPACITY_SUFFIXES
 }
+_LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY = 0.66
+# QGIS renders the full-opacity airport landuse wash too strongly over
+# aeroway polygons in the Geneva z14 comparison. Keep this override narrow.
+_LANDUSE_CLASS_FILL_OPACITY_OVERRIDES = {
+    (f"{_LANDUSE_LAYER_ID}-other-z10-plus", "airport"): _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
+}
 _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("wood", ["match", ["get", "class"], "wood", True, False], _LANDUSE_WOOD_FILL_COLOR),
     ("scrub", ["match", ["get", "class"], "scrub", True, False], _LANDUSE_SCRUB_FILL_COLOR),
@@ -3082,6 +3088,9 @@ def _landuse_class_fill_color_layer_variants(layer: dict[str, object]) -> list[d
         variant_paint = variant["paint"]
         assert isinstance(variant_paint, dict)
         variant_paint["fill-color"] = fill_color
+        fill_opacity = _LANDUSE_CLASS_FILL_OPACITY_OVERRIDES.get((layer_id, suffix))
+        if fill_opacity is not None:
+            variant_paint["fill-opacity"] = fill_opacity
         variants.append(variant)
     return variants or None
 

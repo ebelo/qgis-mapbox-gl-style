@@ -2733,6 +2733,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(park_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
         self.assertEqual(airport_high["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
         self.assertEqual(remaining_high["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
+        self.assertAlmostEqual(airport_mid["paint"]["fill-opacity"], 0.6)
+        self.assertAlmostEqual(
+            airport_high["paint"]["fill-opacity"],
+            mapbox_config._LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
+        )
+        self.assertAlmostEqual(remaining_high["paint"]["fill-opacity"], 1.0)
         self.assertEqual(park_mid["minzoom"], 8.0)
         self.assertEqual(park_mid["maxzoom"], 10.0)
         self.assertEqual(airport_high["minzoom"], 10.0)
