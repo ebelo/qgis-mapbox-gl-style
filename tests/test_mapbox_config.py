@@ -2681,7 +2681,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             )
             self.assertEqual(layer["paint"]["fill-color"], "hsl(60, 22%, 72%)")
 
-    def test_landuse_fill_color_splits_visible_natural_park_and_airport_classes(self):
+    def test_landuse_fill_color_splits_visible_stable_class_colors(self):
         layer = self._landuse_layer()
         layer["paint"]["fill-color"] = copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION)
         style = {"layers": [layer]}
@@ -2693,16 +2693,21 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
             {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
         )
-        self.assertEqual(len(result["layers"]), 24)
+        self.assertEqual(len(result["layers"]), 34)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
-        natural_colors = {
-            "wood": mapbox_config._LANDUSE_WOOD_FILL_COLOR,
-            "scrub": mapbox_config._LANDUSE_SCRUB_FILL_COLOR,
-            "agriculture": mapbox_config._LANDUSE_AGRICULTURE_FILL_COLOR,
-            "grass": mapbox_config._LANDUSE_AGRICULTURE_FILL_COLOR,
-            "glacier": mapbox_config._LANDUSE_GLACIER_FILL_COLOR,
-            "sand": mapbox_config._LANDUSE_SAND_FILL_COLOR,
+        stable_class_variants = {
+            "wood": (mapbox_config._LANDUSE_WOOD_FILL_COLOR, "wood"),
+            "scrub": (mapbox_config._LANDUSE_SCRUB_FILL_COLOR, "scrub"),
+            "agriculture": (mapbox_config._LANDUSE_AGRICULTURE_FILL_COLOR, "agriculture"),
+            "grass": (mapbox_config._LANDUSE_AGRICULTURE_FILL_COLOR, "grass"),
+            "glacier": (mapbox_config._LANDUSE_GLACIER_FILL_COLOR, "glacier"),
+            "sand": (mapbox_config._LANDUSE_SAND_FILL_COLOR, "sand"),
+            "cemetery": (mapbox_config._LANDUSE_CEMETERY_FILL_COLOR, "cemetery"),
+            "hospital": (mapbox_config._LANDUSE_HOSPITAL_FILL_COLOR, "hospital"),
+            "pitch": (mapbox_config._LANDUSE_PITCH_FILL_COLOR, "pitch"),
+            "school": (mapbox_config._LANDUSE_SCHOOL_FILL_COLOR, "school"),
+            "industrial": (mapbox_config._LANDUSE_INDUSTRIAL_FILL_COLOR, ["facility", "industrial"]),
         }
         park_special_mid = by_id["landuse-other-z8-to-z10-park-special"]
         park_mid = by_id["landuse-other-z8-to-z10-park"]
@@ -2713,12 +2718,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         airport_high = by_id["landuse-other-z10-plus-airport"]
         remaining_high = by_id["landuse-other-z10-plus-remaining"]
         for band in ("z8-to-z10", "z10-plus"):
-            for class_name, fill_color in natural_colors.items():
+            for class_name, (fill_color, class_filter) in stable_class_variants.items():
                 natural_layer = by_id[f"landuse-other-{band}-{class_name}"]
                 self.assertEqual(natural_layer["paint"]["fill-color"], fill_color)
                 self.assertEqual(
                     natural_layer["filter"][-1],
-                    ["match", ["get", "class"], class_name, True, False],
+                    ["match", ["get", "class"], class_filter, True, False],
                 )
         self.assertEqual(park_special_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
         self.assertEqual(park_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
@@ -2762,7 +2767,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             [
                 "match",
                 ["get", "class"],
-                ["wood", "scrub", "agriculture", "grass", "glacier", "sand", "park", "airport"],
+                [
+                    "wood",
+                    "scrub",
+                    "agriculture",
+                    "grass",
+                    "glacier",
+                    "sand",
+                    "park",
+                    "airport",
+                    "cemetery",
+                    "hospital",
+                    "pitch",
+                    "school",
+                    "facility",
+                    "industrial",
+                ],
                 False,
                 True,
             ],
@@ -2853,6 +2873,11 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "landuse-other-z10-plus-park-special",
                 "landuse-other-z10-plus-park",
                 "landuse-other-z10-plus-airport",
+                "landuse-other-z10-plus-cemetery",
+                "landuse-other-z10-plus-hospital",
+                "landuse-other-z10-plus-pitch",
+                "landuse-other-z10-plus-school",
+                "landuse-other-z10-plus-industrial",
                 "landuse-other-z10-plus-remaining",
             ],
         )
