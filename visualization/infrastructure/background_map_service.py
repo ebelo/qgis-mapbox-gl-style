@@ -29,6 +29,17 @@ from ...mapbox_config import (
 _WORKING_CRS = "EPSG:3857"
 
 
+def _label_style_mapbox_layer_id(style) -> str:
+    for accessor in ("styleName", "layerName"):
+        try:
+            layer_id = getattr(style, accessor)()
+        except AttributeError:
+            continue
+        if isinstance(layer_id, str) and layer_id:
+            return base_mapbox_style_layer_id_for_qfit(layer_id)
+    return ""
+
+
 class BackgroundMapService:
     """Manages Mapbox background tile layers (raster and vector) in the QGIS project.
 
@@ -175,8 +186,10 @@ class BackgroundMapService:
         try:
             from qgis.core import QgsProperty  # noqa: PLC0415
 
-            for style in labeling.styles():
-                layer_name = base_mapbox_style_layer_id_for_qfit(style.layerName())
+            styles = list(labeling.styles())
+            changed = False
+            for style in styles:
+                layer_name = _label_style_mapbox_layer_id(style)
                 priority = _LAYER_PRIORITIES.get(layer_name)
                 if priority is None:
                     continue
@@ -194,6 +207,9 @@ class BackgroundMapService:
                     )
                     settings.setDataDefinedProperties(dd_props)
                 style.setLabelSettings(settings)
+                changed = True
+            if changed:
+                labeling.setStyles(styles)
         except (RuntimeError, AttributeError):
             logger.debug("Mapbox GL style application skipped", exc_info=True)
 
