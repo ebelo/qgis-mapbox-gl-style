@@ -4400,6 +4400,59 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[3]["id"], "bridge-path-bg-below-z16-outdoor")
         self.assertEqual(result[4]["id"], "bridge-path-bg-below-z16-remaining")
 
+    def test_high_zoom_path_line_width_uses_split_zoom_band(self):
+        path_filter = [
+            "all",
+            ["==", ["get", "class"], "path"],
+            [
+                "step",
+                ["zoom"],
+                ["match", ["get", "type"], ["steps", "sidewalk", "crossing"], False, True],
+                16,
+                ["!=", ["get", "type"], "steps"],
+            ],
+            ["==", ["geometry-type"], "LineString"],
+        ]
+        line_width = ["interpolate", ["linear"], ["zoom"], 12, 1, 16, 4, 18, 7]
+        style = {
+            "layers": [
+                {
+                    "id": "road-path",
+                    "type": "line",
+                    "minzoom": 12,
+                    "filter": copy.deepcopy(path_filter),
+                    "paint": {"line-width": copy.deepcopy(line_width)},
+                },
+                {
+                    "id": "road-path-bg",
+                    "type": "line",
+                    "minzoom": 12,
+                    "filter": copy.deepcopy(path_filter),
+                    "paint": {
+                        "line-width": copy.deepcopy(line_width),
+                        "line-color": copy.deepcopy(mapbox_config._PATH_BACKGROUND_LINE_COLOR_EXPRESSION),
+                    },
+                },
+                {
+                    "id": "road-minor",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {"line-width": copy.deepcopy(line_width)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_width_mm = 1 * mapbox_config._MAPBOX_PIXEL_TO_MM
+        high_width_mm = 7 * mapbox_config._MAPBOX_PIXEL_TO_MM
+        self.assertAlmostEqual(by_id["road-path-below-z16"]["paint"]["line-width"], low_width_mm)
+        self.assertAlmostEqual(by_id["road-path-z16-plus"]["paint"]["line-width"], high_width_mm)
+        self.assertAlmostEqual(by_id["road-path-bg-below-z16-outdoor"]["paint"]["line-width"], low_width_mm)
+        self.assertAlmostEqual(by_id["road-path-bg-z16-plus-outdoor"]["paint"]["line-width"], high_width_mm)
+        self.assertAlmostEqual(by_id["road-minor"]["paint"]["line-width"], low_width_mm)
+
     def test_filter_simplification_replaces_path_filter_without_split_outside_threshold(self):
         path_filter = [
             "all",
