@@ -1712,7 +1712,16 @@ def _road_exit_shield_icon_fallback(layer_id: object, expr: object) -> object:
     return [
         "match",
         ["get", "reflen"],
-        *(item for reflen in range(1, 10) for item in (reflen, f"motorway-exit-{reflen}")),
+        *(
+            item
+            for reflen in range(1, 10)
+            for item in (
+                reflen,
+                f"motorway-exit-{reflen}",
+                str(reflen),
+                f"motorway-exit-{reflen}",
+            )
+        ),
         "motorway-exit-1",
     ]
 
