@@ -159,6 +159,7 @@ class ComparisonPaths:
     qgis_png: Path
     diff_png: Path
     metrics_json: Path
+    qgis_preprocessed_style_json: Path
     manifest_json: Path
 
 
@@ -181,6 +182,7 @@ class ComparisonResult:
     browser_captured: bool
     qgis_captured: bool
     diff_captured: bool
+    qgis_preprocessed_style_captured: bool = False
     image_metrics: dict[str, object] = dataclasses.field(default_factory=dict)
     style_json_path: str | None = None
 
@@ -205,6 +207,7 @@ def build_comparison_paths(*, run_dir: Path) -> ComparisonPaths:
         qgis_png=run_dir / "qgis-vector-render.png",
         diff_png=run_dir / "mapbox-gl-vs-qgis-diff.png",
         metrics_json=run_dir / "metrics.json",
+        qgis_preprocessed_style_json=run_dir / "qgis-preprocessed-style.json",
         manifest_json=run_dir / "manifest.json",
     )
 
@@ -279,12 +282,14 @@ def _redacted_manifest(
             "qgis_vector_render": str(result.paths.qgis_png),
             "diff": str(result.paths.diff_png),
             "metrics": str(result.paths.metrics_json),
+            "qgis_preprocessed_style": str(result.paths.qgis_preprocessed_style_json),
         },
         "style_json_path": result.style_json_path,
         "captured": {
             "browser_reference": result.browser_captured,
             "qgis_vector_render": result.qgis_captured,
             "diff": result.diff_captured,
+            "qgis_preprocessed_style": result.qgis_preprocessed_style_captured,
         },
         "metrics": result.image_metrics,
         "notes": [
@@ -497,6 +502,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     token: str,
     output_path: Path,
     style_definition: dict[str, object] | None = None,
+    qgis_preprocessed_style_path: Path | None = None,
 ) -> None:
     _ensure_package_parent_on_path()
     _ensure_headless_qt_platform()
@@ -540,6 +546,11 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
             else fetch_mapbox_style_definition(token, camera.style_owner, camera.style_id)
         )
         simplified_style = simplify_mapbox_style_expressions(resolved_style_definition)
+        if qgis_preprocessed_style_path is not None:
+            qgis_preprocessed_style_path.write_text(
+                redact_sensitive_text(json.dumps(simplified_style, indent=2), token) + "\n",
+                encoding="utf-8",
+            )
         sprite_resources = None
         try:
             sprite_resources = fetch_mapbox_sprite_resources(
@@ -656,6 +667,7 @@ def run_comparison(
     browser_captured = False
     qgis_captured = False
     diff_captured = False
+    qgis_preprocessed_style_captured = False
     image_metrics: ImageMetrics = {}
     style_definition = (
         load_style_definition(config.style_json_path)
@@ -679,8 +691,10 @@ def run_comparison(
             token=config.token,
             output_path=paths.qgis_png,
             style_definition=style_definition,
+            qgis_preprocessed_style_path=paths.qgis_preprocessed_style_json,
         )
         qgis_captured = True
+        qgis_preprocessed_style_captured = paths.qgis_preprocessed_style_json.exists()
 
     if config.diff and browser_captured and qgis_captured:
         image_metrics = diff_builder(
@@ -696,6 +710,7 @@ def run_comparison(
         browser_captured=browser_captured,
         qgis_captured=qgis_captured,
         diff_captured=diff_captured,
+        qgis_preprocessed_style_captured=qgis_preprocessed_style_captured,
         image_metrics=image_metrics,
         style_json_path=str(config.style_json_path) if config.style_json_path is not None else None,
     )

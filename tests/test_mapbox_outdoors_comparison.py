@@ -97,6 +97,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(paths.qgis_png, Path("/tmp/run/qgis-vector-render.png"))
         self.assertEqual(paths.diff_png, Path("/tmp/run/mapbox-gl-vs-qgis-diff.png"))
         self.assertEqual(paths.metrics_json, Path("/tmp/run/metrics.json"))
+        self.assertEqual(paths.qgis_preprocessed_style_json, Path("/tmp/run/qgis-preprocessed-style.json"))
         self.assertEqual(paths.manifest_json, Path("/tmp/run/manifest.json"))
 
     def test_resolve_token_prefers_argument_then_environment(self):
@@ -306,10 +307,13 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             def renderedImage(self):
                 return FakeRenderedImage()
 
+        captured_style = {}
+
         class FakeBackgroundMapService:
             def _apply_mapbox_gl_style(self, layer, style_definition, *, sprite_resources=None):
                 layer.applied_style = style_definition
                 layer.sprite_resources = sprite_resources
+                captured_style["style_definition"] = style_definition
 
         fake_core = types.ModuleType("qgis.core")
         fake_core.QgsApplication = FakeQgsApplication
@@ -330,7 +334,10 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             raise AssertionError("style should be loaded from the provided style JSON")
 
         fake_mapbox_config.fetch_mapbox_style_definition = fail_fetch_style_definition
-        fake_mapbox_config.simplify_mapbox_style_expressions = lambda style: style
+        fake_mapbox_config.simplify_mapbox_style_expressions = lambda style: {
+            **style,
+            "metadata": {"qfit-preprocessed": True, "token": "test-mapbox-token"},
+        }
         fake_mapbox_config.extract_mapbox_vector_source_ids = lambda _style: ["mapbox.mapbox-streets-v8"]
         fake_mapbox_config.build_vector_tile_layer_uri = lambda *_args, **_kwargs: "vector://style"
         fake_mapbox_config.fetch_mapbox_sprite_resources = lambda *_args, **_kwargs: "sprite-resources"
@@ -351,15 +358,23 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             },
         ):
             output_path = Path(tmpdir) / "qgis-vector.png"
+            preprocessed_style_path = Path(tmpdir) / "qgis-preprocessed-style.json"
 
             render_qgis_vector(
                 camera=CAMERAS["valais-geneva-outdoors"],
                 token="test-mapbox-token",
                 output_path=output_path,
                 style_definition=SAMPLE_STYLE,
+                qgis_preprocessed_style_path=preprocessed_style_path,
             )
 
             self.assertEqual(output_path.read_bytes(), PNG_PLACEHOLDER)
+            preprocessed_style_text = preprocessed_style_path.read_text(encoding="utf-8")
+            preprocessed_style = json.loads(preprocessed_style_text)
+
+            self.assertTrue(captured_style["style_definition"]["metadata"]["qfit-preprocessed"])
+            self.assertTrue(preprocessed_style["metadata"]["qfit-preprocessed"])
+            self.assertNotIn("test-mapbox-token", preprocessed_style_text)
 
     def test_headless_qt_platform_defaults_to_offscreen_without_overriding_callers(self):
         from qfit.validation import mapbox_outdoors_comparison
@@ -426,8 +441,9 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         def fake_browser_renderer(*, output_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
 
-        def fake_qgis_renderer(*, output_path, **_kwargs):
+        def fake_qgis_renderer(*, output_path, qgis_preprocessed_style_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
+            qgis_preprocessed_style_path.write_text(json.dumps(SAMPLE_STYLE), encoding="utf-8")
 
         def fake_diff_builder(*, output_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
@@ -449,18 +465,23 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             manifest_text = result.paths.manifest_json.read_text(encoding="utf-8")
             manifest = json.loads(manifest_text)
             metrics = json.loads(result.paths.metrics_json.read_text(encoding="utf-8"))
+            preprocessed_style = json.loads(result.paths.qgis_preprocessed_style_json.read_text(encoding="utf-8"))
 
         self.assertTrue(result.browser_captured)
         self.assertTrue(result.qgis_captured)
         self.assertTrue(result.diff_captured)
+        self.assertTrue(result.qgis_preprocessed_style_captured)
         self.assertNotIn("test-mapbox-token", manifest_text)
         self.assertEqual(manifest["camera"]["name"], "valais-geneva-outdoors")
         self.assertEqual(manifest["style_url"], "mapbox://styles/mapbox/outdoors-v12")
         self.assertTrue(manifest["captured"]["browser_reference"])
         self.assertTrue(manifest["captured"]["qgis_vector_render"])
         self.assertTrue(manifest["captured"]["diff"])
+        self.assertTrue(manifest["captured"]["qgis_preprocessed_style"])
+        self.assertTrue(manifest["outputs"]["qgis_preprocessed_style"].endswith("qgis-preprocessed-style.json"))
         self.assertEqual(manifest["metrics"]["changed_pixel_ratio"], 0.25)
         self.assertEqual(metrics["changed_pixel_ratio"], 0.25)
+        self.assertEqual(preprocessed_style, SAMPLE_STYLE)
 
     def test_run_comparison_passes_downloaded_style_json_to_renderers(self):
         captured_style_definitions = []
