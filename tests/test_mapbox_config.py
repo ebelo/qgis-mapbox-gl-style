@@ -3482,6 +3482,25 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertAlmostEqual(aeroway_polygon["paint"]["fill-opacity"], 1.0)
 
+    def test_aeroway_polygon_fill_leaves_non_matching_color_unchanged(self):
+        style = {
+            "layers": [
+                {
+                    "id": "aeroway-polygon",
+                    "type": "fill",
+                    "source-layer": "aeroway",
+                    "paint": {
+                        "fill-color": "hsl(230, 36%, 72%)",
+                        "fill-opacity": 1.0,
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["paint"]["fill-color"], "hsl(230, 36%, 72%)")
+
     def test_waterway_line_width_splits_classes_and_zoom_bands(self):
         style = {
             "layers": [
