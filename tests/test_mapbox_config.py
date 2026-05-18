@@ -3996,7 +3996,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "water-shadow-z13-to-z16")
         self.assertEqual(result[3]["id"], "water-shadow-z16-plus")
 
-    def _aeroway_line_layer(self, line_width=None, line_color="hsl(230, 24%, 87%)"):
+    def _aeroway_line_layer(self, line_width=None, line_color=mapbox_config._AEROWAY_LINE_COLOR):
         if line_width is None:
             line_width = copy.deepcopy(mapbox_config._AEROWAY_LINE_WIDTH_EXPRESSION)
         return {
@@ -4049,6 +4049,11 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(mid_other["paint"]["line-width"], 1.5640310125536836)
         self.assertAlmostEqual(high_runway["paint"]["line-width"], 3.0)
         self.assertAlmostEqual(high_other["paint"]["line-width"], 2.3487964134195747)
+        for layer in by_id.values():
+            self.assertEqual(
+                layer["paint"]["line-color"],
+                mapbox_config._AEROWAY_LINE_QGIS_CONTRAST_COLOR,
+            )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("aeroway-line-other-z16-plus"),
             "aeroway-line",
@@ -4066,8 +4071,17 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         for layer in result["layers"]:
             self.assertEqual(
                 layer["paint"]["line-color"],
-                mapbox_config._AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR,
+                mapbox_config._AEROWAY_LINE_QGIS_CONTRAST_COLOR,
             )
+
+    def test_aeroway_line_color_leaves_non_matching_color_unchanged(self):
+        line_color = "hsl(230, 24%, 87%)"
+        style = {"layers": [self._aeroway_line_layer(line_color=line_color)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        for layer in result["layers"]:
+            self.assertEqual(layer["paint"]["line-color"], line_color)
 
     def test_aeroway_line_width_is_not_split_when_shape_changes(self):
         line_width = ["interpolate", ["linear"], ["zoom"], 9, 0.5, 18, 20]
