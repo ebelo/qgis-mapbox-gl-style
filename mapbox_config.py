@@ -650,6 +650,7 @@ _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
 _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
 _PATH_LOW_ZOOM_LINE_WIDTH_LAYER_PREFIXES = ("road-path-below-z16",)
 _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 14.0
+_PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.5
 _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "bridge-pedestrian",
     "bridge-pedestrian-case",
@@ -2558,16 +2559,25 @@ def _should_sample_path_low_zoom_line_width(layer_id: object, prop: str, maxzoom
 
 
 def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
+    high_zoom_path_width = False
     if _should_sample_path_low_zoom_line_width(layer_id, prop, maxzoom):
         target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
     elif _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
         target_sample_zoom = _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+        high_zoom_path_width = True
     else:
         return None
     target_zoom = _zoom_in_layer_range(target_sample_zoom, minzoom, maxzoom)
     if target_zoom is None:
         return None
-    return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
+    width = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
+    if (
+        width is not None
+        and high_zoom_path_width
+        and _path_background_line_color_base_layer_id(layer_id) is not None
+    ):
+        width *= _PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
+    return width
 
 
 def _line_width_mm_at_zoom(expr: object, target_zoom: float) -> float | None:

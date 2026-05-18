@@ -5247,12 +5247,22 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
         high_width_mm = 7 * mapbox_config._MAPBOX_PIXEL_TO_MM
+        high_background_width_mm = min(
+            high_width_mm * mapbox_config._PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE,
+            mapbox_config._MAX_LINE_WIDTH_MM,
+        )
         self.assertAlmostEqual(by_id["road-path-below-z16"]["paint"]["line-width"], path_core_low_width_mm)
         self.assertAlmostEqual(by_id["road-path"]["paint"]["line-width"], path_core_low_width_mm)
         self.assertAlmostEqual(by_id["road-path-z16-plus"]["paint"]["line-width"], high_width_mm)
         self.assertAlmostEqual(by_id["road-path-bg-below-z16-outdoor"]["paint"]["line-width"], low_width_mm)
-        self.assertAlmostEqual(by_id["road-path-bg-z16-plus-outdoor"]["paint"]["line-width"], high_width_mm)
-        self.assertAlmostEqual(by_id["bridge-path-bg-z16-plus-outdoor"]["paint"]["line-width"], high_width_mm)
+        self.assertAlmostEqual(
+            by_id["road-path-bg-z16-plus-outdoor"]["paint"]["line-width"],
+            high_background_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-path-bg-z16-plus-outdoor"]["paint"]["line-width"],
+            high_background_width_mm,
+        )
         self.assertAlmostEqual(by_id["road-minor"]["paint"]["line-width"], low_width_mm)
 
     def test_high_zoom_path_line_width_clamps_to_split_layer_maxzoom(self):
