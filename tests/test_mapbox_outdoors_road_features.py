@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -13,10 +13,13 @@ from tests import _path  # noqa: F401
 from qfit.validation import mapbox_outdoors_road_features as road_features
 from qfit.validation.mapbox_outdoors_road_features import (
     RoadFeatureConfig,
+    build_all_camera_road_feature_paths,
+    build_all_camera_summary_markdown,
     build_parser,
     build_road_feature_paths,
     build_run_directory,
     build_summary_markdown,
+    collect_all_camera_road_feature_report,
     collect_road_feature_report,
     is_path_line_candidate,
     is_pedestrian_line_candidate,
@@ -25,6 +28,7 @@ from qfit.validation.mapbox_outdoors_road_features import (
     main,
     resolve_mapbox_token,
     road_tile_record,
+    write_all_camera_report,
     write_report,
 )
 
@@ -322,6 +326,48 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                 tile_decoder=lambda _payload: {"road": []},
             )
 
+    def test_collect_all_camera_road_feature_report_aggregates_camera_counts(self):
+        generated = dt.datetime(2026, 5, 18, 15, 40, tzinfo=dt.timezone.utc)
+        style_calls = []
+
+        def style_fetcher(_token, _owner, _style_id):
+            style_calls.append((_token, _owner, _style_id))
+            return {"sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}}}
+
+        def decoder(_payload):
+            return {
+                "road": [
+                    _feature("Polygon", {"class": "pedestrian", "type": "pedestrian", "structure": "none"}),
+                    _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none"}),
+                    _feature("LineString", {"class": "path", "type": "footway", "structure": "none"}),
+                ]
+            }
+
+        report = collect_all_camera_road_feature_report(
+            RoadFeatureConfig(token="token", output_root=Path("/tmp"), tile_zoom=0, now=generated),
+            camera_names=("zermatt-trails-z18-outdoors", "chamonix-trails-z14-outdoors"),
+            style_fetcher=style_fetcher,
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=decoder,
+        )
+
+        self.assertEqual(report["generated"], "2026-05-18T15:40:00+00:00")
+        self.assertEqual(report["camera_count"], 2)
+        self.assertEqual(report["tile_count"], 2)
+        self.assertEqual(report["decoded_tile_count"], 2)
+        self.assertEqual(report["road_feature_count"], 6)
+        self.assertEqual(report["pedestrian_polygon_candidate_count"], 2)
+        self.assertEqual(report["pedestrian_line_candidate_count"], 2)
+        self.assertEqual(report["path_line_candidate_count"], 2)
+        self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 2})
+        self.assertEqual(report["pedestrian_line_type_counts"], {"pedestrian": 2})
+        self.assertEqual(report["path_line_type_counts"], {"footway": 2})
+        self.assertEqual(style_calls, [("token", "mapbox", "outdoors-v12")])
+        self.assertEqual(
+            [camera_report["camera"]["name"] for camera_report in report["cameras"]],
+            ["zermatt-trails-z18-outdoors", "chamonix-trails-z14-outdoors"],
+        )
+
     def test_build_summary_markdown_includes_counts_and_samples(self):
         report = {
             "generated": "2026-05-18T14:12:00+00:00",
@@ -368,6 +414,44 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn("## Sample pedestrian line candidates", markdown)
         self.assertIn("## Sample path line candidates", markdown)
 
+    def test_build_all_camera_summary_markdown_includes_camera_rows(self):
+        report = {
+            "generated": "2026-05-18T15:40:00+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "camera_count": 1,
+            "decoded_tile_count": 1,
+            "tile_count": 1,
+            "road_feature_count": 3,
+            "pedestrian_polygon_candidate_count": 1,
+            "pedestrian_line_candidate_count": 1,
+            "path_line_candidate_count": 1,
+            "pedestrian_polygon_type_counts": {"pedestrian": 1},
+            "pedestrian_line_type_counts": {"pedestrian": 1},
+            "path_line_type_counts": {"footway": 1},
+            "cameras": [
+                {
+                    "camera": {"name": "zermatt-trails-z18-outdoors", "zoom": 18.0},
+                    "tile_zoom": 18,
+                    "decoded_tile_count": 1,
+                    "tile_count": 1,
+                    "road_feature_count": 3,
+                    "pedestrian_polygon_candidate_count": 1,
+                    "pedestrian_line_candidate_count": 1,
+                    "path_line_candidate_count": 1,
+                    "pedestrian_polygon_type_counts": {"pedestrian": 1},
+                    "pedestrian_line_type_counts": {"pedestrian": 1},
+                    "path_line_type_counts": {"footway": 1},
+                }
+            ],
+        }
+
+        markdown = build_all_camera_summary_markdown(report)
+
+        self.assertIn("# Mapbox Outdoors road feature diagnostic - all cameras", markdown)
+        self.assertIn("Cameras: 1", markdown)
+        self.assertIn("| zermatt-trails-z18-outdoors | 18.0 | 18 | 1/1 | 3 | 1 | 1 | 1 |", markdown)
+
     def test_write_report_writes_json_and_markdown(self):
         report = {
             "generated": "2026-05-18T14:12:00+00:00",
@@ -390,6 +474,28 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
             self.assertEqual(json.loads(paths.json_path.read_text()), report)
             self.assertIn("Road features: 0", paths.summary_path.read_text())
+
+    def test_write_all_camera_report_writes_json_and_markdown(self):
+        report = {
+            "generated": "2026-05-18T15:40:00+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "camera_count": 0,
+            "decoded_tile_count": 0,
+            "tile_count": 0,
+            "road_feature_count": 0,
+            "pedestrian_polygon_candidate_count": 0,
+            "pedestrian_line_candidate_count": 0,
+            "path_line_candidate_count": 0,
+            "cameras": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = build_all_camera_road_feature_paths(Path(tmpdir) / "run")
+            write_all_camera_report(report, paths)
+
+            self.assertEqual(json.loads(paths.json_path.read_text()), report)
+            self.assertIn("all cameras", paths.summary_path.read_text())
 
     def test_private_helpers_cover_url_fetching_and_sample_limits(self):
         response = mock.Mock()
@@ -428,6 +534,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             ]
         )
         self.assertEqual(args.camera, "camera-name")
+        self.assertFalse(args.all_cameras)
         self.assertEqual(args.tile_zoom, 14)
 
         captured = {}
@@ -454,6 +561,40 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(captured["config"].tile_zoom, 14)
         self.assertEqual(captured["paths"].summary_path.name, "summary.md")
         self.assertIn("summary.md", stdout.getvalue())
+
+    def test_main_wires_all_camera_mode_to_aggregate_report_output(self):
+        captured = {}
+
+        def fake_collect(config):
+            captured["config"] = config
+            return {"camera_count": 0, "cameras": []}
+
+        def fake_write(report, paths):
+            captured["report"] = report
+            captured["paths"] = paths
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(road_features, "collect_all_camera_road_feature_report", side_effect=fake_collect),
+                mock.patch.object(road_features, "write_all_camera_report", side_effect=fake_write),
+                redirect_stdout(stdout),
+            ):
+                result = main(["--all-cameras", "--mapbox-token", "token", "--output-root", tmpdir])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured["config"].camera_name, road_features.DEFAULT_CAMERA_NAME)
+        self.assertEqual(captured["report"], {"camera_count": 0, "cameras": []})
+        self.assertEqual(captured["paths"].run_dir.parent.name, "all-cameras")
+        self.assertIn("summary.md", stdout.getvalue())
+
+    def test_main_rejects_single_camera_with_all_camera_mode(self):
+        stderr = io.StringIO()
+        with redirect_stderr(stderr):
+            result = main(["camera-name", "--all-cameras"])
+
+        self.assertEqual(result, 2)
+        self.assertIn("either a single camera or --all-cameras", stderr.getvalue())
 
 
 if __name__ == "__main__":

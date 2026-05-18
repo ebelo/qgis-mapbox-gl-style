@@ -92,6 +92,14 @@ def build_road_feature_paths(run_dir: Path) -> RoadFeaturePaths:
     )
 
 
+def build_all_camera_road_feature_paths(run_dir: Path) -> RoadFeaturePaths:
+    return RoadFeaturePaths(
+        run_dir=run_dir,
+        json_path=run_dir / "road-features.json",
+        summary_path=run_dir / "summary.md",
+    )
+
+
 def _structure_is_surface(properties: dict[str, object]) -> bool:
     structure = properties.get("structure")
     return structure in SURFACE_STRUCTURES
@@ -234,10 +242,11 @@ def _load_original_style(config: RoadFeatureConfig, style_fetcher) -> dict[str, 
 def _road_tileset_context(
     config: RoadFeatureConfig,
     style_fetcher: Callable[[str, str, str], dict[str, object]] | None,
+    style_definition: dict[str, object] | None = None,
 ) -> tuple[list[str], str]:
     fetch_style = style_fetcher if style_fetcher is not None else mapbox_config.fetch_mapbox_style_definition
-    style_definition = _load_original_style(config, fetch_style)
-    tileset_ids = mapbox_config.extract_mapbox_vector_source_ids(style_definition)
+    resolved_style_definition = style_definition if style_definition is not None else _load_original_style(config, fetch_style)
+    tileset_ids = mapbox_config.extract_mapbox_vector_source_ids(resolved_style_definition)
     if not config.token:
         raise ValueError("A Mapbox token is required to fetch vector tiles.")
     tile_url_template = mapbox_config.build_mapbox_vector_tiles_url(
@@ -249,15 +258,32 @@ def _road_tileset_context(
     return tileset_ids, tile_url_template
 
 
+def _all_camera_names() -> list[str]:
+    _ensure_package_parent_on_path()
+    from qfit.validation.mapbox_outdoors_comparison import CAMERAS
+
+    return list(CAMERAS.keys())
+
+
+def _sum_reports(reports: Iterable[dict[str, object]], key: str) -> int:
+    total = 0
+    for report in reports:
+        value = report.get(key)
+        if isinstance(value, int):
+            total += value
+    return total
+
+
 def collect_road_feature_report(
     config: RoadFeatureConfig,
     *,
     style_fetcher: Callable[[str, str, str], dict[str, object]] | None = None,
+    style_definition: dict[str, object] | None = None,
     tile_fetcher: TileFetcher | None = None,
     tile_decoder: TileDecoder | None = None,
 ) -> dict[str, object]:
     _ensure_package_parent_on_path()
-    tileset_ids, tile_url_template = _road_tileset_context(config, style_fetcher)
+    tileset_ids, tile_url_template = _road_tileset_context(config, style_fetcher, style_definition)
     camera = _camera_by_name(config.camera_name)
     tile_zoom = config.tile_zoom if config.tile_zoom is not None else recommended_tile_zoom(float(camera.zoom))
     tile_bounds = tile_bounds_for_web_mercator_extent(_camera_extent(camera), tile_zoom)
@@ -322,6 +348,77 @@ def collect_road_feature_report(
     }
 
 
+def collect_all_camera_road_feature_report(
+    config: RoadFeatureConfig,
+    *,
+    camera_names: Iterable[str] | None = None,
+    style_fetcher: Callable[[str, str, str], dict[str, object]] | None = None,
+    tile_fetcher: TileFetcher | None = None,
+    tile_decoder: TileDecoder | None = None,
+) -> dict[str, object]:
+    generated = config.now or dt.datetime.now(dt.timezone.utc)
+    names = list(camera_names) if camera_names is not None else _all_camera_names()
+    fetch_style = style_fetcher if style_fetcher is not None else mapbox_config.fetch_mapbox_style_definition
+    style_definition = _load_original_style(config, fetch_style)
+    camera_reports = [
+        collect_road_feature_report(
+            RoadFeatureConfig(
+                token=config.token,
+                output_root=config.output_root,
+                camera_name=camera_name,
+                style_owner=config.style_owner,
+                style_id=config.style_id,
+                style_json_path=config.style_json_path,
+                tile_zoom=config.tile_zoom,
+                now=generated,
+            ),
+            style_fetcher=style_fetcher,
+            style_definition=style_definition,
+            tile_fetcher=tile_fetcher,
+            tile_decoder=tile_decoder,
+        )
+        for camera_name in names
+    ]
+    return {
+        "style_owner": config.style_owner,
+        "style_id": config.style_id,
+        "generated": generated.isoformat(),
+        "camera_count": len(camera_reports),
+        "tile_count": _sum_reports(camera_reports, "tile_count"),
+        "decoded_tile_count": _sum_reports(camera_reports, "decoded_tile_count"),
+        "failed_tile_count": _sum_reports(camera_reports, "failed_tile_count"),
+        "road_feature_count": _sum_reports(camera_reports, "road_feature_count"),
+        "pedestrian_polygon_candidate_count": _sum_reports(
+            camera_reports,
+            "pedestrian_polygon_candidate_count",
+        ),
+        "pedestrian_line_candidate_count": _sum_reports(
+            camera_reports,
+            "pedestrian_line_candidate_count",
+        ),
+        "path_line_candidate_count": _sum_reports(camera_reports, "path_line_candidate_count"),
+        "road_geometry_type_counts": _combined_record_counts(camera_reports, "road_geometry_type_counts"),
+        "pedestrian_polygon_class_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_polygon_class_counts",
+        ),
+        "pedestrian_polygon_type_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_polygon_type_counts",
+        ),
+        "pedestrian_polygon_structure_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_polygon_structure_counts",
+        ),
+        "pedestrian_line_type_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_line_type_counts",
+        ),
+        "path_line_type_counts": _combined_record_counts(camera_reports, "path_line_type_counts"),
+        "cameras": camera_reports,
+    }
+
+
 def build_summary_markdown(report: dict[str, object]) -> str:
     camera = report.get("camera") if isinstance(report.get("camera"), dict) else {}
     lines = [
@@ -377,16 +474,69 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
+    lines = [
+        "# Mapbox Outdoors road feature diagnostic - all cameras",
+        "",
+        f"Generated: {report.get('generated')}",
+        f"Style: {report.get('style_owner')}/{report.get('style_id')}",
+        f"Cameras: {report.get('camera_count')}",
+        f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
+        f"Road features: {report.get('road_feature_count')}",
+        f"Pedestrian/path polygon candidates: {report.get('pedestrian_polygon_candidate_count')}",
+        f"Pedestrian line candidates: {report.get('pedestrian_line_candidate_count')}",
+        f"Path line candidates: {report.get('path_line_candidate_count')}",
+        f"Pedestrian polygon type counts: {_markdown_value(report.get('pedestrian_polygon_type_counts'))}",
+        f"Pedestrian line type counts: {_markdown_value(report.get('pedestrian_line_type_counts'))}",
+        f"Path line type counts: {_markdown_value(report.get('path_line_type_counts'))}",
+        "",
+        "| Camera | Camera zoom | Tile zoom | Tiles | Road | Pedestrian/path polygons | Pedestrian lines | Path lines | Polygon types | Pedestrian line types | Path line types |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+    ]
+    camera_reports = report.get("cameras")
+    rows = camera_reports if isinstance(camera_reports, list) else []
+    for camera_report in rows:
+        if not isinstance(camera_report, dict):
+            continue
+        camera = camera_report.get("camera") if isinstance(camera_report.get("camera"), dict) else {}
+        lines.append(
+            "| {camera_name} | {camera_zoom} | {tile_zoom} | {tiles} | {road} | {polygons} | {pedestrian_lines} | {path_lines} | {polygon_types} | {pedestrian_types} | {path_types} |".format(
+                camera_name=_markdown_value(camera.get("name")),
+                camera_zoom=_markdown_value(camera.get("zoom")),
+                tile_zoom=_markdown_value(camera_report.get("tile_zoom")),
+                tiles=(
+                    f"{_markdown_value(camera_report.get('decoded_tile_count'))}/"
+                    f"{_markdown_value(camera_report.get('tile_count'))}"
+                ),
+                road=_markdown_value(camera_report.get("road_feature_count")),
+                polygons=_markdown_value(camera_report.get("pedestrian_polygon_candidate_count")),
+                pedestrian_lines=_markdown_value(camera_report.get("pedestrian_line_candidate_count")),
+                path_lines=_markdown_value(camera_report.get("path_line_candidate_count")),
+                polygon_types=_markdown_value(camera_report.get("pedestrian_polygon_type_counts")),
+                pedestrian_types=_markdown_value(camera_report.get("pedestrian_line_type_counts")),
+                path_types=_markdown_value(camera_report.get("path_line_type_counts")),
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
 def write_report(report: dict[str, object], paths: RoadFeaturePaths) -> None:
     paths.run_dir.mkdir(parents=True, exist_ok=True)
     paths.json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     paths.summary_path.write_text(build_summary_markdown(report), encoding="utf-8")
 
 
+def write_all_camera_report(report: dict[str, object], paths: RoadFeaturePaths) -> None:
+    paths.run_dir.mkdir(parents=True, exist_ok=True)
+    paths.json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    paths.summary_path.write_text(build_all_camera_summary_markdown(report), encoding="utf-8")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate Mapbox Outdoors road vector-tile feature diagnostics.")
     arguments = (
-        (("camera",), {"nargs": "?", "default": DEFAULT_CAMERA_NAME}),
+        (("camera",), {"nargs": "?"}),
+        (("--all-cameras",), {"action": "store_true", "help": "Inspect every comparison harness camera."}),
         (("--style-json",), {"type": Path, "help": "Read an already downloaded Mapbox style JSON file."}),
         (("--style-owner",), {"default": DEFAULT_MAPBOX_STYLE_OWNER}),
         (("--style-id",), {"default": DEFAULT_MAPBOX_STYLE_ID}),
@@ -403,7 +553,7 @@ def _config_from_args(args: argparse.Namespace, now: dt.datetime) -> RoadFeature
     config_kwargs = {
         "token": resolve_mapbox_token(provided_token=args.mapbox_token),
         "output_root": args.output_root,
-        "camera_name": args.camera,
+        "camera_name": args.camera or DEFAULT_CAMERA_NAME,
         "style_owner": args.style_owner,
         "style_id": args.style_id,
         "style_json_path": args.style_json,
@@ -415,12 +565,22 @@ def _config_from_args(args: argparse.Namespace, now: dt.datetime) -> RoadFeature
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.all_cameras and args.camera:
+        print("error: pass either a single camera or --all-cameras, not both.", file=sys.stderr)
+        return 2
     config = _config_from_args(args, dt.datetime.now(dt.timezone.utc))
-    report = collect_road_feature_report(config)
-    paths = build_road_feature_paths(
-        build_run_directory(output_root=config.output_root, camera_name=config.camera_name, now=config.now)
-    )
-    write_report(report, paths)
+    if args.all_cameras:
+        report = collect_all_camera_road_feature_report(config)
+        paths = build_all_camera_road_feature_paths(
+            build_run_directory(output_root=config.output_root, camera_name="all-cameras", now=config.now)
+        )
+        write_all_camera_report(report, paths)
+    else:
+        report = collect_road_feature_report(config)
+        paths = build_road_feature_paths(
+            build_run_directory(output_root=config.output_root, camera_name=config.camera_name, now=config.now)
+        )
+        write_report(report, paths)
     print(paths.summary_path)
     return 0
 
