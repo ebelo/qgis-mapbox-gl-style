@@ -829,6 +829,8 @@ _LABEL_ICON_VISIBILITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
 )
 _SETTLEMENT_DOT_ICON_SPLIT_ZOOM = 8.0
 _SETTLEMENT_SYMBOL_SORT_KEY_EXPRESSION = ["get", "symbolrank"]
+_SETTLEMENT_MAJOR_LOW_ZOOM_QGIS_FILTER_SAMPLE_ZOOM = 6.0
+_SETTLEMENT_MINOR_LOW_ZOOM_QGIS_MIN_ZOOM = 6.0
 _SETTLEMENT_DOT_ICON_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
     ("z2-to-z4", 2.0, 4.0),
     ("z4-to-z6", 4.0, 6.0),
@@ -3106,6 +3108,41 @@ def _settlement_major_low_zoom_text_justify_variants(layer: dict[str, object]) -
     return variants
 
 
+def _is_suppressed_settlement_minor_low_zoom_band(base_layer_id: str, band_maxzoom: float | None) -> bool:
+    return (
+        base_layer_id == _SETTLEMENT_MINOR_LABEL_LAYER_ID
+        and band_maxzoom is not None
+        and band_maxzoom <= _SETTLEMENT_MINOR_LOW_ZOOM_QGIS_MIN_ZOOM
+    )
+
+
+def _settlement_dot_icon_zoom_bands_for_layer(
+    base_layer_id: str,
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+):
+    for zoom_suffix, band_minzoom, band_maxzoom in _SETTLEMENT_DOT_ICON_ZOOM_BANDS:
+        if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
+            continue
+        if _is_suppressed_settlement_minor_low_zoom_band(base_layer_id, band_maxzoom):
+            # The z5 comparison reads these minor towns as clutter while Mapbox
+            # emphasizes only country/state and major settlement hierarchy.
+            continue
+        yield zoom_suffix, band_minzoom, band_maxzoom
+
+
+def _settlement_dot_icon_layer_has_suppressed_zoom_band(
+    base_layer_id: str,
+    existing_minzoom: float | None,
+    existing_maxzoom: float | None,
+) -> bool:
+    return any(
+        _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom)
+        and _is_suppressed_settlement_minor_low_zoom_band(base_layer_id, band_maxzoom)
+        for _zoom_suffix, band_minzoom, band_maxzoom in _SETTLEMENT_DOT_ICON_ZOOM_BANDS
+    )
+
+
 def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split Mapbox's low-zoom settlement dot icons from z8+ centered labels."""
     if not _has_settlement_dot_icon_expression(layer):
@@ -3116,9 +3153,11 @@ def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[s
     layer_id = str(layer.get("id") or base_layer_id)
     variants: list[dict[str, object]] = []
 
-    for zoom_suffix, band_minzoom, band_maxzoom in _SETTLEMENT_DOT_ICON_ZOOM_BANDS:
-        if not _zoom_ranges_overlap(existing_minzoom, existing_maxzoom, band_minzoom, band_maxzoom):
-            continue
+    for zoom_suffix, band_minzoom, band_maxzoom in _settlement_dot_icon_zoom_bands_for_layer(
+        base_layer_id,
+        existing_minzoom,
+        existing_maxzoom,
+    ):
         for suffix, icon_filter, icon_image, text_radial_offset in _SETTLEMENT_DOT_ICON_VARIANTS:
             icon_layer = _apply_zoom_band_bounds(layer, band_minzoom, band_maxzoom)
             icon_layer["id"] = f"{layer_id}-{zoom_suffix}-{suffix}"
@@ -3140,6 +3179,12 @@ def _settlement_dot_icon_layer_variants(layer: dict[str, object]) -> list[dict[s
         variants.extend(_settlement_minor_text_filter_zoom_variants(text_layer) or [text_layer])
 
     if not variants:
+        if _settlement_dot_icon_layer_has_suppressed_zoom_band(
+            base_layer_id,
+            existing_minzoom,
+            existing_maxzoom,
+        ):
+            return []
         return None
     field_variants: list[dict[str, object]] = []
     for variant in variants:
@@ -5376,6 +5421,15 @@ def _zoom_normalized_filter_expression_for_qgis(layer: dict[str, object], value:
         if override_zoom is not None
         else None
     )
+    layer_id = str(layer.get("id") or "")
+    if (
+        target_zoom is None
+        and base_mapbox_style_layer_id_for_qfit(layer_id) == _SETTLEMENT_MAJOR_LABEL_LAYER_ID
+        and layer_id.startswith(f"{_SETTLEMENT_MAJOR_LABEL_LAYER_ID}-z4-to-z6-")
+    ):
+        # At z5 QGIS otherwise samples just below z6 and misses rank-7 cities
+        # such as Zurich and Milan, leaving minor towns to dominate the hierarchy.
+        target_zoom = _SETTLEMENT_MAJOR_LOW_ZOOM_QGIS_FILTER_SAMPLE_ZOOM
     if target_zoom is None:
         target_zoom = _representative_zoom_in_layer_range(layer.get("minzoom"), layer.get("maxzoom"))
     if target_zoom is None:
