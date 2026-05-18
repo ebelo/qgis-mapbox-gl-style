@@ -2071,6 +2071,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 {
                     "filter": ["<=", ["+", ["get", "filterrank"], 0], ["-", 12, 0]],
                 },
+                {
+                    "filter": ["<=", ["-", ["get", "filterrank"], 2], 12],
+                },
                 {"filter": True},
             ]
         }
@@ -2088,7 +2091,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][2]["filter"], ["==", ["get", "class"], "park"])
         self.assertEqual(result["layers"][3]["filter"], ["!", ["==", ["get", "class"], "park"]])
         self.assertEqual(result["layers"][4]["filter"], ["<=", ["get", "filterrank"], 12])
-        self.assertEqual(result["layers"][5]["filter"], ["==", 1, 1])
+        self.assertEqual(result["layers"][5]["filter"], ["<=", ["get", "filterrank"], 14.0])
+        self.assertEqual(result["layers"][6]["filter"], ["==", 1, 1])
         self.assertEqual(style["layers"][0]["filter"][0], "!")
 
     def test_filter_simplification_snapshots_zoom_dependent_filters(self):
@@ -5775,6 +5779,20 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                         ["-", ["to-number", ["get", "sizerank"]], ["interpolate", ["linear"], ["zoom"], 12, 0, 18, 14]],
                         14,
                     ]
+                },
+                {
+                    "id": "landuse",
+                    "type": "fill",
+                    "minzoom": 15,
+                    "filter": [
+                        "<=",
+                        [
+                            "-",
+                            ["to-number", ["get", "sizerank"]],
+                            ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0, 18, 14],
+                        ],
+                        14,
+                    ]
                 }
             ]
         }
@@ -5785,6 +5803,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             result["layers"][0]["filter"],
             ["<=", ["to-number", ["get", "sizerank"]], 14],
         )
+        self.assertEqual(result["layers"][1]["filter"][0:2], ["<=", ["to-number", ["get", "sizerank"]]])
+        self.assertAlmostEqual(result["layers"][1]["filter"][2], 17.2)
 
     def test_filter_simplification_normalizes_zoom_arithmetic_operators(self):
         style = {

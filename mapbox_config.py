@@ -5189,6 +5189,51 @@ def _additive_identity_filter(value: list[object], *, root: bool) -> object:
     return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
 
 
+def _numeric_literal(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _comparison_left_offset_filter(value: list[object]) -> object:
+    if len(value) != 3 or value[0] not in {"<", "<=", ">", ">="}:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+    left = _simplify_filter_expression_for_qgis(value[1], root=False)
+    right = _simplify_filter_expression_for_qgis(value[2], root=False)
+    right_number = _numeric_literal(right)
+    if right_number is None or not isinstance(left, list) or len(left) != 3:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+    arithmetic_operator = left[0]
+    expression = left[1]
+    offset = _numeric_literal(left[2])
+    if arithmetic_operator == "+" and offset is None:
+        expression = left[2]
+        offset = _numeric_literal(left[1])
+    if arithmetic_operator not in {"+", "-"} or offset is None:
+        return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+    adjusted_right = right_number - offset if arithmetic_operator == "+" else right_number + offset
+    return [value[0], _simplify_filter_expression_for_qgis(expression, root=False), adjusted_right]
+
+
+def _special_filter_simplification_for_qgis(
+    value: list[object],
+    operator: object,
+    *,
+    root: bool,
+) -> object:
+    for simplify in (_inverted_boolean_match_filter, _simple_case_filter):
+        simplified = simplify(value)
+        if simplified is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+            return simplified
+    if operator in {"+", "-"}:
+        return _additive_identity_filter(value, root=root)
+    if operator in {"<", "<=", ">", ">="}:
+        return _comparison_left_offset_filter(value)
+    return _FILTER_SIMPLIFICATION_NOT_AVAILABLE
+
+
 def _simplify_filter_expression_for_qgis(value: object, *, root: bool = True) -> object:
     """Apply semantics-preserving filter rewrites that QGIS parses more reliably."""
     if isinstance(value, bool):
@@ -5201,16 +5246,9 @@ def _simplify_filter_expression_for_qgis(value: object, *, root: bool = True) ->
     operator = value[0]
     if operator == "literal":
         return value
-    inverted_match = _inverted_boolean_match_filter(value)
-    if inverted_match is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
-        return inverted_match
-    case_filter = _simple_case_filter(value)
-    if case_filter is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
-        return case_filter
-    if operator in {"+", "-"}:
-        additive_identity = _additive_identity_filter(value, root=root)
-        if additive_identity is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
-            return additive_identity
+    special_filter = _special_filter_simplification_for_qgis(value, operator, root=root)
+    if special_filter is not _FILTER_SIMPLIFICATION_NOT_AVAILABLE:
+        return special_filter
     return [operator, *[_simplify_filter_expression_for_qgis(item, root=False) for item in value[1:]]]
 
 
