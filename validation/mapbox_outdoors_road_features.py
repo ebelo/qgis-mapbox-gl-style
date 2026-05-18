@@ -220,9 +220,13 @@ def road_tile_record(
         "pedestrian_polygon_class_counts": _count_by_property(pedestrian_polygons, "class"),
         "pedestrian_polygon_type_counts": _count_by_property(pedestrian_polygons, "type"),
         "pedestrian_polygon_structure_counts": _count_by_property(pedestrian_polygons, "structure"),
+        "pedestrian_polygon_surface_counts": _count_by_property(pedestrian_polygons, "surface"),
         "pedestrian_line_type_counts": _count_by_property(pedestrian_lines, "type"),
+        "pedestrian_line_surface_counts": _count_by_property(pedestrian_lines, "surface"),
         "path_line_type_counts": _count_by_property(path_lines, "type"),
+        "path_line_surface_counts": _count_by_property(path_lines, "surface"),
         "step_line_structure_counts": _count_by_property(step_lines, "structure"),
+        "step_line_surface_counts": _count_by_property(step_lines, "surface"),
         "sample_pedestrian_polygons": [
             _feature_sample(tile, feature) for feature in pedestrian_polygons[:MAX_SAMPLE_FEATURES]
         ],
@@ -254,9 +258,13 @@ _SUMMARY_COUNT_FIELDS = (
 )
 _SUMMARY_COUNT_MAP_FIELDS = (
     ("Pedestrian polygon type counts", "pedestrian_polygon_type_counts"),
+    ("Pedestrian polygon surface counts", "pedestrian_polygon_surface_counts"),
     ("Pedestrian line type counts", "pedestrian_line_type_counts"),
+    ("Pedestrian line surface counts", "pedestrian_line_surface_counts"),
     ("Path line type counts", "path_line_type_counts"),
+    ("Path line surface counts", "path_line_surface_counts"),
     ("Step line structure counts", "step_line_structure_counts"),
+    ("Step line surface counts", "step_line_surface_counts"),
 )
 _ROAD_FEATURE_TABLE_FIELDS = (
     ("Road", "road_feature_count", "---:"),
@@ -265,9 +273,13 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Path lines", "path_line_candidate_count", "---:"),
     ("Step lines", "step_line_candidate_count", "---:"),
     ("Polygon types", "pedestrian_polygon_type_counts", "---"),
+    ("Polygon surfaces", "pedestrian_polygon_surface_counts", "---"),
     ("Pedestrian line types", "pedestrian_line_type_counts", "---"),
+    ("Pedestrian line surfaces", "pedestrian_line_surface_counts", "---"),
     ("Path line types", "path_line_type_counts", "---"),
+    ("Path line surfaces", "path_line_surface_counts", "---"),
     ("Step structures", "step_line_structure_counts", "---"),
+    ("Step surfaces", "step_line_surface_counts", "---"),
 )
 
 
@@ -405,9 +417,16 @@ def collect_road_feature_report(
             tile_records,
             "pedestrian_polygon_structure_counts",
         ),
+        "pedestrian_polygon_surface_counts": _combined_record_counts(
+            tile_records,
+            "pedestrian_polygon_surface_counts",
+        ),
         "pedestrian_line_type_counts": _combined_record_counts(tile_records, "pedestrian_line_type_counts"),
+        "pedestrian_line_surface_counts": _combined_record_counts(tile_records, "pedestrian_line_surface_counts"),
         "path_line_type_counts": _combined_record_counts(tile_records, "path_line_type_counts"),
+        "path_line_surface_counts": _combined_record_counts(tile_records, "path_line_surface_counts"),
         "step_line_structure_counts": _combined_record_counts(tile_records, "step_line_structure_counts"),
+        "step_line_surface_counts": _combined_record_counts(tile_records, "step_line_surface_counts"),
         "sample_pedestrian_polygons": _combined_samples(tile_records, "sample_pedestrian_polygons"),
         "sample_pedestrian_lines": _combined_samples(tile_records, "sample_pedestrian_lines"),
         "sample_path_lines": _combined_samples(tile_records, "sample_path_lines"),
@@ -479,12 +498,22 @@ def collect_all_camera_road_feature_report(
             camera_reports,
             "pedestrian_polygon_structure_counts",
         ),
+        "pedestrian_polygon_surface_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_polygon_surface_counts",
+        ),
         "pedestrian_line_type_counts": _combined_record_counts(
             camera_reports,
             "pedestrian_line_type_counts",
         ),
+        "pedestrian_line_surface_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_line_surface_counts",
+        ),
         "path_line_type_counts": _combined_record_counts(camera_reports, "path_line_type_counts"),
+        "path_line_surface_counts": _combined_record_counts(camera_reports, "path_line_surface_counts"),
         "step_line_structure_counts": _combined_record_counts(camera_reports, "step_line_structure_counts"),
+        "step_line_surface_counts": _combined_record_counts(camera_reports, "step_line_surface_counts"),
         "cameras": camera_reports,
     }
 
