@@ -25,6 +25,13 @@ CONTOUR_LABEL_INDICES = (5, 10)
 SAMPLE_PROPERTY_KEYS = ("ele", "index", "class", "worldview", "level", "sizerank", "name")
 MAX_SAMPLE_CANDIDATES = 12
 MISSING_VALUE = "(missing)"
+LINE_COMPATIBLE_GEOMETRY_TYPES = {"LineString", "MultiLineString"}
+POLYGON_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
+LABEL_GEOMETRY_NO_CANDIDATES = "no_candidates"
+LABEL_GEOMETRY_LINE_COMPATIBLE = "line_compatible"
+LABEL_GEOMETRY_MIXED_WITH_LINES = "mixed_with_line_compatible"
+LABEL_GEOMETRY_POLYGON_ONLY = "polygon_only"
+LABEL_GEOMETRY_NO_LINE_COMPATIBLE = "no_line_compatible"
 
 TileFetcher = Callable[[str], bytes]
 TileDecoder = Callable[[bytes], dict[str, object]]
@@ -297,6 +304,33 @@ def _count_geometry_types(features: list[dict[str, object]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def _count_geometry_family(geometry_type_counts: dict[str, int], geometry_types: set[str]) -> int:
+    return sum(count for geometry_type, count in geometry_type_counts.items() if geometry_type in geometry_types)
+
+
+def _candidate_label_geometry(geometry_type_counts: dict[str, int]) -> dict[str, object]:
+    total = sum(geometry_type_counts.values())
+    line_compatible_count = _count_geometry_family(geometry_type_counts, LINE_COMPATIBLE_GEOMETRY_TYPES)
+    polygon_count = _count_geometry_family(geometry_type_counts, POLYGON_GEOMETRY_TYPES)
+    other_count = max(0, total - line_compatible_count - polygon_count)
+    status = LABEL_GEOMETRY_NO_CANDIDATES
+    if total and line_compatible_count == total:
+        status = LABEL_GEOMETRY_LINE_COMPATIBLE
+    elif line_compatible_count:
+        status = LABEL_GEOMETRY_MIXED_WITH_LINES
+    elif total and polygon_count == total:
+        status = LABEL_GEOMETRY_POLYGON_ONLY
+    elif total:
+        status = LABEL_GEOMETRY_NO_LINE_COMPATIBLE
+    return {
+        "status": status,
+        "candidate_count": total,
+        "line_compatible_count": line_compatible_count,
+        "polygon_count": polygon_count,
+        "other_count": other_count,
+    }
+
+
 def _candidate_sample(tile: dict[str, int], feature: dict[str, object]) -> dict[str, object]:
     properties = _feature_properties(feature)
     sample = {key: properties[key] for key in SAMPLE_PROPERTY_KEYS if key in properties}
@@ -324,6 +358,7 @@ def contour_tile_record(
         return {**tile, "status": "error", "error": type(exc).__name__, "message": str(exc)}
     features = _decoded_layer_features(decoded, CONTOUR_SOURCE_LAYER)
     candidates = [feature for feature in features if is_contour_label_candidate(_feature_properties(feature))]
+    candidate_geometry_type_counts = _count_geometry_types(candidates)
     return {
         **tile,
         "status": "decoded",
@@ -332,7 +367,8 @@ def contour_tile_record(
         "contour_label_candidate_count": len(candidates),
         "index_counts": _count_indices(features),
         "geometry_type_counts": _count_geometry_types(features),
-        "candidate_geometry_type_counts": _count_geometry_types(candidates),
+        "candidate_geometry_type_counts": candidate_geometry_type_counts,
+        "candidate_label_geometry": _candidate_label_geometry(candidate_geometry_type_counts),
         "sample_candidates": [
             _candidate_sample(tile, feature) for feature in candidates[:MAX_SAMPLE_CANDIDATES]
         ],
@@ -430,6 +466,7 @@ def collect_contour_feature_report(
     ]
     decoded_tile_count = sum(1 for tile in tile_records if tile.get("status") == "decoded")
     generated = config.now or dt.datetime.now(dt.timezone.utc)
+    candidate_geometry_type_counts = _combined_record_counts(tile_records, "candidate_geometry_type_counts")
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -454,7 +491,8 @@ def collect_contour_feature_report(
         ),
         "index_counts": _combined_index_counts(tile_records),
         "geometry_type_counts": _combined_record_counts(tile_records, "geometry_type_counts"),
-        "candidate_geometry_type_counts": _combined_record_counts(tile_records, "candidate_geometry_type_counts"),
+        "candidate_geometry_type_counts": candidate_geometry_type_counts,
+        "candidate_label_geometry": _candidate_label_geometry(candidate_geometry_type_counts),
         "sample_candidates": _combined_samples(tile_records),
         "tiles": tile_records,
     }
@@ -482,6 +520,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Index counts: {_markdown_value(report.get('index_counts'))}",
         f"Geometry types: {_markdown_value(report.get('geometry_type_counts'))}",
         f"Candidate geometry types: {_markdown_value(report.get('candidate_geometry_type_counts'))}",
+        f"Candidate label geometry: {_markdown_value(report.get('candidate_label_geometry'))}",
         "",
         "| z | x | y | Status | Contour features | Label candidates | Index counts | Geometry types | Candidate geometry types |",
         "| ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- |",

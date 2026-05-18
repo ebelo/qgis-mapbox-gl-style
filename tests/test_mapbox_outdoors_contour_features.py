@@ -127,12 +127,111 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(record["index_counts"], {"1": 1, "10": 1, "5": 1})
         self.assertEqual(record["geometry_type_counts"], {"LineString": 1, "MultiPolygon": 1, "Polygon": 1})
         self.assertEqual(record["candidate_geometry_type_counts"], {"MultiPolygon": 1, "Polygon": 1})
+        self.assertEqual(
+            record["candidate_label_geometry"],
+            {
+                "status": "polygon_only",
+                "candidate_count": 2,
+                "line_compatible_count": 0,
+                "polygon_count": 2,
+                "other_count": 0,
+            },
+        )
         self.assertEqual(record["sample_candidates"][0]["ele"], 1200)
         self.assertEqual(
             record["sample_candidates"][0]["geometry"],
             {"type": "Polygon", "point_count": 4, "part_count": 1, "bounds": [0.0, 0.0, 2.0, 2.0]},
         )
         self.assertEqual(record["sample_candidates"][1]["property_keys"], ["ele", "extra", "index"])
+
+    def test_contour_tile_record_marks_line_compatible_candidate_geometry(self):
+        def decoder(_payload):
+            return {
+                "contour": {
+                    "features": [
+                        {
+                            "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                            "properties": {"ele": 1200, "index": 5},
+                        }
+                    ]
+                }
+            }
+
+        record = contour_tile_record(
+            tile={"z": 14, "x": 8504, "y": 5833},
+            tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=decoder,
+        )
+
+        self.assertEqual(
+            record["candidate_label_geometry"],
+            {
+                "status": "line_compatible",
+                "candidate_count": 1,
+                "line_compatible_count": 1,
+                "polygon_count": 0,
+                "other_count": 0,
+            },
+        )
+
+    def test_contour_tile_record_covers_remaining_candidate_geometry_statuses(self):
+        cases = [
+            (
+                [
+                    {
+                        "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                        "properties": {"index": 1},
+                    }
+                ],
+                {
+                    "status": "no_candidates",
+                    "candidate_count": 0,
+                    "line_compatible_count": 0,
+                    "polygon_count": 0,
+                    "other_count": 0,
+                },
+            ),
+            (
+                [
+                    {
+                        "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                        "properties": {"index": 5},
+                    },
+                    {
+                        "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+                        "properties": {"index": 10},
+                    },
+                ],
+                {
+                    "status": "mixed_with_line_compatible",
+                    "candidate_count": 2,
+                    "line_compatible_count": 1,
+                    "polygon_count": 1,
+                    "other_count": 0,
+                },
+            ),
+            (
+                [{"geometry": {"type": "Point", "coordinates": [0, 0]}, "properties": {"index": 5}}],
+                {
+                    "status": "no_line_compatible",
+                    "candidate_count": 1,
+                    "line_compatible_count": 0,
+                    "polygon_count": 0,
+                    "other_count": 1,
+                },
+            ),
+        ]
+        for features, expected in cases:
+            with self.subTest(status=expected["status"]):
+                record = contour_tile_record(
+                    tile={"z": 14, "x": 8504, "y": 5833},
+                    tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+                    tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                    tile_decoder=lambda _payload, features=features: {"contour": {"features": features}},
+                )
+
+                self.assertEqual(record["candidate_label_geometry"], expected)
 
     def test_contour_tile_record_reports_fetch_or_decode_errors(self):
         def failing_fetcher(_url):
@@ -209,6 +308,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(report["generated"], "2026-05-18T11:35:00+00:00")
         self.assertEqual(report["geometry_type_counts"], {"LineString": 1, "Polygon": 2})
         self.assertEqual(report["candidate_geometry_type_counts"], {"Polygon": 2})
+        self.assertEqual(report["candidate_label_geometry"]["status"], "polygon_only")
+        self.assertEqual(report["candidate_label_geometry"]["line_compatible_count"], 0)
 
     def test_write_report_writes_json_and_markdown(self):
         report = {
@@ -224,6 +325,13 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "index_counts": {"1": 1, "5": 2},
             "geometry_type_counts": {"LineString": 1, "Polygon": 2},
             "candidate_geometry_type_counts": {"Polygon": 2},
+            "candidate_label_geometry": {
+                "status": "polygon_only",
+                "candidate_count": 2,
+                "line_compatible_count": 0,
+                "polygon_count": 2,
+                "other_count": 0,
+            },
             "sample_candidates": [{"ele": 1000, "index": 5, "geometry": {"type": "Polygon"}}],
             "tiles": [
                 {
@@ -243,6 +351,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
 
         self.assertIn("Contour-label candidates (index 5/10): 2", markdown)
         self.assertIn('Candidate geometry types: {"Polygon":2}', markdown)
+        self.assertIn('Candidate label geometry: {"candidate_count":2', markdown)
         self.assertIn("| 14 | 8504 | 5833 | decoded | 3 | 2 |", markdown)
         self.assertIn("Sample contour-label candidates", markdown)
 
