@@ -648,6 +648,8 @@ _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
     "bridge-path-bg-z16-plus",
 )
 _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
+_PATH_LOW_ZOOM_LINE_WIDTH_LAYER_PREFIXES = ("road-path-below-z16",)
+_PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 14.0
 _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "bridge-pedestrian",
     "bridge-pedestrian-case",
@@ -2538,10 +2540,27 @@ def _should_sample_path_high_zoom_line_width(layer_id: object, prop: str, minzoo
     )
 
 
-def _path_high_zoom_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
-    if not _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
+def _should_sample_path_low_zoom_line_width(layer_id: object, prop: str, maxzoom: object) -> bool:
+    if prop != "line-width":
+        return False
+    normalized = str(layer_id or "")
+    if any(
+        normalized == prefix or normalized.startswith(f"{prefix}-")
+        for prefix in _PATH_LOW_ZOOM_LINE_WIDTH_LAYER_PREFIXES
+    ):
+        return True
+    layer_maxzoom = _numeric_zoom_bound(maxzoom)
+    return normalized == "road-path" and layer_maxzoom is not None and layer_maxzoom <= _PATH_TYPE_FILTER_SPLIT_ZOOM
+
+
+def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
+    if _should_sample_path_low_zoom_line_width(layer_id, prop, maxzoom):
+        target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+    elif _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
+        target_sample_zoom = _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+    else:
         return None
-    target_zoom = _zoom_in_layer_range(_PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM, minzoom, maxzoom)
+    target_zoom = _zoom_in_layer_range(target_sample_zoom, minzoom, maxzoom)
     if target_zoom is None:
         return None
     return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
@@ -5852,7 +5871,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                         props[prop] = fallback
                 elif prop in _WIDTH_PROPS:
                     width = None
-                    width = _path_high_zoom_line_width(
+                    width = _path_split_line_width(
                         val,
                         layer_id,
                         prop,

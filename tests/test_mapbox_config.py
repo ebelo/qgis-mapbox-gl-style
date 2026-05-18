@@ -5123,7 +5123,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[3]["id"], "bridge-path-bg-below-z16-outdoor")
         self.assertEqual(result[4]["id"], "bridge-path-bg-below-z16-remaining")
 
-    def test_high_zoom_path_line_width_uses_split_zoom_band(self):
+    def test_path_line_width_uses_split_zoom_band_samples(self):
         path_filter = [
             "all",
             ["==", ["get", "class"], "path"],
@@ -5143,6 +5143,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     "id": "road-path",
                     "type": "line",
                     "minzoom": 12,
+                    "filter": copy.deepcopy(path_filter),
+                    "paint": {"line-width": copy.deepcopy(line_width)},
+                },
+                {
+                    "id": "road-path",
+                    "type": "line",
+                    "minzoom": 12,
+                    "maxzoom": 15,
                     "filter": copy.deepcopy(path_filter),
                     "paint": {"line-width": copy.deepcopy(line_width)},
                 },
@@ -5179,8 +5187,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         by_id = {layer["id"]: layer for layer in result["layers"]}
         low_width_mm = 1 * mapbox_config._MAPBOX_PIXEL_TO_MM
+        path_core_low_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(line_width, 14.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
         high_width_mm = 7 * mapbox_config._MAPBOX_PIXEL_TO_MM
-        self.assertAlmostEqual(by_id["road-path-below-z16"]["paint"]["line-width"], low_width_mm)
+        self.assertAlmostEqual(by_id["road-path-below-z16"]["paint"]["line-width"], path_core_low_width_mm)
+        self.assertAlmostEqual(by_id["road-path"]["paint"]["line-width"], path_core_low_width_mm)
         self.assertAlmostEqual(by_id["road-path-z16-plus"]["paint"]["line-width"], high_width_mm)
         self.assertAlmostEqual(by_id["road-path-bg-below-z16-outdoor"]["paint"]["line-width"], low_width_mm)
         self.assertAlmostEqual(by_id["road-path-bg-z16-plus-outdoor"]["paint"]["line-width"], high_width_mm)
