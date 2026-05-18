@@ -59,6 +59,8 @@ _WATERWAY_LABEL_REPEAT_DISTANCE_PX_BY_STYLE_MARKER = {
     "z15-to-z17": 325.0,
     "z17-plus": 400.0,
 }
+_CONTOUR_LABEL_ELEVATION_FIELD_EXPRESSION = '"ele"'
+_CONTOUR_LABEL_EXPRESSION = "concat(\"ele\", ' m')"
 
 
 def _label_style_mapbox_layer_id(style) -> str:
@@ -110,6 +112,16 @@ def _label_repeat_distance(layer_name: str, style) -> float | None:
     return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
 
 
+def _label_field_expression(layer_name: str, settings) -> str | None:
+    if (
+        layer_name == "contour-label"
+        and getattr(settings, "fieldName", "") == _CONTOUR_LABEL_ELEVATION_FIELD_EXPRESSION
+        and getattr(settings, "isExpression", False)
+    ):
+        return _CONTOUR_LABEL_EXPRESSION
+    return None
+
+
 def _needs_repeat_distance(settings) -> bool:
     repeat_distance = getattr(settings, "repeatDistance", 0.0)
     return not isinstance(repeat_distance, (int, float)) or repeat_distance <= 0
@@ -132,6 +144,7 @@ def _apply_label_settings(
     layer_name: str,
     priority: int | None,
     repeat_distance: float | None,
+    field_expression: str | None,
     qgs_property,
     qgis,
 ) -> bool:
@@ -144,6 +157,13 @@ def _apply_label_settings(
     if repeat_distance is not None and _needs_repeat_distance(settings):
         settings.repeatDistance = repeat_distance
         settings.repeatDistanceUnit = qgis.RenderUnit.Millimeters
+        changed = True
+    if field_expression is not None and (
+        getattr(settings, "fieldName", "") != field_expression
+        or not getattr(settings, "isExpression", False)
+    ):
+        settings.fieldName = field_expression
+        settings.isExpression = True
         changed = True
     return changed
 
@@ -283,16 +303,20 @@ class BackgroundMapService:
                 layer_name = _label_style_mapbox_layer_id(style)
                 priority = _label_priority(layer_name, style)
                 repeat_distance = _label_repeat_distance(layer_name, style)
-                if priority is None and repeat_distance is None:
+                if priority is None and repeat_distance is None and layer_name != "contour-label":
                     continue
                 settings = style.labelSettings()
                 if settings is None:
+                    continue
+                field_expression = _label_field_expression(layer_name, settings)
+                if priority is None and repeat_distance is None and field_expression is None:
                     continue
                 if _apply_label_settings(
                     settings,
                     layer_name=layer_name,
                     priority=priority,
                     repeat_distance=repeat_distance,
+                    field_expression=field_expression,
                     qgs_property=QgsProperty,
                     qgis=Qgis,
                 ):
