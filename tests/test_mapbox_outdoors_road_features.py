@@ -1,0 +1,460 @@
+import datetime as dt
+import gzip
+import io
+import json
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+from unittest import mock
+
+from tests import _path  # noqa: F401
+
+from qfit.validation import mapbox_outdoors_road_features as road_features
+from qfit.validation.mapbox_outdoors_road_features import (
+    RoadFeatureConfig,
+    build_parser,
+    build_road_feature_paths,
+    build_run_directory,
+    build_summary_markdown,
+    collect_road_feature_report,
+    is_path_line_candidate,
+    is_pedestrian_line_candidate,
+    is_pedestrian_polygon_candidate,
+    load_style_definition,
+    main,
+    resolve_mapbox_token,
+    road_tile_record,
+    write_report,
+)
+
+
+def _feature(geometry_type, properties):
+    return {
+        "geometry": {"type": geometry_type, "coordinates": [[0, 0], [1, 1]]},
+        "properties": properties,
+    }
+
+
+class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
+    def test_resolve_mapbox_token_prefers_argument_then_environment(self):
+        self.assertEqual(
+            resolve_mapbox_token(
+                provided_token="arg-token",
+                environ={"MAPBOX_ACCESS_TOKEN": "env-token", "QFIT_MAPBOX_ACCESS_TOKEN": "qfit-token"},
+            ),
+            "arg-token",
+        )
+        self.assertEqual(
+            resolve_mapbox_token(provided_token=None, environ={"MAPBOX_ACCESS_TOKEN": "env-token"}),
+            "env-token",
+        )
+        self.assertEqual(
+            resolve_mapbox_token(provided_token=None, environ={"QFIT_MAPBOX_ACCESS_TOKEN": "qfit-token"}),
+            "qfit-token",
+        )
+        self.assertIsNone(resolve_mapbox_token(provided_token=None, environ={}))
+
+    def test_build_paths_are_predictable(self):
+        run_dir = build_run_directory(
+            output_root=Path("/tmp/roads"),
+            camera_name="zermatt",
+            now=dt.datetime(2026, 5, 18, 14, 5, tzinfo=dt.timezone.utc),
+        )
+        paths = build_road_feature_paths(run_dir)
+
+        self.assertEqual(run_dir, Path("/tmp/roads/zermatt/20260518T140500Z"))
+        self.assertEqual(paths.json_path, run_dir / "road-features.json")
+        self.assertEqual(paths.summary_path, run_dir / "summary.md")
+
+    def test_load_style_definition_requires_json_object(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            style_path = Path(tmpdir) / "style.json"
+            style_path.write_text('{"version": 8}\n', encoding="utf-8")
+            self.assertEqual(load_style_definition(style_path), {"version": 8})
+
+            style_path.write_text('["not", "an", "object"]\n', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_style_definition(style_path)
+
+    def test_candidate_filters_match_pedestrian_polygon_and_line_style_inputs(self):
+        pedestrian_polygon = _feature(
+            "Polygon",
+            {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": 0},
+        )
+        path_polygon = _feature("MultiPolygon", {"class": "path", "type": "footway", "structure": "ford"})
+        bridge_polygon = _feature("Polygon", {"class": "pedestrian", "type": "pedestrian", "structure": "bridge"})
+        negative_layer_polygon = _feature(
+            "Polygon",
+            {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": -1},
+        )
+        pedestrian_line = _feature(
+            "LineString",
+            {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": 1},
+        )
+        negative_layer_line = _feature(
+            "LineString",
+            {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": -1},
+        )
+        path_line = _feature("MultiLineString", {"class": "path", "type": "footway", "structure": "none"})
+        negative_layer_path_line = _feature(
+            "LineString",
+            {"class": "path", "type": "footway", "structure": "none", "layer": -1},
+        )
+        step_path_line = _feature("LineString", {"class": "path", "type": "steps", "structure": "none"})
+        sidewalk_path_line = _feature("LineString", {"class": "path", "type": "sidewalk", "structure": "none"})
+        crossing_path_line = _feature("LineString", {"class": "path", "type": "crossing", "structure": "none"})
+        missing_structure_path_line = _feature("LineString", {"class": "path", "type": "footway"})
+
+        self.assertTrue(is_pedestrian_polygon_candidate(pedestrian_polygon))
+        self.assertTrue(is_pedestrian_polygon_candidate(path_polygon))
+        self.assertFalse(is_pedestrian_polygon_candidate(bridge_polygon))
+        self.assertFalse(is_pedestrian_polygon_candidate(negative_layer_polygon))
+        self.assertFalse(is_pedestrian_polygon_candidate(pedestrian_line))
+        self.assertTrue(is_pedestrian_line_candidate(pedestrian_line))
+        self.assertFalse(is_pedestrian_line_candidate(negative_layer_line))
+        self.assertFalse(is_pedestrian_line_candidate(path_line))
+        self.assertTrue(is_path_line_candidate(path_line))
+        self.assertFalse(is_path_line_candidate(negative_layer_path_line))
+        self.assertFalse(is_path_line_candidate(step_path_line, tile_zoom=15))
+        self.assertFalse(is_path_line_candidate(step_path_line, tile_zoom=16))
+        self.assertFalse(is_path_line_candidate(sidewalk_path_line, tile_zoom=15))
+        self.assertTrue(is_path_line_candidate(sidewalk_path_line, tile_zoom=16))
+        self.assertFalse(is_path_line_candidate(crossing_path_line, tile_zoom=15))
+        self.assertTrue(is_path_line_candidate(crossing_path_line, tile_zoom=16))
+        self.assertFalse(is_path_line_candidate(missing_structure_path_line))
+        self.assertFalse(is_path_line_candidate(pedestrian_line))
+
+    def test_road_tile_record_counts_pedestrian_polygons_and_line_candidates(self):
+        road_features = [
+            _feature("Polygon", {"class": "pedestrian", "type": "pedestrian", "structure": "none"}),
+            _feature("MultiPolygon", {"class": "path", "type": "footway", "structure": "none"}),
+            _feature("Polygon", {"class": "pedestrian", "type": "pedestrian", "structure": "bridge"}),
+            _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none"}),
+            _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": -1}),
+            _feature("LineString", {"class": "path", "type": "footway", "structure": "none"}),
+            _feature("MultiLineString", {"class": "path", "type": "steps", "structure": "none"}),
+            _feature("LineString", {"class": "street", "type": "street", "structure": "none"}),
+        ]
+
+        def decoder(_payload):
+            return {"road": {"features": road_features}}
+
+        record = road_tile_record(
+            tile={"z": 18, "x": 136712, "y": 93238},
+            tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=decoder,
+        )
+
+        self.assertEqual(record["status"], "decoded")
+        self.assertEqual(record["road_feature_count"], 8)
+        self.assertEqual(record["pedestrian_polygon_candidate_count"], 2)
+        self.assertEqual(record["pedestrian_line_candidate_count"], 1)
+        self.assertEqual(record["path_line_candidate_count"], 1)
+        self.assertEqual(record["pedestrian_polygon_class_counts"], {"path": 1, "pedestrian": 1})
+        self.assertEqual(record["pedestrian_polygon_type_counts"], {"footway": 1, "pedestrian": 1})
+        self.assertEqual(record["pedestrian_line_type_counts"], {"pedestrian": 1})
+        self.assertEqual(record["path_line_type_counts"], {"footway": 1})
+        self.assertEqual(record["sample_pedestrian_polygons"][0]["properties"]["class"], "pedestrian")
+
+    def test_road_tile_record_accepts_flat_layer_lists_and_summarizes_irregular_features(self):
+        road_features = [
+            {
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 2]], [[2, 3], [4, 5]]],
+                },
+                "properties": {"class": "pedestrian", "type": ["plaza"], "structure": "none"},
+            },
+            {
+                "geometry": {"type": "LineString", "coordinates": [7, 8]},
+                "properties": {"class": "pedestrian", "type": {"kind": "lane"}, "structure": "none"},
+            },
+            {"geometry": {"type": "Polygon"}, "properties": {"class": "path", "structure": "none"}},
+            {"properties": {"class": "street"}},
+            "ignore-me",
+        ]
+
+        record = road_tile_record(
+            tile={"z": 18, "x": 1, "y": 2},
+            tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=lambda _payload: {"road": road_features},
+        )
+
+        self.assertEqual(record["status"], "decoded")
+        self.assertEqual(record["road_feature_count"], 4)
+        self.assertEqual(record["pedestrian_polygon_candidate_count"], 2)
+        self.assertEqual(record["pedestrian_line_candidate_count"], 1)
+        self.assertEqual(record["road_geometry_type_counts"]["(missing)"], 1)
+        self.assertEqual(record["pedestrian_polygon_type_counts"], {'["plaza"]': 1, "(missing)": 1})
+        self.assertEqual(record["pedestrian_line_type_counts"], {'{"kind":"lane"}': 1})
+        self.assertEqual(record["sample_pedestrian_polygons"][0]["geometry"]["bounds"], [0.0, 0.0, 4.0, 5.0])
+        self.assertEqual(record["sample_pedestrian_lines"][0]["geometry"]["point_count"], 1)
+
+    def test_road_tile_record_treats_non_list_layer_as_empty(self):
+        record = road_tile_record(
+            tile={"z": 18, "x": 1, "y": 2},
+            tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=lambda _payload: {"road": "not-a-layer"},
+        )
+
+        self.assertEqual(record["status"], "decoded")
+        self.assertEqual(record["road_feature_count"], 0)
+
+    def test_road_tile_record_marks_decode_errors(self):
+        record = road_tile_record(
+            tile={"z": 18, "x": 1, "y": 2},
+            tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+            tile_fetcher=lambda _url: b"not-gzip",
+            tile_decoder=lambda _payload: (_ for _ in ()).throw(ValueError("bad tile")),
+        )
+
+        self.assertEqual(record["status"], "error")
+        self.assertEqual(record["error"], "ValueError")
+
+    def test_collect_road_feature_report_uses_style_tiles_and_camera(self):
+        generated = dt.datetime(2026, 5, 18, 14, 12, tzinfo=dt.timezone.utc)
+        calls = []
+
+        def style_fetcher(token, owner, style_id):
+            self.assertEqual((token, owner, style_id), ("token", "mapbox", "outdoors-v12"))
+            return {"sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}}}
+
+        def tile_fetcher(url):
+            calls.append(url)
+            return gzip.compress(b"tile")
+
+        def decoder(_payload):
+            return {
+                "road": {
+                    "features": [
+                        _feature("Polygon", {"class": "pedestrian", "type": "pedestrian", "structure": "none"}),
+                        _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none"}),
+                        _feature("LineString", {"class": "path", "type": "footway", "structure": "none"}),
+                    ]
+                }
+            }
+
+        report = collect_road_feature_report(
+            RoadFeatureConfig(token="token", output_root=Path("/tmp"), tile_zoom=0, now=generated),
+            style_fetcher=style_fetcher,
+            tile_fetcher=tile_fetcher,
+            tile_decoder=decoder,
+        )
+
+        self.assertEqual(report["generated"], "2026-05-18T14:12:00+00:00")
+        self.assertEqual(report["camera"]["name"], "zermatt-trails-z18-outdoors")
+        self.assertEqual(report["tile_zoom"], 0)
+        self.assertEqual(report["tile_count"], 1)
+        self.assertEqual(report["decoded_tile_count"], 1)
+        self.assertEqual(report["road_feature_count"], 3)
+        self.assertEqual(report["pedestrian_polygon_candidate_count"], 1)
+        self.assertEqual(report["pedestrian_line_candidate_count"], 1)
+        self.assertEqual(report["path_line_candidate_count"], 1)
+        self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 1})
+        self.assertEqual(report["path_line_type_counts"], {"footway": 1})
+        self.assertEqual(len(calls), 1)
+        self.assertIn("mapbox.mapbox-streets-v8/0/0/0.mvt", calls[0])
+
+    def test_collect_road_feature_report_can_load_style_json_file(self):
+        generated = dt.datetime(2026, 5, 18, 14, 12, tzinfo=dt.timezone.utc)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            style_path = Path(tmpdir) / "style.json"
+            style_path.write_text(
+                json.dumps({"sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}}}),
+                encoding="utf-8",
+            )
+            report = collect_road_feature_report(
+                RoadFeatureConfig(
+                    token="token",
+                    output_root=Path(tmpdir),
+                    style_json_path=style_path,
+                    tile_zoom=0,
+                    now=generated,
+                ),
+                tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                tile_decoder=lambda _payload: {"road": []},
+            )
+
+        self.assertEqual(report["tileset_ids"], ["mapbox.mapbox-streets-v8"])
+        self.assertEqual(report["road_feature_count"], 0)
+
+    def test_collect_road_feature_report_requires_token_for_style_and_tiles(self):
+        with self.assertRaisesRegex(ValueError, "style-json"):
+            collect_road_feature_report(
+                RoadFeatureConfig(token=None, output_root=Path("/tmp"), tile_zoom=0),
+                style_fetcher=lambda _token, _owner, _style_id: {},
+                tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                tile_decoder=lambda _payload: {"road": []},
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            style_path = Path(tmpdir) / "style.json"
+            style_path.write_text(
+                json.dumps({"sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}}}),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "vector tiles"):
+                collect_road_feature_report(
+                    RoadFeatureConfig(token=None, output_root=Path(tmpdir), style_json_path=style_path, tile_zoom=0),
+                    tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                    tile_decoder=lambda _payload: {"road": []},
+                )
+            with self.assertRaisesRegex(ValueError, "vector tiles"):
+                collect_road_feature_report(
+                    RoadFeatureConfig(token="", output_root=Path(tmpdir), style_json_path=style_path, tile_zoom=0),
+                    tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                    tile_decoder=lambda _payload: {"road": []},
+                )
+
+    def test_collect_road_feature_report_rejects_unknown_camera(self):
+        with self.assertRaisesRegex(ValueError, "Unknown comparison camera"):
+            collect_road_feature_report(
+                RoadFeatureConfig(token="token", output_root=Path("/tmp"), camera_name="missing-camera", tile_zoom=0),
+                style_fetcher=lambda _token, _owner, _style_id: {
+                    "sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}}
+                },
+                tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                tile_decoder=lambda _payload: {"road": []},
+            )
+
+    def test_build_summary_markdown_includes_counts_and_samples(self):
+        report = {
+            "generated": "2026-05-18T14:12:00+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "camera": {"name": "zermatt-trails-z18-outdoors"},
+            "tile_zoom": 18,
+            "decoded_tile_count": 1,
+            "tile_count": 1,
+            "road_feature_count": 3,
+            "pedestrian_polygon_candidate_count": 1,
+            "pedestrian_line_candidate_count": 1,
+            "path_line_candidate_count": 1,
+            "pedestrian_polygon_type_counts": {"pedestrian": 1},
+            "pedestrian_line_type_counts": {"pedestrian": 1},
+            "path_line_type_counts": {"footway": 1},
+            "sample_pedestrian_polygons": [{"properties": {"class": "pedestrian"}}],
+            "sample_pedestrian_lines": [{"properties": {"class": "pedestrian"}}],
+            "sample_path_lines": [{"properties": {"class": "path"}}],
+            "tiles": [
+                "ignore-me",
+                {
+                    "z": 18,
+                    "x": 1,
+                    "y": 2,
+                    "status": "decoded",
+                    "road_feature_count": 3,
+                    "pedestrian_polygon_candidate_count": 1,
+                    "pedestrian_line_candidate_count": 1,
+                    "path_line_candidate_count": 1,
+                    "pedestrian_polygon_type_counts": {"pedestrian": 1},
+                    "pedestrian_line_type_counts": {"pedestrian": 1},
+                    "path_line_type_counts": {"footway": 1},
+                }
+            ],
+        }
+
+        markdown = build_summary_markdown(report)
+
+        self.assertIn("# Mapbox Outdoors road feature diagnostic - zermatt-trails-z18-outdoors", markdown)
+        self.assertIn("Pedestrian/path polygon candidates: 1", markdown)
+        self.assertIn("Path line candidates: 1", markdown)
+        self.assertIn("## Sample pedestrian/path polygon candidates", markdown)
+        self.assertIn("## Sample pedestrian line candidates", markdown)
+        self.assertIn("## Sample path line candidates", markdown)
+
+    def test_write_report_writes_json_and_markdown(self):
+        report = {
+            "generated": "2026-05-18T14:12:00+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "camera": {"name": "zermatt-trails-z18-outdoors"},
+            "tile_zoom": 18,
+            "decoded_tile_count": 0,
+            "tile_count": 0,
+            "road_feature_count": 0,
+            "pedestrian_polygon_candidate_count": 0,
+            "pedestrian_line_candidate_count": 0,
+            "path_line_candidate_count": 0,
+            "tiles": [],
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = build_road_feature_paths(Path(tmpdir) / "run")
+            write_report(report, paths)
+
+            self.assertEqual(json.loads(paths.json_path.read_text()), report)
+            self.assertIn("Road features: 0", paths.summary_path.read_text())
+
+    def test_private_helpers_cover_url_fetching_and_sample_limits(self):
+        response = mock.Mock()
+        response.read.return_value = b"tile"
+        response.__enter__ = mock.Mock(return_value=response)
+        response.__exit__ = mock.Mock(return_value=None)
+        with mock.patch("qfit.validation.mapbox_outdoors_contour_features.urlopen", return_value=response) as urlopen:
+            self.assertEqual(road_features._fetch_url_bytes("https://example.test/tile.mvt"), b"tile")
+        urlopen.assert_called_once_with("https://example.test/tile.mvt", timeout=20)
+
+        self.assertEqual(road_features._merge_bounds([0, 0, 1, 1], None), [0, 0, 1, 1])
+        self.assertEqual(road_features._combined_record_counts([{"counts": "bad"}], "counts"), {})
+        many_samples = [{"sample": i} for i in range(road_features.MAX_SAMPLE_FEATURES + 3)]
+        self.assertEqual(
+            road_features._combined_samples([{"samples": many_samples}, {"samples": [{"sample": "extra"}]}], "samples"),
+            many_samples[: road_features.MAX_SAMPLE_FEATURES],
+        )
+
+    def test_parser_and_main_wire_cli_arguments_to_report_output(self):
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "camera-name",
+                "--style-json",
+                "/tmp/style.json",
+                "--style-owner",
+                "owner",
+                "--style-id",
+                "style",
+                "--mapbox-token",
+                "token",
+                "--tile-zoom",
+                "14",
+                "--output-root",
+                "/tmp/out",
+            ]
+        )
+        self.assertEqual(args.camera, "camera-name")
+        self.assertEqual(args.tile_zoom, 14)
+
+        captured = {}
+
+        def fake_collect(config):
+            captured["config"] = config
+            return {"camera": {"name": config.camera_name}, "tiles": []}
+
+        def fake_write(report, paths):
+            captured["report"] = report
+            captured["paths"] = paths
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            stdout = io.StringIO()
+            with (
+                mock.patch.object(road_features, "collect_road_feature_report", side_effect=fake_collect),
+                mock.patch.object(road_features, "write_report", side_effect=fake_write),
+                redirect_stdout(stdout),
+            ):
+                result = main(["camera-name", "--mapbox-token", "token", "--tile-zoom", "14", "--output-root", tmpdir])
+
+        self.assertEqual(result, 0)
+        self.assertEqual(captured["config"].camera_name, "camera-name")
+        self.assertEqual(captured["config"].tile_zoom, 14)
+        self.assertEqual(captured["paths"].summary_path.name, "summary.md")
+        self.assertIn("summary.md", stdout.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
