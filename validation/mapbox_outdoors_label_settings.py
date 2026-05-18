@@ -15,6 +15,59 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-label-settings"
 DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 DEFAULT_QT_QPA_PLATFORM = "offscreen"
+_SOURCE_LABEL_LAYOUT_PROPERTIES = (
+    "symbol-placement",
+    "symbol-spacing",
+    "symbol-avoid-edges",
+    "symbol-sort-key",
+    "symbol-z-order",
+    "icon-allow-overlap",
+    "icon-anchor",
+    "icon-ignore-placement",
+    "icon-image",
+    "icon-keep-upright",
+    "icon-offset",
+    "icon-optional",
+    "icon-padding",
+    "icon-pitch-alignment",
+    "icon-rotate",
+    "icon-rotation-alignment",
+    "icon-size",
+    "icon-text-fit",
+    "icon-text-fit-padding",
+    "text-field",
+    "text-size",
+    "text-font",
+    "text-letter-spacing",
+    "text-max-width",
+    "text-max-angle",
+    "text-allow-overlap",
+    "text-ignore-placement",
+    "text-optional",
+    "text-keep-upright",
+    "text-padding",
+    "text-anchor",
+    "text-justify",
+    "text-offset",
+    "text-radial-offset",
+    "text-variable-anchor",
+    "visibility",
+)
+_SOURCE_LABEL_PAINT_PROPERTIES = (
+    "icon-color",
+    "icon-halo-blur",
+    "icon-halo-color",
+    "icon-halo-width",
+    "icon-opacity",
+    "icon-translate",
+    "icon-translate-anchor",
+    "text-color",
+    "text-halo-color",
+    "text-halo-width",
+    "text-halo-blur",
+    "text-opacity",
+    "text-translate",
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +108,118 @@ def load_style_definition(path: Path) -> dict[str, object]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected Mapbox style JSON object in {path}")
     return data
+
+
+def _style_layers(style_definition: dict[str, object]) -> list[dict[str, object]]:
+    layers = style_definition.get("layers")
+    if not isinstance(layers, list):
+        return []
+    return [layer for layer in layers if isinstance(layer, dict)]
+
+
+def _style_layers_by_id(style_definition: dict[str, object]) -> dict[str, dict[str, object]]:
+    return {
+        str(layer.get("id")): layer
+        for layer in _style_layers(style_definition)
+        if isinstance(layer.get("id"), str)
+    }
+
+
+def _selected_section_properties(
+    layer: dict[str, object],
+    section: str,
+    property_names: tuple[str, ...],
+) -> dict[str, object]:
+    values = layer.get(section)
+    if not isinstance(values, dict):
+        return {}
+    return {property_name: values[property_name] for property_name in property_names if property_name in values}
+
+
+def _source_label_layer_record(
+    *,
+    original_layer: dict[str, object],
+    qfit_layer: dict[str, object] | None,
+    style_name: str,
+) -> dict[str, object]:
+    return {
+        "base_style_layer_id": str(original_layer.get("id") or ""),
+        "style_name": style_name,
+        "qfit_style_layer_id": str(qfit_layer.get("id") or "") if qfit_layer is not None else None,
+        "source_layer": str(original_layer.get("source-layer") or ""),
+        "minzoom": original_layer.get("minzoom"),
+        "maxzoom": original_layer.get("maxzoom"),
+        "qfit_minzoom": qfit_layer.get("minzoom") if qfit_layer is not None else None,
+        "qfit_maxzoom": qfit_layer.get("maxzoom") if qfit_layer is not None else None,
+        "filter": original_layer.get("filter"),
+        "qfit_filter": qfit_layer.get("filter") if qfit_layer is not None else None,
+        "layout": _selected_section_properties(
+            original_layer,
+            "layout",
+            _SOURCE_LABEL_LAYOUT_PROPERTIES,
+        ),
+        "paint": _selected_section_properties(
+            original_layer,
+            "paint",
+            _SOURCE_LABEL_PAINT_PROPERTIES,
+        ),
+        "qfit_layout": (
+            _selected_section_properties(qfit_layer, "layout", _SOURCE_LABEL_LAYOUT_PROPERTIES)
+            if qfit_layer is not None
+            else {}
+        ),
+        "qfit_paint": (
+            _selected_section_properties(qfit_layer, "paint", _SOURCE_LABEL_PAINT_PROPERTIES)
+            if qfit_layer is not None
+            else {}
+        ),
+    }
+
+
+def source_label_layer_records(
+    original_style: dict[str, object],
+    qfit_style: dict[str, object],
+    label_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    _ensure_package_parent_on_path()
+    from qfit.mapbox_config import base_mapbox_style_layer_id_for_qfit
+
+    original_layers_by_id = _style_layers_by_id(original_style)
+    qfit_layers = _style_layers(qfit_style)
+    qfit_layers_by_id = _style_layers_by_id(qfit_style)
+    rows: list[dict[str, object]] = []
+    seen: set[tuple[str, str]] = set()
+    for label_record in label_records:
+        style_name = str(label_record.get("style_name") or "")
+        base_style_layer_id = str(label_record.get("base_style_layer_id") or "")
+        if not base_style_layer_id:
+            base_style_layer_id = base_mapbox_style_layer_id_for_qfit(style_name)
+        key = (base_style_layer_id, style_name)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        original_layer = original_layers_by_id.get(base_style_layer_id)
+        if original_layer is None:
+            continue
+        qfit_layer = qfit_layers_by_id.get(style_name) or qfit_layers_by_id.get(base_style_layer_id)
+        if qfit_layer is None:
+            qfit_layer = next(
+                (
+                    layer
+                    for layer in qfit_layers
+                    if base_mapbox_style_layer_id_for_qfit(str(layer.get("id") or "")) == base_style_layer_id
+                ),
+                None,
+            )
+        rows.append(
+            _source_label_layer_record(
+                original_layer=original_layer,
+                qfit_layer=qfit_layer,
+                style_name=style_name,
+            )
+        )
+    return sorted(rows, key=lambda row: (str(row.get("base_style_layer_id") or ""), str(row.get("style_name") or "")))
 
 
 def _style_slug(style_owner: str, style_id: str) -> str:
@@ -260,7 +425,9 @@ def _label_settings_report(
     sprite_loaded: bool,
     sprite_count: int,
     records: list[dict[str, object]],
+    source_label_layers: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
+    source_label_layer_rows = source_label_layers or []
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -271,6 +438,8 @@ def _label_settings_report(
         "sprite_definition_count": sprite_count,
         "label_count": len(records),
         "labels": records,
+        "source_label_layer_count": len(source_label_layer_rows),
+        "source_label_layers": source_label_layer_rows,
     }
 
 
@@ -305,12 +474,14 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             (QgsMapBoxGlStyleConversionContext, QgsMapBoxGlStyleConverter, Qgis),
         )
         records = _postprocessed_label_records(labeling, apply_mapbox_label_priority)
+        source_label_layers = source_label_layer_records(original_style, qfit_style, records)
         return _label_settings_report(
             config=config,
             result=result,
             sprite_loaded=sprite_loaded,
             sprite_count=sprite_count,
             records=records,
+            source_label_layers=source_label_layers,
         )
     finally:
         if created_app:
@@ -336,9 +507,29 @@ def _compound_markdown_value(*values: object, separator: str = " ") -> str:
     return separator.join(rendered_values)
 
 
+def _json_markdown_value(value: object) -> str:
+    if value is None or value == {} or value == []:
+        return "—"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).replace("|", "\\|")
+    return _markdown_value(value)
+
+
+def _zoom_range_markdown_value(minzoom: object, maxzoom: object) -> str:
+    if minzoom is None and maxzoom is None:
+        return "all"
+    if maxzoom is None:
+        return f"{_markdown_value(minzoom)}+"
+    if minzoom is None:
+        return f"<{_markdown_value(maxzoom)}"
+    return _compound_markdown_value(minzoom, maxzoom, separator=" to ")
+
+
 def build_summary_markdown(report: dict[str, object]) -> str:
     labels = report.get("labels")
     rows = labels if isinstance(labels, list) else []
+    source_labels = report.get("source_label_layers")
+    source_rows = source_labels if isinstance(source_labels, list) else []
     lines = [
         f"# Mapbox Outdoors QGIS label settings — {report.get('style_owner')}/{report.get('style_id')}",
         "",
@@ -386,6 +577,41 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                     row.get("overrun_distance_unit"),
                 ),
                 keys=_markdown_value(row.get("data_defined_property_keys")),
+            )
+        )
+    if source_rows:
+        lines.extend(
+            [
+                "",
+                "## Source Mapbox label controls",
+                "",
+                f"Source label layers: {report.get('source_label_layer_count', len(source_rows))}",
+                "",
+                "| Base layer | Style | QGIS layer | Source layer | Zoom | QGIS zoom | Filter | QGIS filter | Layout controls | Paint controls | QGIS layout | QGIS paint |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+    for row in source_rows:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "| {base} | {style} | {qfit_layer} | {source} | {zoom} | {qfit_zoom} | {filter} | {qfit_filter} | {layout} | {paint} | {qfit_layout} | {qfit_paint} |".format(
+                base=_markdown_value(row.get("base_style_layer_id")),
+                style=_markdown_value(row.get("style_name")),
+                qfit_layer=_markdown_value(row.get("qfit_style_layer_id")),
+                source=_markdown_value(row.get("source_layer")),
+                zoom=_zoom_range_markdown_value(row.get("minzoom"), row.get("maxzoom")),
+                qfit_zoom=(
+                    _zoom_range_markdown_value(row.get("qfit_minzoom"), row.get("qfit_maxzoom"))
+                    if row.get("qfit_style_layer_id") is not None
+                    else "—"
+                ),
+                filter=_json_markdown_value(row.get("filter")),
+                qfit_filter=_json_markdown_value(row.get("qfit_filter")),
+                layout=_json_markdown_value(row.get("layout")),
+                paint=_json_markdown_value(row.get("paint")),
+                qfit_layout=_json_markdown_value(row.get("qfit_layout")),
+                qfit_paint=_json_markdown_value(row.get("qfit_paint")),
             )
         )
     return "\n".join(lines) + "\n"

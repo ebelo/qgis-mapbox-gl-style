@@ -26,6 +26,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     load_style_definition,
     main,
     resolve_mapbox_token,
+    source_label_layer_records,
     write_report,
 )
 
@@ -421,6 +422,109 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual([record["base_style_layer_id"] for record in records], ["road-label", "waterway-label"])
         self.assertEqual(_postprocessed_label_records(None, fake_apply_label_priority), [])
 
+    def test_source_label_layer_records_align_original_and_qfit_controls(self):
+        original_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "contour-label",
+                    "type": "symbol",
+                    "source-layer": "contour",
+                    "minzoom": 12,
+                    "filter": ["==", ["get", "index"], 5],
+                    "layout": {
+                        "icon-image": "mountain",
+                        "icon-size": 0.8,
+                        "symbol-placement": "line",
+                        "text-field": ["concat", ["get", "ele"], " m"],
+                        "text-letter-spacing": ["match", ["get", "class"], "ocean", 0.25, 0.01],
+                        "text-max-width": ["match", ["get", "class"], "ocean", 4, 10],
+                        "text-size": ["interpolate", ["linear"], ["zoom"], 12, 10, 16, 12],
+                        "text-max-angle": 25,
+                    },
+                    "paint": {
+                        "icon-opacity": 0.75,
+                        "text-color": "#626250",
+                        "text-halo-color": "#dcdcd4",
+                        "text-halo-width": 2,
+                    },
+                }
+            ],
+        }
+        qfit_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "contour-label",
+                    "type": "symbol",
+                    "source-layer": "contour",
+                    "minzoom": 12,
+                    "layout": {
+                        "icon-image": "mountain",
+                        "icon-size": 0.8,
+                        "symbol-placement": "line",
+                        "text-field": ["concat", ["get", "ele"], " m"],
+                        "text-letter-spacing": 0.25,
+                        "text-max-width": 4,
+                        "text-size": 9,
+                    },
+                    "paint": {
+                        "icon-opacity": 0.75,
+                        "text-color": "#626250",
+                        "text-halo-color": "#dcdcd4",
+                    },
+                }
+            ],
+        }
+
+        records = source_label_layer_records(
+            original_style,
+            qfit_style,
+            [{"base_style_layer_id": "contour-label", "style_name": "contour-label"}],
+        )
+
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertEqual(record["base_style_layer_id"], "contour-label")
+        self.assertEqual(record["qfit_style_layer_id"], "contour-label")
+        self.assertEqual(record["source_layer"], "contour")
+        self.assertEqual(record["filter"], ["==", ["get", "index"], 5])
+        self.assertEqual(record["layout"]["icon-image"], "mountain")
+        self.assertEqual(record["layout"]["icon-size"], 0.8)
+        self.assertEqual(record["layout"]["symbol-placement"], "line")
+        self.assertEqual(record["layout"]["text-letter-spacing"], ["match", ["get", "class"], "ocean", 0.25, 0.01])
+        self.assertEqual(record["layout"]["text-max-width"], ["match", ["get", "class"], "ocean", 4, 10])
+        self.assertEqual(record["layout"]["text-size"], ["interpolate", ["linear"], ["zoom"], 12, 10, 16, 12])
+        self.assertEqual(record["paint"]["icon-opacity"], 0.75)
+        self.assertEqual(record["paint"]["text-halo-width"], 2)
+        self.assertEqual(record["qfit_layout"]["icon-image"], "mountain")
+        self.assertEqual(record["qfit_layout"]["text-letter-spacing"], 0.25)
+        self.assertEqual(record["qfit_layout"]["text-max-width"], 4)
+        self.assertEqual(record["qfit_layout"]["text-size"], 9)
+
+    def test_source_label_layer_records_marks_missing_qfit_layer(self):
+        records = source_label_layer_records(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "contour-label",
+                        "type": "symbol",
+                        "source-layer": "contour",
+                        "layout": {"text-field": ["get", "ele"]},
+                        "paint": {"text-color": "#626250"},
+                    }
+                ],
+            },
+            {"version": 8, "layers": []},
+            [{"base_style_layer_id": "contour-label", "style_name": "contour-label"}],
+        )
+
+        self.assertIsNone(records[0]["qfit_style_layer_id"])
+        self.assertIsNone(records[0]["qfit_filter"])
+        self.assertEqual(records[0]["qfit_layout"], {})
+        self.assertEqual(records[0]["qfit_paint"], {})
+
     def test_label_settings_report_captures_summary_metadata(self):
         report = _label_settings_report(
             config=LabelSettingsConfig(token="token", output_root=Path("/tmp")),
@@ -428,6 +532,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             sprite_loaded=True,
             sprite_count=440,
             records=[{"style_name": "contour-label"}],
+            source_label_layers=[{"base_style_layer_id": "contour-label"}],
         )
 
         self.assertEqual(report["style_owner"], "mapbox")
@@ -436,6 +541,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertTrue(report["sprite_context_loaded"])
         self.assertEqual(report["sprite_definition_count"], 440)
         self.assertEqual(report["label_count"], 1)
+        self.assertEqual(report["source_label_layer_count"], 1)
 
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
         modules = {
@@ -445,7 +551,19 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, modules):
             with mock.patch(
                 "qfit.mapbox_config.fetch_mapbox_style_definition",
-                return_value={"version": 8, "layers": [], "sprite": "sprite-url"},
+                return_value={
+                    "version": 8,
+                    "layers": [
+                        {
+                            "id": "road-label",
+                            "type": "symbol",
+                            "source-layer": "road",
+                            "layout": {"text-field": ["get", "name"], "text-size": 11},
+                            "paint": {"text-color": "#111111"},
+                        }
+                    ],
+                    "sprite": "sprite-url",
+                },
             ) as fetch_style:
                 with mock.patch(
                     "qfit.mapbox_config.fetch_mapbox_sprite_resources",
@@ -453,7 +571,18 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 ) as fetch_sprites:
                     with mock.patch(
                         "qfit.mapbox_config.simplify_mapbox_style_expressions",
-                        return_value={"version": 8, "layers": [{"id": "road-label-z15-plus"}]},
+                        return_value={
+                            "version": 8,
+                            "layers": [
+                                {
+                                    "id": "road-label-z15-plus",
+                                    "type": "symbol",
+                                    "source-layer": "road",
+                                    "layout": {"text-field": ["get", "name"], "text-size": 11},
+                                    "paint": {"text-color": "#111111"},
+                                }
+                            ],
+                        },
                     ):
                         report = collect_label_settings(LabelSettingsConfig(token="token", output_root=Path("/tmp")))
 
@@ -464,6 +593,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertFalse(report["sprite_context_loaded"])
         self.assertEqual(report["label_count"], 1)
         self.assertEqual(report["labels"][0]["base_style_layer_id"], "road-label")
+        self.assertEqual(report["source_label_layer_count"], 1)
+        self.assertEqual(report["source_label_layers"][0]["qfit_style_layer_id"], "road-label-z15-plus")
         self.assertIsNone(FakeQgsApplication.instance())
 
     def test_summary_markdown_lists_label_settings(self):
@@ -474,6 +605,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "sprite_context_loaded": True,
             "sprite_definition_count": 440,
             "label_count": 1,
+            "source_label_layer_count": 1,
             "labels": [
                 {
                     "base_style_layer_id": "contour-label",
@@ -506,6 +638,24 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "data_defined_property_keys": ["pipe|key"],
                 }
             ],
+            "source_label_layers": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "style_name": "contour-label",
+                    "qfit_style_layer_id": "contour-label",
+                    "source_layer": "contour",
+                    "minzoom": 12,
+                    "maxzoom": None,
+                    "qfit_minzoom": 12,
+                    "qfit_maxzoom": None,
+                    "filter": ["==", ["get", "index"], 5],
+                    "qfit_filter": ["==", ["get", "index"], 5],
+                    "layout": {"symbol-placement": "line", "text-field": ["concat", ["get", "ele"], " m"]},
+                    "paint": {"text-color": "#626250", "text-halo-color": "#dcdcd4"},
+                    "qfit_layout": {"symbol-placement": "line", "text-field": ["concat", ["get", "ele"], " m"]},
+                    "qfit_paint": {"text-color": "#626250", "text-halo-color": "#dcdcd4"},
+                }
+            ],
         }
 
         markdown = build_summary_markdown(report)
@@ -520,6 +670,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("#dcdcd4", markdown)
         self.assertIn("25/-25", markdown)
         self.assertIn("pipe\\|key", markdown)
+        self.assertIn("## Source Mapbox label controls", markdown)
+        self.assertIn("Source label layers: 1", markdown)
+        self.assertIn("| contour-label | contour-label | contour-label | contour | 12+", markdown)
+        self.assertIn("\"symbol-placement\":\"line\"", markdown)
+        self.assertIn("\"text-halo-color\":\"#dcdcd4\"", markdown)
 
     def test_summary_markdown_collapses_empty_compound_cells(self):
         report = {
@@ -530,6 +685,21 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "sprite_definition_count": 0,
             "label_count": 1,
             "labels": [{"style_name": "sparse-label"}],
+            "source_label_layer_count": 1,
+            "source_label_layers": [
+                {
+                    "base_style_layer_id": "sparse-label",
+                    "style_name": "sparse-label",
+                    "qfit_style_layer_id": None,
+                    "source_layer": "sparse",
+                    "filter": [],
+                    "qfit_filter": [],
+                    "layout": {},
+                    "paint": {},
+                    "qfit_layout": {},
+                    "qfit_paint": {},
+                }
+            ],
         }
 
         markdown = build_summary_markdown(report)
@@ -537,6 +707,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("sparse-label", markdown)
         self.assertNotIn("— —", markdown)
         self.assertNotIn("—/—", markdown)
+        self.assertNotIn("[]", markdown)
+        self.assertIn("| sparse-label | sparse-label | — | sparse | all | — | — | — |", markdown)
 
     def test_write_report_writes_json_and_summary(self):
         report = {
