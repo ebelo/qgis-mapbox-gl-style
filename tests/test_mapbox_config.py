@@ -3747,7 +3747,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(fade_layer["paint"]["fill-opacity"], 0.5)
         self.assertAlmostEqual(full_layer["paint"]["fill-opacity"], 1.0)
         for layer in result["layers"]:
-            self.assertEqual(layer["paint"]["fill-pattern"], "pedestrian-polygon")
+            self.assertNotIn("fill-pattern", layer["paint"])
+            self.assertEqual(layer["paint"]["fill-color"], "hsl(0, 0%, 96%)")
             self.assertEqual(layer["filter"], ["==", ["geometry-type"], "Polygon"])
 
     def test_road_pedestrian_polygon_pattern_fill_opacity_is_not_split_when_shape_changes(self):
@@ -3759,6 +3760,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(len(result["layers"]), 1)
         self.assertEqual(result["layers"][0]["id"], "road-pedestrian-polygon-pattern")
         self.assertEqual(result["layers"][0]["paint"]["fill-opacity"], fill_opacity)
+        self.assertNotIn("fill-pattern", result["layers"][0]["paint"])
+        self.assertEqual(result["layers"][0]["paint"]["fill-color"], "hsl(0, 0%, 96%)")
 
     def test_road_pedestrian_polygon_pattern_fill_opacity_helpers_keep_passthrough_inputs(self):
         unchanged_layers = "not-a-layer-list"
