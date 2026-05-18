@@ -315,6 +315,7 @@ def label_settings_record(style: object, settings: object) -> dict[str, object]:
         "style_name": style_name_text,
         "base_style_layer_id": base_mapbox_style_layer_id_for_qfit(style_name_text),
         "source_layer": layer_name if isinstance(layer_name, str) else "",
+        "geometry_type": _enum_name(_method_value(style, "geometryType")),
         "field_name": _settings_value(settings, "fieldName"),
         "is_expression": _settings_value(settings, "isExpression"),
         "priority": _settings_value(settings, "priority"),
@@ -538,17 +539,18 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
         "",
-        "| Base layer | Style | Source layer | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Curve angles | Overrun | Data-defined keys |",
-        "| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- |",
+        "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Curve angles | Overrun | Data-defined keys |",
+        "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {base} | {style} | {source} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {curve_angles} | {overrun} | {keys} |".format(
+            "| {base} | {style} | {source} | {geometry} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {curve_angles} | {overrun} | {keys} |".format(
                 base=_markdown_value(row.get("base_style_layer_id")),
                 style=_markdown_value(row.get("style_name")),
                 source=_markdown_value(row.get("source_layer")),
+                geometry=_markdown_value(row.get("geometry_type")),
                 field=_markdown_value(row.get("field_name")),
                 expr=_markdown_value(row.get("is_expression")),
                 priority=_markdown_value(row.get("priority")),

@@ -82,9 +82,10 @@ class FakeTextFormat:
 
 
 class FakeStyle:
-    def __init__(self, *, style_name, layer_name):
+    def __init__(self, *, style_name, layer_name, geometry_type=None):
         self._style_name = style_name
         self._layer_name = layer_name
+        self._geometry_type = geometry_type or SimpleNamespace(name="Line")
 
     def styleName(self):
         return self._style_name
@@ -92,10 +93,13 @@ class FakeStyle:
     def layerName(self):
         return self._layer_name
 
+    def geometryType(self):
+        return self._geometry_type
+
 
 class FakeLabelStyle(FakeStyle):
-    def __init__(self, *, style_name, layer_name, settings):
-        super().__init__(style_name=style_name, layer_name=layer_name)
+    def __init__(self, *, style_name, layer_name, settings, geometry_type=None):
+        super().__init__(style_name=style_name, layer_name=layer_name, geometry_type=geometry_type)
         self._settings = settings
 
     def labelSettings(self):
@@ -284,6 +288,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(record["style_name"], "road-label-z15-plus")
         self.assertEqual(record["base_style_layer_id"], "road-label")
         self.assertEqual(record["source_layer"], "road")
+        self.assertEqual(record["geometry_type"], "Line")
         self.assertEqual(record["field_name"], '"name"')
         self.assertTrue(record["is_expression"])
         self.assertEqual(record["priority"], 7)
@@ -611,6 +616,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "base_style_layer_id": "contour-label",
                     "style_name": "contour-label",
                     "source_layer": "contour",
+                    "geometry_type": "Line",
                     "field_name": "concat(\"ele\", ' m')",
                     "is_expression": True,
                     "priority": 3,
@@ -664,6 +670,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("Converted label styles: 1", markdown)
         self.assertIn("Sprite context loaded: yes", markdown)
         self.assertIn("contour-label", markdown)
+        self.assertIn("| contour-label | contour-label | contour | Line |", markdown)
         self.assertIn("concat", markdown)
         self.assertIn("Millimeters", markdown)
         self.assertIn("#626250", markdown)
