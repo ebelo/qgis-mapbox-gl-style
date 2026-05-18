@@ -2369,7 +2369,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 city_filter,
             ],
         )
-        self.assertIn(["<", ["get", "symbolrank"], 8], low_zoom_city_layer["filter"][1])
+        self.assertIn(["<", ["get", "symbolrank"], 10], low_zoom_city_layer["filter"][1])
         self.assertEqual(
             dot_layer["filter"],
             [

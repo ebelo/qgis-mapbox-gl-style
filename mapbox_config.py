@@ -829,7 +829,7 @@ _LABEL_ICON_VISIBILITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
 )
 _SETTLEMENT_DOT_ICON_SPLIT_ZOOM = 8.0
 _SETTLEMENT_SYMBOL_SORT_KEY_EXPRESSION = ["get", "symbolrank"]
-_SETTLEMENT_MAJOR_LOW_ZOOM_QGIS_FILTER_SAMPLE_ZOOM = 6.0
+_SETTLEMENT_MAJOR_LOW_ZOOM_QGIS_FILTER_SAMPLE_ZOOM = 7.0
 _SETTLEMENT_MINOR_LOW_ZOOM_QGIS_MIN_ZOOM = 6.0
 _SETTLEMENT_DOT_ICON_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
     ("z2-to-z4", 2.0, 4.0),
@@ -5427,8 +5427,8 @@ def _zoom_normalized_filter_expression_for_qgis(layer: dict[str, object], value:
         and base_mapbox_style_layer_id_for_qfit(layer_id) == _SETTLEMENT_MAJOR_LABEL_LAYER_ID
         and layer_id.startswith(f"{_SETTLEMENT_MAJOR_LABEL_LAYER_ID}-z4-to-z6-")
     ):
-        # At z5 QGIS otherwise samples just below z6 and misses rank-7 cities
-        # such as Zurich and Milan, leaving minor towns to dominate the hierarchy.
+        # At z5 QGIS otherwise samples just below z6 and misses rank-8/9
+        # major cities, leaving the broad regional hierarchy too sparse.
         target_zoom = _SETTLEMENT_MAJOR_LOW_ZOOM_QGIS_FILTER_SAMPLE_ZOOM
     if target_zoom is None:
         target_zoom = _representative_zoom_in_layer_range(layer.get("minzoom"), layer.get("maxzoom"))
