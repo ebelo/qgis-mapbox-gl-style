@@ -5083,19 +5083,27 @@ def _literal_line_dasharray(value: object) -> list[object] | None:
     return None
 
 
-def _representative_line_dasharray_interpolate_output(expr: list[object]) -> object | None:
+def _representative_line_dasharray_interpolate_output(
+    expr: list[object],
+    *,
+    target_zoom: float = _REPRESENTATIVE_STYLE_ZOOM,
+) -> object | None:
     if len(expr) < 5:
         return None
     if expr[2] == ["zoom"]:
-        return _nearest_zoom_stop_value(expr)
+        return _nearest_zoom_stop_value(expr, target_zoom=target_zoom)
     return expr[4]
 
 
-def _representative_line_dasharray_step_output(expr: list[object]) -> object | None:
+def _representative_line_dasharray_step_output(
+    expr: list[object],
+    *,
+    target_zoom: float = _REPRESENTATIVE_STYLE_ZOOM,
+) -> object | None:
     if len(expr) < 3:
         return None
     if expr[1] == ["zoom"]:
-        return _step_zoom_value(expr)
+        return _step_zoom_value(expr, target_zoom=target_zoom)
     return expr[2]
 
 
@@ -5105,15 +5113,26 @@ def _case_expression_output_candidates(expr: list[object]) -> list[object]:
     return [expr[-1], *(expr[index] for index in range(len(expr) - 2, 1, -2))]
 
 
-def _first_line_dasharray_literal(candidates: list[object]) -> list[object] | None:
+def _first_line_dasharray_literal(
+    candidates: list[object],
+    *,
+    target_zoom: float = _REPRESENTATIVE_STYLE_ZOOM,
+) -> list[object] | None:
     for candidate in candidates:
-        literal_dasharray = _extract_line_dasharray_literal(candidate)
+        literal_dasharray = _extract_line_dasharray_literal(
+            candidate,
+            target_zoom=target_zoom,
+        )
         if literal_dasharray is not None:
             return literal_dasharray
     return None
 
 
-def _extract_line_dasharray_literal(expr: object) -> list[object] | None:
+def _extract_line_dasharray_literal(
+    expr: object,
+    *,
+    target_zoom: float = _REPRESENTATIVE_STYLE_ZOOM,
+) -> list[object] | None:
     """Extract a literal QGIS-safe dash pattern from simple Mapbox expressions."""
     literal_dasharray = _literal_line_dasharray(expr)
     if literal_dasharray is not None:
@@ -5123,15 +5142,31 @@ def _extract_line_dasharray_literal(expr: object) -> list[object] | None:
 
     op = expr[0]
     if op == "interpolate":
-        return _extract_line_dasharray_literal(_representative_line_dasharray_interpolate_output(expr))
+        return _extract_line_dasharray_literal(
+            _representative_line_dasharray_interpolate_output(expr, target_zoom=target_zoom),
+            target_zoom=target_zoom,
+        )
     if op == "step":
-        return _extract_line_dasharray_literal(_representative_line_dasharray_step_output(expr))
+        return _extract_line_dasharray_literal(
+            _representative_line_dasharray_step_output(expr, target_zoom=target_zoom),
+            target_zoom=target_zoom,
+        )
     if op == "match":
-        return _extract_line_dasharray_literal(expr[-1]) if len(expr) >= 5 else None
+        return (
+            _extract_line_dasharray_literal(expr[-1], target_zoom=target_zoom)
+            if len(expr) >= 5
+            else None
+        )
     if op == "case":
-        return _first_line_dasharray_literal(_case_expression_output_candidates(expr))
+        return _first_line_dasharray_literal(
+            _case_expression_output_candidates(expr),
+            target_zoom=target_zoom,
+        )
     if op == "coalesce":
-        return _first_line_dasharray_literal(list(reversed(expr[1:])))
+        return _first_line_dasharray_literal(
+            list(reversed(expr[1:])),
+            target_zoom=target_zoom,
+        )
     return None
 
 
@@ -6021,7 +6056,18 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if blur_width_mm is not None:
                         props[prop] = blur_width_mm
                 elif prop == "line-dasharray":
-                    dasharray = _extract_line_dasharray_literal(val)
+                    dasharray_target_zoom = _representative_zoom_in_layer_range(
+                        layer.get("minzoom"),
+                        layer.get("maxzoom"),
+                    )
+                    dasharray = _extract_line_dasharray_literal(
+                        val,
+                        target_zoom=(
+                            dasharray_target_zoom
+                            if dasharray_target_zoom is not None
+                            else _REPRESENTATIVE_STYLE_ZOOM
+                        ),
+                    )
                     if dasharray is not None:
                         props[prop] = dasharray
                 elif prop in _FULL_OPACITY_PROPS:
