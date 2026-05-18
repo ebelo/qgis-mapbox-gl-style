@@ -27,6 +27,24 @@ from ...mapbox_config import (
 )
 
 _WORKING_CRS = "EPSG:3857"
+_LABEL_PRIORITIES = {
+    "continent-label": 10,
+    "country-label": 10,
+    "state-label": 9,
+    "settlement-major-label": 8,
+    "settlement-minor-label": 6,
+    "settlement-subdivision-label": 3,
+    "water-point-label": 7,
+    "water-line-label": 6,
+    "natural-line-label": 4,
+    "natural-point-label": 4,
+    "poi-label": 5,
+    "road-label": 4,
+    "airport-label": 8,
+}
+_SETTLEMENT_LAYERS = {"settlement-major-label", "settlement-minor-label"}
+_SWISS_MOTORWAY_SHIELD_PRIORITY = 6
+_SWISS_MOTORWAY_SHIELD_Z11_STYLE_MARKER = "ch-motorway-icon-z11-plus"
 
 
 def _label_style_mapbox_layer_id(style) -> str:
@@ -38,6 +56,23 @@ def _label_style_mapbox_layer_id(style) -> str:
         if isinstance(layer_id, str) and layer_id:
             return base_mapbox_style_layer_id_for_qfit(layer_id)
     return ""
+
+
+def _label_style_name(style) -> str:
+    try:
+        style_name = style.styleName()
+    except AttributeError:
+        return ""
+    return style_name if isinstance(style_name, str) else ""
+
+
+def _label_priority(layer_name: str, style) -> int | None:
+    if (
+        layer_name == "road-number-shield"
+        and _SWISS_MOTORWAY_SHIELD_Z11_STYLE_MARKER in _label_style_name(style)
+    ):
+        return _SWISS_MOTORWAY_SHIELD_PRIORITY
+    return _LABEL_PRIORITIES.get(layer_name)
 
 
 class BackgroundMapService:
@@ -166,23 +201,6 @@ class BackgroundMapService:
         return False
 
     def _apply_label_priority(self, labeling) -> None:
-        _LAYER_PRIORITIES = {
-            "continent-label": 10,
-            "country-label": 10,
-            "state-label": 9,
-            "settlement-major-label": 8,
-            "settlement-minor-label": 6,
-            "settlement-subdivision-label": 3,
-            "water-point-label": 7,
-            "water-line-label": 6,
-            "natural-line-label": 4,
-            "natural-point-label": 4,
-            "poi-label": 5,
-            "road-label": 4,
-            "airport-label": 8,
-        }
-        _SETTLEMENT_LAYERS = {"settlement-major-label", "settlement-minor-label"}
-
         try:
             from qgis.core import QgsProperty  # noqa: PLC0415
 
@@ -190,7 +208,7 @@ class BackgroundMapService:
             changed = False
             for style in styles:
                 layer_name = _label_style_mapbox_layer_id(style)
-                priority = _LAYER_PRIORITIES.get(layer_name)
+                priority = _label_priority(layer_name, style)
                 if priority is None:
                     continue
                 settings = style.labelSettings()
