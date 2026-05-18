@@ -1,0 +1,464 @@
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import gzip
+import json
+import math
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Iterable
+from urllib.request import urlopen
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_PARENT = REPO_ROOT.parent
+DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-contour-features"
+DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
+DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
+DEFAULT_CAMERA_NAME = "chamonix-trails-z14-outdoors"
+WEB_MERCATOR_HALF_WORLD = 20037508.342789244
+MAX_WEB_MERCATOR_LATITUDE = 85.05112878
+CONTOUR_SOURCE_LAYER = "contour"
+CONTOUR_LABEL_INDICES = (5, 10)
+SAMPLE_PROPERTY_KEYS = ("ele", "index", "class", "worldview", "level", "sizerank", "name")
+MAX_SAMPLE_CANDIDATES = 12
+
+TileFetcher = Callable[[str], bytes]
+TileDecoder = Callable[[bytes], dict[str, object]]
+
+
+@dataclass(frozen=True)
+class ContourFeaturePaths:
+    run_dir: Path
+    json_path: Path
+    summary_path: Path
+
+
+@dataclass(frozen=True)
+class ContourFeatureConfig:
+    token: str | None
+    output_root: Path
+    camera_name: str = DEFAULT_CAMERA_NAME
+    style_owner: str = DEFAULT_MAPBOX_STYLE_OWNER
+    style_id: str = DEFAULT_MAPBOX_STYLE_ID
+    style_json_path: Path | None = None
+    tile_zoom: int | None = None
+    now: dt.datetime | None = None
+
+
+def _ensure_package_parent_on_path() -> None:
+    package_parent = str(PACKAGE_PARENT)
+    if package_parent not in sys.path:
+        sys.path.insert(0, package_parent)
+
+
+def resolve_mapbox_token(*, provided_token: str | None, environ: dict[str, str] | None = None) -> str | None:
+    env = os.environ if environ is None else environ
+    return provided_token or env.get("MAPBOX_ACCESS_TOKEN") or env.get("QFIT_MAPBOX_ACCESS_TOKEN")
+
+
+def load_style_definition(path: Path) -> dict[str, object]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected Mapbox style JSON object in {path}")
+    return data
+
+
+def _utc_timestamp(now: dt.datetime | None = None) -> str:
+    return (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def build_run_directory(
+    *,
+    output_root: Path,
+    camera_name: str,
+    now: dt.datetime | None = None,
+) -> Path:
+    return output_root / camera_name / _utc_timestamp(now)
+
+
+def build_contour_feature_paths(run_dir: Path) -> ContourFeaturePaths:
+    return ContourFeaturePaths(
+        run_dir=run_dir,
+        json_path=run_dir / "contour-features.json",
+        summary_path=run_dir / "summary.md",
+    )
+
+
+def recommended_tile_zoom(camera_zoom: float) -> int:
+    return max(0, min(22, int(round(camera_zoom))))
+
+
+def web_mercator_to_lon_lat(x: float, y: float) -> tuple[float, float]:
+    longitude = x / WEB_MERCATOR_HALF_WORLD * 180.0
+    latitude = y / WEB_MERCATOR_HALF_WORLD * 180.0
+    latitude = 180.0 / math.pi * (2.0 * math.atan(math.exp(latitude * math.pi / 180.0)) - math.pi / 2.0)
+    return longitude, latitude
+
+
+def lon_lat_to_tile(longitude: float, latitude: float, zoom: int) -> tuple[int, int]:
+    clamped_latitude = max(-MAX_WEB_MERCATOR_LATITUDE, min(MAX_WEB_MERCATOR_LATITUDE, latitude))
+    tile_count = 2**zoom
+    x_float = (longitude + 180.0) / 360.0 * tile_count
+    latitude_radians = math.radians(clamped_latitude)
+    y_float = (
+        1.0 - math.log(math.tan(latitude_radians) + 1.0 / math.cos(latitude_radians)) / math.pi
+    ) / 2.0 * tile_count
+    x = max(0, min(tile_count - 1, int(x_float)))
+    y = max(0, min(tile_count - 1, int(y_float)))
+    return x, y
+
+
+def tile_bounds_for_web_mercator_extent(
+    extent: tuple[float, float, float, float],
+    zoom: int,
+) -> dict[str, int]:
+    min_x, min_y, max_x, max_y = extent
+    west, north = web_mercator_to_lon_lat(min_x, max_y)
+    east, south = web_mercator_to_lon_lat(max_x, min_y)
+    tile_x_min, tile_y_top = lon_lat_to_tile(west, north, zoom)
+    tile_x_max, tile_y_bottom = lon_lat_to_tile(east, south, zoom)
+    return {
+        "min_x": min(tile_x_min, tile_x_max),
+        "max_x": max(tile_x_min, tile_x_max),
+        "min_y": min(tile_y_top, tile_y_bottom),
+        "max_y": max(tile_y_top, tile_y_bottom),
+    }
+
+
+def iter_tile_coordinates(tile_bounds: dict[str, int], zoom: int) -> Iterable[dict[str, int]]:
+    for x in range(tile_bounds["min_x"], tile_bounds["max_x"] + 1):
+        for y in range(tile_bounds["min_y"], tile_bounds["max_y"] + 1):
+            yield {"z": zoom, "x": x, "y": y}
+
+
+def _fetch_url_bytes(url: str) -> bytes:
+    with urlopen(url, timeout=20) as response:  # noqa: S310
+        return response.read()
+
+
+def _default_tile_decoder(tile_bytes: bytes) -> dict[str, object]:
+    try:
+        from mapbox_vector_tile import decode  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - optional local diagnostic dependency
+        raise RuntimeError(
+            "Contour feature diagnostics require the optional mapbox_vector_tile package."
+        ) from exc
+    decoded = decode(tile_bytes)
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _tile_error_types() -> tuple[type[BaseException], ...]:
+    errors: tuple[type[BaseException], ...] = (
+        EOFError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+        gzip.BadGzipFile,
+    )
+    try:  # pragma: no cover - depends on optional protobuf runtime details
+        from google.protobuf.message import DecodeError  # type: ignore[import-not-found]
+    except ImportError:
+        return errors
+    return (*errors, DecodeError)
+
+
+_TILE_ERROR_TYPES = _tile_error_types()
+
+
+def _decompressed_tile_bytes(tile_bytes: bytes) -> bytes:
+    return gzip.decompress(tile_bytes) if tile_bytes.startswith(b"\x1f\x8b") else tile_bytes
+
+
+def decode_vector_tile_bytes(tile_bytes: bytes, tile_decoder: TileDecoder) -> dict[str, object]:
+    return tile_decoder(_decompressed_tile_bytes(tile_bytes))
+
+
+def _decoded_layer_features(decoded_tile: dict[str, object], source_layer: str) -> list[dict[str, object]]:
+    layer = decoded_tile.get(source_layer)
+    if isinstance(layer, dict):
+        features = layer.get("features")
+    else:
+        features = layer
+    if not isinstance(features, list):
+        return []
+    return [feature for feature in features if isinstance(feature, dict)]
+
+
+def _feature_properties(feature: dict[str, object]) -> dict[str, object]:
+    properties = feature.get("properties")
+    return properties if isinstance(properties, dict) else {}
+
+
+def _normalized_index(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def is_contour_label_candidate(properties: dict[str, object]) -> bool:
+    return _normalized_index(properties.get("index")) in CONTOUR_LABEL_INDICES
+
+
+def _count_indices(features: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for feature in features:
+        index = _normalized_index(_feature_properties(feature).get("index"))
+        key = str(index) if index is not None else "(missing)"
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _candidate_sample(tile: dict[str, int], properties: dict[str, object]) -> dict[str, object]:
+    sample = {key: properties[key] for key in SAMPLE_PROPERTY_KEYS if key in properties}
+    sample["tile"] = tile
+    sample["property_keys"] = sorted(str(key) for key in properties.keys())
+    return sample
+
+
+def _tile_url(tile_url_template: str, tile: dict[str, int]) -> str:
+    return tile_url_template.format(z=tile["z"], x=tile["x"], y=tile["y"])
+
+
+def contour_tile_record(
+    *,
+    tile: dict[str, int],
+    tile_url_template: str,
+    tile_fetcher: TileFetcher,
+    tile_decoder: TileDecoder,
+) -> dict[str, object]:
+    try:
+        tile_bytes = tile_fetcher(_tile_url(tile_url_template, tile))
+        decoded = decode_vector_tile_bytes(tile_bytes, tile_decoder)
+    except _TILE_ERROR_TYPES as exc:
+        return {**tile, "status": "error", "error": type(exc).__name__, "message": str(exc)}
+    features = _decoded_layer_features(decoded, CONTOUR_SOURCE_LAYER)
+    candidates = [feature for feature in features if is_contour_label_candidate(_feature_properties(feature))]
+    return {
+        **tile,
+        "status": "decoded",
+        "byte_count": len(tile_bytes),
+        "contour_feature_count": len(features),
+        "contour_label_candidate_count": len(candidates),
+        "index_counts": _count_indices(features),
+        "sample_candidates": [
+            _candidate_sample(tile, _feature_properties(feature)) for feature in candidates[:MAX_SAMPLE_CANDIDATES]
+        ],
+    }
+
+
+def _combined_index_counts(tile_records: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for tile_record in tile_records:
+        index_counts = tile_record.get("index_counts")
+        if not isinstance(index_counts, dict):
+            continue
+        for index, count in index_counts.items():
+            if isinstance(count, int):
+                counts[str(index)] = counts.get(str(index), 0) + count
+    return dict(sorted(counts.items()))
+
+
+def _combined_samples(tile_records: list[dict[str, object]]) -> list[dict[str, object]]:
+    samples: list[dict[str, object]] = []
+    for tile_record in tile_records:
+        tile_samples = tile_record.get("sample_candidates")
+        if isinstance(tile_samples, list):
+            samples.extend(sample for sample in tile_samples if isinstance(sample, dict))
+        if len(samples) >= MAX_SAMPLE_CANDIDATES:
+            break
+    return samples[:MAX_SAMPLE_CANDIDATES]
+
+
+def _camera_by_name(camera_name: str):
+    _ensure_package_parent_on_path()
+    from qfit.validation.mapbox_outdoors_comparison import CAMERAS
+
+    try:
+        return CAMERAS[camera_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown comparison camera: {camera_name}") from exc
+
+
+def _camera_extent(camera) -> tuple[float, float, float, float]:
+    _ensure_package_parent_on_path()
+    from qfit.validation.mapbox_outdoors_comparison import camera_extent_web_mercator
+
+    return camera_extent_web_mercator(camera)
+
+
+def _load_original_style(config: ContourFeatureConfig, style_fetcher) -> dict[str, object]:
+    if config.style_json_path is not None:
+        return load_style_definition(config.style_json_path)
+    if not config.token:
+        raise ValueError("A Mapbox token is required unless --style-json is provided.")
+    return style_fetcher(config.token, config.style_owner, config.style_id)
+
+
+def collect_contour_feature_report(
+    config: ContourFeatureConfig,
+    *,
+    style_fetcher: Callable[[str, str, str], dict[str, object]] | None = None,
+    tile_fetcher: TileFetcher | None = None,
+    tile_decoder: TileDecoder | None = None,
+) -> dict[str, object]:
+    _ensure_package_parent_on_path()
+    from qfit.mapbox_config import (
+        build_mapbox_vector_tiles_url,
+        extract_mapbox_vector_source_ids,
+        fetch_mapbox_style_definition,
+    )
+
+    fetch_style = style_fetcher or fetch_mapbox_style_definition
+    original_style = _load_original_style(config, fetch_style)
+    tileset_ids = extract_mapbox_vector_source_ids(original_style)
+    if not config.token:
+        raise ValueError("A Mapbox token is required to fetch vector tiles.")
+    camera = _camera_by_name(config.camera_name)
+    tile_zoom = config.tile_zoom if config.tile_zoom is not None else recommended_tile_zoom(float(camera.zoom))
+    tile_bounds = tile_bounds_for_web_mercator_extent(_camera_extent(camera), tile_zoom)
+    tile_url_template = build_mapbox_vector_tiles_url(
+        config.token,
+        config.style_owner,
+        config.style_id,
+        tileset_ids=tileset_ids,
+    )
+    tile_records = [
+        contour_tile_record(
+            tile=tile,
+            tile_url_template=tile_url_template,
+            tile_fetcher=tile_fetcher or _fetch_url_bytes,
+            tile_decoder=tile_decoder or _default_tile_decoder,
+        )
+        for tile in iter_tile_coordinates(tile_bounds, tile_zoom)
+    ]
+    decoded_tile_count = sum(1 for tile in tile_records if tile.get("status") == "decoded")
+    generated = config.now or dt.datetime.now(dt.timezone.utc)
+    return {
+        "style_owner": config.style_owner,
+        "style_id": config.style_id,
+        "generated": generated.isoformat(),
+        "camera": {
+            "name": camera.name,
+            "longitude": camera.longitude,
+            "latitude": camera.latitude,
+            "zoom": camera.zoom,
+            "width": camera.width,
+            "height": camera.height,
+        },
+        "tile_zoom": tile_zoom,
+        "tile_bounds": tile_bounds,
+        "tileset_ids": tileset_ids,
+        "tile_count": len(tile_records),
+        "decoded_tile_count": decoded_tile_count,
+        "failed_tile_count": len(tile_records) - decoded_tile_count,
+        "contour_feature_count": sum(int(tile.get("contour_feature_count") or 0) for tile in tile_records),
+        "contour_label_candidate_count": sum(
+            int(tile.get("contour_label_candidate_count") or 0) for tile in tile_records
+        ),
+        "index_counts": _combined_index_counts(tile_records),
+        "sample_candidates": _combined_samples(tile_records),
+        "tiles": tile_records,
+    }
+
+
+def _markdown_value(value: object) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, dict) or isinstance(value, list):
+        return json.dumps(value, sort_keys=True, separators=(",", ":")).replace("|", "\\|")
+    return str(value).replace("|", "\\|")
+
+
+def build_summary_markdown(report: dict[str, object]) -> str:
+    camera = report.get("camera") if isinstance(report.get("camera"), dict) else {}
+    lines = [
+        f"# Mapbox Outdoors contour feature diagnostic - {camera.get('name')}",
+        "",
+        f"Generated: {report.get('generated')}",
+        f"Style: {report.get('style_owner')}/{report.get('style_id')}",
+        f"Tile zoom: {report.get('tile_zoom')}",
+        f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
+        f"Contour features: {report.get('contour_feature_count')}",
+        f"Contour-label candidates (index 5/10): {report.get('contour_label_candidate_count')}",
+        f"Index counts: {_markdown_value(report.get('index_counts'))}",
+        "",
+        "| z | x | y | Status | Contour features | Label candidates | Index counts |",
+        "| ---: | ---: | ---: | --- | ---: | ---: | --- |",
+    ]
+    tiles = report.get("tiles")
+    tile_rows = tiles if isinstance(tiles, list) else []
+    for tile in tile_rows:
+        if not isinstance(tile, dict):
+            continue
+        lines.append(
+            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} |".format(
+                z=_markdown_value(tile.get("z")),
+                x=_markdown_value(tile.get("x")),
+                y=_markdown_value(tile.get("y")),
+                status=_markdown_value(tile.get("status")),
+                feature_count=_markdown_value(tile.get("contour_feature_count")),
+                candidate_count=_markdown_value(tile.get("contour_label_candidate_count")),
+                index_counts=_markdown_value(tile.get("index_counts")),
+            )
+        )
+    samples = report.get("sample_candidates")
+    sample_rows = samples if isinstance(samples, list) else []
+    if sample_rows:
+        lines.extend(["", "## Sample contour-label candidates", ""])
+        for sample in sample_rows:
+            lines.append(f"- {_markdown_value(sample)}")
+    return "\n".join(lines) + "\n"
+
+
+def write_report(report: dict[str, object], paths: ContourFeaturePaths) -> None:
+    paths.run_dir.mkdir(parents=True, exist_ok=True)
+    paths.json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    paths.summary_path.write_text(build_summary_markdown(report), encoding="utf-8")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate Mapbox Outdoors contour vector-tile feature diagnostics.")
+    parser.add_argument("camera", nargs="?", default=DEFAULT_CAMERA_NAME)
+    parser.add_argument("--style-json", type=Path, help="Read an already downloaded Mapbox style JSON file.")
+    parser.add_argument("--style-owner", default=DEFAULT_MAPBOX_STYLE_OWNER)
+    parser.add_argument("--style-id", default=DEFAULT_MAPBOX_STYLE_ID)
+    parser.add_argument("--mapbox-token", help="Mapbox token. Prefer MAPBOX_ACCESS_TOKEN or QFIT_MAPBOX_ACCESS_TOKEN.")
+    parser.add_argument("--tile-zoom", type=int, help="Override the integer vector-tile zoom to inspect.")
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    now = dt.datetime.now(dt.timezone.utc)
+    config = ContourFeatureConfig(
+        token=resolve_mapbox_token(provided_token=args.mapbox_token),
+        output_root=args.output_root,
+        camera_name=args.camera,
+        style_owner=args.style_owner,
+        style_id=args.style_id,
+        style_json_path=args.style_json,
+        tile_zoom=args.tile_zoom,
+        now=now,
+    )
+    report = collect_contour_feature_report(config)
+    paths = build_contour_feature_paths(
+        build_run_directory(output_root=config.output_root, camera_name=config.camera_name, now=config.now)
+    )
+    write_report(report, paths)
+    print(paths.summary_path)
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
