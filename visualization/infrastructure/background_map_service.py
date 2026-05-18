@@ -53,11 +53,13 @@ _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
     "path-pedestrian-label",
 }
 # Representative-zoom values from mapbox_config's waterway-label spacing
-# expression after qfit splits it into static QGIS zoom bands.
+# expression after qfit splits it into static QGIS zoom bands.  The z17+
+# value is wider than Mapbox's raw 400 px spacing because QGIS repeats labels
+# more densely along segmented waterways in the Zermatt z18 comparison.
 _WATERWAY_LABEL_REPEAT_DISTANCE_PX_BY_STYLE_MARKER = {
     "z13-to-z15": 250.0,
     "z15-to-z17": 325.0,
-    "z17-plus": 400.0,
+    "z17-plus": 600.0,
 }
 _CONTOUR_LABEL_ELEVATION_FIELD_EXPRESSION = '"ele"'
 _CONTOUR_LABEL_EXPRESSION = "concat(\"ele\", ' m')"
