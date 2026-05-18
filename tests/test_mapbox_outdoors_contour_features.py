@@ -95,9 +95,21 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             return {
                 "contour": {
                     "features": [
-                        {"properties": {"ele": 1200, "index": 5, "class": "contour"}},
-                        {"properties": {"ele": 1210, "index": 1}},
-                        {"properties": {"ele": 1300, "index": "10", "extra": "kept-key"}},
+                        {
+                            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 0]]]},
+                            "properties": {"ele": 1200, "index": 5, "class": "contour"},
+                        },
+                        {
+                            "geometry": {"type": "LineString", "coordinates": [[3, 4], [5, 6]]},
+                            "properties": {"ele": 1210, "index": 1},
+                        },
+                        {
+                            "geometry": {
+                                "type": "MultiPolygon",
+                                "coordinates": [[[[10, 20], [11, 20], [11, 21], [10, 20]]]],
+                            },
+                            "properties": {"ele": 1300, "index": "10", "extra": "kept-key"},
+                        },
                     ]
                 }
             }
@@ -113,7 +125,13 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(record["contour_feature_count"], 3)
         self.assertEqual(record["contour_label_candidate_count"], 2)
         self.assertEqual(record["index_counts"], {"1": 1, "10": 1, "5": 1})
+        self.assertEqual(record["geometry_type_counts"], {"LineString": 1, "MultiPolygon": 1, "Polygon": 1})
+        self.assertEqual(record["candidate_geometry_type_counts"], {"MultiPolygon": 1, "Polygon": 1})
         self.assertEqual(record["sample_candidates"][0]["ele"], 1200)
+        self.assertEqual(
+            record["sample_candidates"][0]["geometry"],
+            {"type": "Polygon", "point_count": 4, "part_count": 1, "bounds": [0.0, 0.0, 2.0, 2.0]},
+        )
         self.assertEqual(record["sample_candidates"][1]["property_keys"], ["ele", "extra", "index"])
 
     def test_contour_tile_record_reports_fetch_or_decode_errors(self):
@@ -155,9 +173,18 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             return {
                 "contour": {
                     "features": [
-                        {"properties": {"ele": 1000, "index": 5}},
-                        {"properties": {"ele": 1010, "index": 1}},
-                        {"properties": {"ele": 1200, "index": 10}},
+                        {
+                            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+                            "properties": {"ele": 1000, "index": 5},
+                        },
+                        {
+                            "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 1]]},
+                            "properties": {"ele": 1010, "index": 1},
+                        },
+                        {
+                            "geometry": {"type": "Polygon", "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 2]]]},
+                            "properties": {"ele": 1200, "index": 10},
+                        },
                     ]
                 }
             }
@@ -180,6 +207,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(report["contour_feature_count"], 3)
         self.assertEqual(report["contour_label_candidate_count"], 2)
         self.assertEqual(report["generated"], "2026-05-18T11:35:00+00:00")
+        self.assertEqual(report["geometry_type_counts"], {"LineString": 1, "Polygon": 2})
+        self.assertEqual(report["candidate_geometry_type_counts"], {"Polygon": 2})
 
     def test_write_report_writes_json_and_markdown(self):
         report = {
@@ -193,7 +222,9 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "contour_feature_count": 3,
             "contour_label_candidate_count": 2,
             "index_counts": {"1": 1, "5": 2},
-            "sample_candidates": [{"ele": 1000, "index": 5}],
+            "geometry_type_counts": {"LineString": 1, "Polygon": 2},
+            "candidate_geometry_type_counts": {"Polygon": 2},
+            "sample_candidates": [{"ele": 1000, "index": 5, "geometry": {"type": "Polygon"}}],
             "tiles": [
                 {
                     "z": 14,
@@ -203,12 +234,15 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "contour_feature_count": 3,
                     "contour_label_candidate_count": 2,
                     "index_counts": {"1": 1, "5": 2},
+                    "geometry_type_counts": {"LineString": 1, "Polygon": 2},
+                    "candidate_geometry_type_counts": {"Polygon": 2},
                 }
             ],
         }
         markdown = build_summary_markdown(report)
 
         self.assertIn("Contour-label candidates (index 5/10): 2", markdown)
+        self.assertIn('Candidate geometry types: {"Polygon":2}', markdown)
         self.assertIn("| 14 | 8504 | 5833 | decoded | 3 | 2 |", markdown)
         self.assertIn("Sample contour-label candidates", markdown)
 

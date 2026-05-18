@@ -24,6 +24,7 @@ CONTOUR_SOURCE_LAYER = "contour"
 CONTOUR_LABEL_INDICES = (5, 10)
 SAMPLE_PROPERTY_KEYS = ("ele", "index", "class", "worldview", "level", "sizerank", "name")
 MAX_SAMPLE_CANDIDATES = 12
+MISSING_VALUE = "(missing)"
 
 TileFetcher = Callable[[str], bytes]
 TileDecoder = Callable[[bytes], dict[str, object]]
@@ -193,6 +194,76 @@ def _feature_properties(feature: dict[str, object]) -> dict[str, object]:
     return properties if isinstance(properties, dict) else {}
 
 
+def _geometry_type(feature: dict[str, object]) -> str:
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        return MISSING_VALUE
+    geometry_type = geometry.get("type")
+    return geometry_type if isinstance(geometry_type, str) and geometry_type else MISSING_VALUE
+
+
+def _is_coordinate_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _is_coordinate_pair(value: object) -> bool:
+    return (
+        isinstance(value, (list, tuple))
+        and len(value) >= 2
+        and _is_coordinate_number(value[0])
+        and _is_coordinate_number(value[1])
+    )
+
+
+def _coordinate_bounds(coordinate: list[object] | tuple[object, ...]) -> list[float]:
+    x = float(coordinate[0])
+    y = float(coordinate[1])
+    return [x, y, x, y]
+
+
+def _merge_bounds(left: list[float] | None, right: list[float] | None) -> list[float] | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return [min(left[0], right[0]), min(left[1], right[1]), max(left[2], right[2]), max(left[3], right[3])]
+
+
+def _coordinate_stats(coordinates: object) -> dict[str, object]:
+    if _is_coordinate_pair(coordinates):
+        return {"point_count": 1, "part_count": 1, "bounds": _coordinate_bounds(coordinates)}
+    if not isinstance(coordinates, (list, tuple)) or not coordinates:
+        return {"point_count": 0, "part_count": 0}
+    if all(_is_coordinate_pair(coordinate) for coordinate in coordinates):
+        bounds: list[float] | None = None
+        for coordinate in coordinates:
+            bounds = _merge_bounds(bounds, _coordinate_bounds(coordinate))
+        return {"point_count": len(coordinates), "part_count": 1, "bounds": bounds}
+
+    point_count = 0
+    part_count = 0
+    bounds = None
+    for child in coordinates:
+        child_stats = _coordinate_stats(child)
+        point_count += int(child_stats.get("point_count") or 0)
+        part_count += int(child_stats.get("part_count") or 0)
+        child_bounds = child_stats.get("bounds")
+        if isinstance(child_bounds, list):
+            bounds = _merge_bounds(bounds, child_bounds)
+    summary: dict[str, object] = {"point_count": point_count, "part_count": part_count}
+    if bounds is not None:
+        summary["bounds"] = bounds
+    return summary
+
+
+def _geometry_summary(feature: dict[str, object]) -> dict[str, object]:
+    geometry = feature.get("geometry")
+    summary: dict[str, object] = {"type": _geometry_type(feature)}
+    if isinstance(geometry, dict):
+        summary.update(_coordinate_stats(geometry.get("coordinates")))
+    return summary
+
+
 def _normalized_index(value: object) -> int | None:
     if isinstance(value, bool):
         return None
@@ -213,14 +284,24 @@ def _count_indices(features: list[dict[str, object]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for feature in features:
         index = _normalized_index(_feature_properties(feature).get("index"))
-        key = str(index) if index is not None else "(missing)"
+        key = str(index) if index is not None else MISSING_VALUE
         counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items()))
 
 
-def _candidate_sample(tile: dict[str, int], properties: dict[str, object]) -> dict[str, object]:
+def _count_geometry_types(features: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for feature in features:
+        geometry_type = _geometry_type(feature)
+        counts[geometry_type] = counts.get(geometry_type, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _candidate_sample(tile: dict[str, int], feature: dict[str, object]) -> dict[str, object]:
+    properties = _feature_properties(feature)
     sample = {key: properties[key] for key in SAMPLE_PROPERTY_KEYS if key in properties}
     sample["tile"] = tile
+    sample["geometry"] = _geometry_summary(feature)
     sample["property_keys"] = sorted(str(key) for key in properties.keys())
     return sample
 
@@ -250,22 +331,28 @@ def contour_tile_record(
         "contour_feature_count": len(features),
         "contour_label_candidate_count": len(candidates),
         "index_counts": _count_indices(features),
+        "geometry_type_counts": _count_geometry_types(features),
+        "candidate_geometry_type_counts": _count_geometry_types(candidates),
         "sample_candidates": [
-            _candidate_sample(tile, _feature_properties(feature)) for feature in candidates[:MAX_SAMPLE_CANDIDATES]
+            _candidate_sample(tile, feature) for feature in candidates[:MAX_SAMPLE_CANDIDATES]
         ],
     }
 
 
-def _combined_index_counts(tile_records: list[dict[str, object]]) -> dict[str, int]:
+def _combined_record_counts(tile_records: list[dict[str, object]], count_key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for tile_record in tile_records:
-        index_counts = tile_record.get("index_counts")
-        if not isinstance(index_counts, dict):
+        record_counts = tile_record.get(count_key)
+        if not isinstance(record_counts, dict):
             continue
-        for index, count in index_counts.items():
+        for index, count in record_counts.items():
             if isinstance(count, int):
                 counts[str(index)] = counts.get(str(index), 0) + count
     return dict(sorted(counts.items()))
+
+
+def _combined_index_counts(tile_records: list[dict[str, object]]) -> dict[str, int]:
+    return _combined_record_counts(tile_records, "index_counts")
 
 
 def _combined_samples(tile_records: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -366,6 +453,8 @@ def collect_contour_feature_report(
             int(tile.get("contour_label_candidate_count") or 0) for tile in tile_records
         ),
         "index_counts": _combined_index_counts(tile_records),
+        "geometry_type_counts": _combined_record_counts(tile_records, "geometry_type_counts"),
+        "candidate_geometry_type_counts": _combined_record_counts(tile_records, "candidate_geometry_type_counts"),
         "sample_candidates": _combined_samples(tile_records),
         "tiles": tile_records,
     }
@@ -391,9 +480,11 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Contour features: {report.get('contour_feature_count')}",
         f"Contour-label candidates (index 5/10): {report.get('contour_label_candidate_count')}",
         f"Index counts: {_markdown_value(report.get('index_counts'))}",
+        f"Geometry types: {_markdown_value(report.get('geometry_type_counts'))}",
+        f"Candidate geometry types: {_markdown_value(report.get('candidate_geometry_type_counts'))}",
         "",
-        "| z | x | y | Status | Contour features | Label candidates | Index counts |",
-        "| ---: | ---: | ---: | --- | ---: | ---: | --- |",
+        "| z | x | y | Status | Contour features | Label candidates | Index counts | Geometry types | Candidate geometry types |",
+        "| ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- |",
     ]
     tiles = report.get("tiles")
     tile_rows = tiles if isinstance(tiles, list) else []
@@ -401,7 +492,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         if not isinstance(tile, dict):
             continue
         lines.append(
-            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} |".format(
+            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} | {geometry_counts} | {candidate_geometry_counts} |".format(
                 z=_markdown_value(tile.get("z")),
                 x=_markdown_value(tile.get("x")),
                 y=_markdown_value(tile.get("y")),
@@ -409,6 +500,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 feature_count=_markdown_value(tile.get("contour_feature_count")),
                 candidate_count=_markdown_value(tile.get("contour_label_candidate_count")),
                 index_counts=_markdown_value(tile.get("index_counts")),
+                geometry_counts=_markdown_value(tile.get("geometry_type_counts")),
+                candidate_geometry_counts=_markdown_value(tile.get("candidate_geometry_type_counts")),
             )
         )
     samples = report.get("sample_candidates")
