@@ -3996,7 +3996,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "water-shadow-z13-to-z16")
         self.assertEqual(result[3]["id"], "water-shadow-z16-plus")
 
-    def _aeroway_line_layer(self, line_width=None):
+    def _aeroway_line_layer(self, line_width=None, line_color="hsl(230, 24%, 87%)"):
         if line_width is None:
             line_width = copy.deepcopy(mapbox_config._AEROWAY_LINE_WIDTH_EXPRESSION)
         return {
@@ -4006,7 +4006,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             "source-layer": "aeroway",
             "filter": ["==", ["geometry-type"], "LineString"],
             "paint": {
-                "line-color": "hsl(230, 24%, 87%)",
+                "line-color": line_color,
                 "line-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 11, 1],
                 "line-width": line_width,
             },
@@ -4053,6 +4053,21 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config.base_mapbox_style_layer_id_for_qfit("aeroway-line-other-z16-plus"),
             "aeroway-line",
         )
+
+    def test_aeroway_line_color_uses_qgis_contrast_color(self):
+        style = {
+            "layers": [
+                self._aeroway_line_layer(line_color=mapbox_config._AEROWAY_POLYGON_FILL_COLOR)
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        for layer in result["layers"]:
+            self.assertEqual(
+                layer["paint"]["line-color"],
+                mapbox_config._AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR,
+            )
 
     def test_aeroway_line_width_is_not_split_when_shape_changes(self):
         line_width = ["interpolate", ["linear"], ["zoom"], 9, 0.5, 18, 20]

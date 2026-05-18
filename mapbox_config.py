@@ -5808,6 +5808,10 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                 # QGIS renders Mapbox's airport aeroway fill too close to the
                 # surrounding airport landuse in the Geneva z14 comparison.
                 paint["fill-color"] = _AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR
+        if base_layer_id == _AEROWAY_LINE_LAYER_ID and layer.get("type") == "line":
+            paint = layer.get("paint")
+            if isinstance(paint, dict) and paint.get("line-color") == _AEROWAY_POLYGON_FILL_COLOR:
+                paint["line-color"] = _AEROWAY_POLYGON_QGIS_CONTRAST_FILL_COLOR
 
         for section in ("paint", "layout"):
             props = layer.get(section)
