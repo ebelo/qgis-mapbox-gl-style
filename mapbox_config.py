@@ -1532,14 +1532,14 @@ _CONTOUR_LINE_VARIANTS: tuple[
     tuple[str, object, float | None, float | None, float, float],
     ...,
 ] = (
-    ("index-minor-below-z11", ["match", ["get", "index"], [1, 2], True, False], None, 11.0, 0.15, 0.5),
-    ("index-minor-z11-to-z13", ["match", ["get", "index"], [1, 2], True, False], 11.0, 13.0, 0.225, 0.5),
-    ("index-minor-z13-to-z16", ["match", ["get", "index"], [1, 2], True, False], 13.0, 16.0, 0.3, 0.65),
-    ("index-minor-z16-plus", ["match", ["get", "index"], [1, 2], True, False], 16.0, None, 0.3, 0.8),
-    ("index-major-below-z11", ["match", ["get", "index"], [1, 2], False, True], None, 11.0, 0.3, 0.6),
-    ("index-major-z11-to-z13", ["match", ["get", "index"], [1, 2], False, True], 11.0, 13.0, 0.4, 0.6),
-    ("index-major-z13-to-z16", ["match", ["get", "index"], [1, 2], False, True], 13.0, 16.0, 0.5, 0.9),
-    ("index-major-z16-plus", ["match", ["get", "index"], [1, 2], False, True], 16.0, None, 0.5, 1.2),
+    ("index-minor-below-z11", ["match", ["get", "index"], [1, 2], True, False], None, 11.0, 0.25, 0.7),
+    ("index-minor-z11-to-z13", ["match", ["get", "index"], [1, 2], True, False], 11.0, 13.0, 0.35, 0.7),
+    ("index-minor-z13-to-z16", ["match", ["get", "index"], [1, 2], True, False], 13.0, 16.0, 0.5, 1.0),
+    ("index-minor-z16-plus", ["match", ["get", "index"], [1, 2], True, False], 16.0, None, 0.55, 1.25),
+    ("index-major-below-z11", ["match", ["get", "index"], [1, 2], False, True], None, 11.0, 0.5, 0.9),
+    ("index-major-z11-to-z13", ["match", ["get", "index"], [1, 2], False, True], 11.0, 13.0, 0.65, 0.9),
+    ("index-major-z13-to-z16", ["match", ["get", "index"], [1, 2], False, True], 13.0, 16.0, 0.8, 1.4),
+    ("index-major-z16-plus", ["match", ["get", "index"], [1, 2], False, True], 16.0, None, 0.9, 1.9),
 )
 _FILTER_NORMALIZATION_ZOOM_OVERRIDES = {
     "bridge-minor": 14.0,

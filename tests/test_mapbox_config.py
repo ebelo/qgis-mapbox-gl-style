@@ -4709,18 +4709,18 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual((major_mid["minzoom"], major_mid["maxzoom"]), (13.0, 16.0))
         self.assertEqual(major_full["minzoom"], 16.0)
         self.assertNotIn("maxzoom", major_full)
-        self.assertAlmostEqual(minor_fade["paint"]["line-opacity"], 0.225)
-        self.assertAlmostEqual(minor_mid["paint"]["line-opacity"], 0.3)
-        self.assertAlmostEqual(minor_full["paint"]["line-opacity"], 0.3)
-        self.assertAlmostEqual(major_fade["paint"]["line-opacity"], 0.4)
-        self.assertAlmostEqual(major_mid["paint"]["line-opacity"], 0.5)
-        self.assertAlmostEqual(major_full["paint"]["line-opacity"], 0.5)
-        self.assertAlmostEqual(minor_fade["paint"]["line-width"], 0.5 * mapbox_config._MAPBOX_PIXEL_TO_MM)
-        self.assertAlmostEqual(minor_mid["paint"]["line-width"], 0.65 * mapbox_config._MAPBOX_PIXEL_TO_MM)
-        self.assertAlmostEqual(minor_full["paint"]["line-width"], 0.8 * mapbox_config._MAPBOX_PIXEL_TO_MM)
-        self.assertAlmostEqual(major_fade["paint"]["line-width"], 0.6 * mapbox_config._MAPBOX_PIXEL_TO_MM)
-        self.assertAlmostEqual(major_mid["paint"]["line-width"], 0.9 * mapbox_config._MAPBOX_PIXEL_TO_MM)
-        self.assertAlmostEqual(major_full["paint"]["line-width"], 1.2 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(minor_fade["paint"]["line-opacity"], 0.35)
+        self.assertAlmostEqual(minor_mid["paint"]["line-opacity"], 0.5)
+        self.assertAlmostEqual(minor_full["paint"]["line-opacity"], 0.55)
+        self.assertAlmostEqual(major_fade["paint"]["line-opacity"], 0.65)
+        self.assertAlmostEqual(major_mid["paint"]["line-opacity"], 0.8)
+        self.assertAlmostEqual(major_full["paint"]["line-opacity"], 0.9)
+        self.assertAlmostEqual(minor_fade["paint"]["line-width"], 0.7 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(minor_mid["paint"]["line-width"], 1.0 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(minor_full["paint"]["line-width"], 1.25 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_fade["paint"]["line-width"], 0.9 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_mid["paint"]["line-width"], 1.4 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_full["paint"]["line-width"], 1.9 * mapbox_config._MAPBOX_PIXEL_TO_MM)
         for layer in (minor_fade, minor_mid, minor_full):
             self.assertEqual(
                 layer["filter"],
@@ -4755,10 +4755,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(minor_below["maxzoom"], 11.0)
         self.assertEqual(major_below["minzoom"], 10)
         self.assertEqual(major_below["maxzoom"], 11.0)
-        self.assertAlmostEqual(minor_below["paint"]["line-opacity"], 0.15)
-        self.assertAlmostEqual(major_below["paint"]["line-opacity"], 0.3)
-        self.assertAlmostEqual(minor_below["paint"]["line-width"], 0.5 * mapbox_config._MAPBOX_PIXEL_TO_MM)
-        self.assertAlmostEqual(major_below["paint"]["line-width"], 0.6 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(minor_below["paint"]["line-opacity"], 0.25)
+        self.assertAlmostEqual(major_below["paint"]["line-opacity"], 0.5)
+        self.assertAlmostEqual(minor_below["paint"]["line-width"], 0.7 * mapbox_config._MAPBOX_PIXEL_TO_MM)
+        self.assertAlmostEqual(major_below["paint"]["line-width"], 0.9 * mapbox_config._MAPBOX_PIXEL_TO_MM)
         self.assertEqual(
             minor_below["filter"],
             [
@@ -4796,11 +4796,11 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         by_id = {layer["id"]: layer for layer in result["layers"]}
         self.assertEqual(
             by_id["contour-line-index-minor-z11-to-z13"]["paint"]["line-opacity"],
-            0.225,
+            0.35,
         )
         self.assertEqual(
             by_id["contour-line-index-major-z13-to-z16"]["paint"]["line-opacity"],
-            0.5,
+            0.8,
         )
         self.assertEqual(
             by_id["contour-line-index-minor-z11-to-z13"]["paint"]["line-width"],
