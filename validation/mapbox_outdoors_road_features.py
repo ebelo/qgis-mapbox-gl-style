@@ -54,6 +54,7 @@ LINE_GEOMETRY_TYPES = {"LineString", "MultiLineString"}
 POLYGON_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
 LOW_ZOOM_PATH_EXCLUDED_TYPES = {"crossing", "sidewalk", "steps"}
 HIGH_ZOOM_PATH_EXCLUDED_TYPES = {"steps"}
+STEP_STRUCTURES = {"none", "ford", "bridge", "tunnel"}
 SAMPLE_PROPERTY_KEYS = (
     "class",
     "type",
@@ -147,6 +148,15 @@ def is_path_line_candidate(feature: dict[str, object], *, tile_zoom: int | None 
     )
 
 
+def is_step_line_candidate(feature: dict[str, object]) -> bool:
+    properties = _feature_properties(feature)
+    return (
+        properties.get("type") == "steps"
+        and properties.get("structure") in STEP_STRUCTURES
+        and _geometry_type(feature) in LINE_GEOMETRY_TYPES
+    )
+
+
 def _count_by_property(features: Iterable[dict[str, object]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for feature in features:
@@ -196,6 +206,7 @@ def road_tile_record(
     pedestrian_polygons = [feature for feature in road_features if is_pedestrian_polygon_candidate(feature)]
     pedestrian_lines = [feature for feature in road_features if is_pedestrian_line_candidate(feature)]
     path_lines = [feature for feature in road_features if is_path_line_candidate(feature, tile_zoom=tile.get("z"))]
+    step_lines = [feature for feature in road_features if is_step_line_candidate(feature)]
     return {
         **tile,
         "status": "decoded",
@@ -204,12 +215,14 @@ def road_tile_record(
         "pedestrian_polygon_candidate_count": len(pedestrian_polygons),
         "pedestrian_line_candidate_count": len(pedestrian_lines),
         "path_line_candidate_count": len(path_lines),
+        "step_line_candidate_count": len(step_lines),
         "road_geometry_type_counts": _count_geometry_types(road_features),
         "pedestrian_polygon_class_counts": _count_by_property(pedestrian_polygons, "class"),
         "pedestrian_polygon_type_counts": _count_by_property(pedestrian_polygons, "type"),
         "pedestrian_polygon_structure_counts": _count_by_property(pedestrian_polygons, "structure"),
         "pedestrian_line_type_counts": _count_by_property(pedestrian_lines, "type"),
         "path_line_type_counts": _count_by_property(path_lines, "type"),
+        "step_line_structure_counts": _count_by_property(step_lines, "structure"),
         "sample_pedestrian_polygons": [
             _feature_sample(tile, feature) for feature in pedestrian_polygons[:MAX_SAMPLE_FEATURES]
         ],
@@ -217,6 +230,7 @@ def road_tile_record(
             _feature_sample(tile, feature) for feature in pedestrian_lines[:MAX_SAMPLE_FEATURES]
         ],
         "sample_path_lines": [_feature_sample(tile, feature) for feature in path_lines[:MAX_SAMPLE_FEATURES]],
+        "sample_step_lines": [_feature_sample(tile, feature) for feature in step_lines[:MAX_SAMPLE_FEATURES]],
     }
 
 
@@ -229,6 +243,57 @@ def _combined_samples(tile_records: list[dict[str, object]], sample_key: str) ->
         if len(samples) >= MAX_SAMPLE_FEATURES:
             break
     return samples[:MAX_SAMPLE_FEATURES]
+
+
+_SUMMARY_COUNT_FIELDS = (
+    ("Road features", "road_feature_count"),
+    ("Pedestrian/path polygon candidates", "pedestrian_polygon_candidate_count"),
+    ("Pedestrian line candidates", "pedestrian_line_candidate_count"),
+    ("Path line candidates", "path_line_candidate_count"),
+    ("Step line candidates", "step_line_candidate_count"),
+)
+_SUMMARY_COUNT_MAP_FIELDS = (
+    ("Pedestrian polygon type counts", "pedestrian_polygon_type_counts"),
+    ("Pedestrian line type counts", "pedestrian_line_type_counts"),
+    ("Path line type counts", "path_line_type_counts"),
+    ("Step line structure counts", "step_line_structure_counts"),
+)
+_ROAD_FEATURE_TABLE_FIELDS = (
+    ("Road", "road_feature_count", "---:"),
+    ("Pedestrian/path polygons", "pedestrian_polygon_candidate_count", "---:"),
+    ("Pedestrian lines", "pedestrian_line_candidate_count", "---:"),
+    ("Path lines", "path_line_candidate_count", "---:"),
+    ("Step lines", "step_line_candidate_count", "---:"),
+    ("Polygon types", "pedestrian_polygon_type_counts", "---"),
+    ("Pedestrian line types", "pedestrian_line_type_counts", "---"),
+    ("Path line types", "path_line_type_counts", "---"),
+    ("Step structures", "step_line_structure_counts", "---"),
+)
+
+
+def _feature_summary_lines(report: dict[str, object]) -> list[str]:
+    count_lines = [f"{label}: {report.get(key)}" for label, key in _SUMMARY_COUNT_FIELDS]
+    count_map_lines = [f"{label}: {_markdown_value(report.get(key))}" for label, key in _SUMMARY_COUNT_MAP_FIELDS]
+    return [*count_lines, *count_map_lines]
+
+
+def _markdown_table_header(prefix_columns: tuple[tuple[str, str], ...]) -> list[str]:
+    labels = [label for label, _alignment in prefix_columns]
+    labels.extend(label for label, _key, _alignment in _ROAD_FEATURE_TABLE_FIELDS)
+    alignments = [alignment for _label, alignment in prefix_columns]
+    alignments.extend(alignment for _label, _key, alignment in _ROAD_FEATURE_TABLE_FIELDS)
+    return [
+        "| " + " | ".join(labels) + " |",
+        "| " + " | ".join(alignments) + " |",
+    ]
+
+
+def _road_feature_table_cells(record: dict[str, object]) -> list[str]:
+    return [_markdown_value(record.get(key)) for _label, key, _alignment in _ROAD_FEATURE_TABLE_FIELDS]
+
+
+def _markdown_table_row(cells: Iterable[object]) -> str:
+    return "| " + " | ".join(_markdown_value(cell) for cell in cells) + " |"
 
 
 def _load_original_style(config: RoadFeatureConfig, style_fetcher) -> dict[str, object]:
@@ -326,6 +391,7 @@ def collect_road_feature_report(
             int(tile.get("pedestrian_line_candidate_count") or 0) for tile in tile_records
         ),
         "path_line_candidate_count": sum(int(tile.get("path_line_candidate_count") or 0) for tile in tile_records),
+        "step_line_candidate_count": sum(int(tile.get("step_line_candidate_count") or 0) for tile in tile_records),
         "road_geometry_type_counts": _combined_record_counts(tile_records, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(
             tile_records,
@@ -341,9 +407,11 @@ def collect_road_feature_report(
         ),
         "pedestrian_line_type_counts": _combined_record_counts(tile_records, "pedestrian_line_type_counts"),
         "path_line_type_counts": _combined_record_counts(tile_records, "path_line_type_counts"),
+        "step_line_structure_counts": _combined_record_counts(tile_records, "step_line_structure_counts"),
         "sample_pedestrian_polygons": _combined_samples(tile_records, "sample_pedestrian_polygons"),
         "sample_pedestrian_lines": _combined_samples(tile_records, "sample_pedestrian_lines"),
         "sample_path_lines": _combined_samples(tile_records, "sample_path_lines"),
+        "sample_step_lines": _combined_samples(tile_records, "sample_step_lines"),
         "tiles": tile_records,
     }
 
@@ -397,6 +465,7 @@ def collect_all_camera_road_feature_report(
             "pedestrian_line_candidate_count",
         ),
         "path_line_candidate_count": _sum_reports(camera_reports, "path_line_candidate_count"),
+        "step_line_candidate_count": _sum_reports(camera_reports, "step_line_candidate_count"),
         "road_geometry_type_counts": _combined_record_counts(camera_reports, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(
             camera_reports,
@@ -415,6 +484,7 @@ def collect_all_camera_road_feature_report(
             "pedestrian_line_type_counts",
         ),
         "path_line_type_counts": _combined_record_counts(camera_reports, "path_line_type_counts"),
+        "step_line_structure_counts": _combined_record_counts(camera_reports, "step_line_structure_counts"),
         "cameras": camera_reports,
     }
 
@@ -428,41 +498,21 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Style: {report.get('style_owner')}/{report.get('style_id')}",
         f"Tile zoom: {report.get('tile_zoom')}",
         f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
-        f"Road features: {report.get('road_feature_count')}",
-        f"Pedestrian/path polygon candidates: {report.get('pedestrian_polygon_candidate_count')}",
-        f"Pedestrian line candidates: {report.get('pedestrian_line_candidate_count')}",
-        f"Path line candidates: {report.get('path_line_candidate_count')}",
-        f"Pedestrian polygon type counts: {_markdown_value(report.get('pedestrian_polygon_type_counts'))}",
-        f"Pedestrian line type counts: {_markdown_value(report.get('pedestrian_line_type_counts'))}",
-        f"Path line type counts: {_markdown_value(report.get('path_line_type_counts'))}",
+        *_feature_summary_lines(report),
         "",
-        "| z | x | y | Status | Road | Pedestrian/path polygons | Pedestrian lines | Path lines | Polygon types | Pedestrian line types | Path line types |",
-        "| ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        *_markdown_table_header((("z", "---:"), ("x", "---:"), ("y", "---:"), ("Status", "---"))),
     ]
     tiles = report.get("tiles")
     tile_rows = tiles if isinstance(tiles, list) else []
     for tile in tile_rows:
         if not isinstance(tile, dict):
             continue
-        lines.append(
-            "| {z} | {x} | {y} | {status} | {road} | {polygons} | {pedestrian_lines} | {path_lines} | {polygon_types} | {pedestrian_types} | {path_types} |".format(
-                z=_markdown_value(tile.get("z")),
-                x=_markdown_value(tile.get("x")),
-                y=_markdown_value(tile.get("y")),
-                status=_markdown_value(tile.get("status")),
-                road=_markdown_value(tile.get("road_feature_count")),
-                polygons=_markdown_value(tile.get("pedestrian_polygon_candidate_count")),
-                pedestrian_lines=_markdown_value(tile.get("pedestrian_line_candidate_count")),
-                path_lines=_markdown_value(tile.get("path_line_candidate_count")),
-                polygon_types=_markdown_value(tile.get("pedestrian_polygon_type_counts")),
-                pedestrian_types=_markdown_value(tile.get("pedestrian_line_type_counts")),
-                path_types=_markdown_value(tile.get("path_line_type_counts")),
-            )
-        )
+        lines.append(_markdown_table_row([tile.get("z"), tile.get("x"), tile.get("y"), tile.get("status"), *_road_feature_table_cells(tile)]))
     sample_sections = (
         ("Sample pedestrian/path polygon candidates", "sample_pedestrian_polygons"),
         ("Sample pedestrian line candidates", "sample_pedestrian_lines"),
         ("Sample path line candidates", "sample_path_lines"),
+        ("Sample step line candidates", "sample_step_lines"),
     )
     for heading, key in sample_sections:
         samples = report.get(key)
@@ -482,16 +532,11 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
         f"Style: {report.get('style_owner')}/{report.get('style_id')}",
         f"Cameras: {report.get('camera_count')}",
         f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
-        f"Road features: {report.get('road_feature_count')}",
-        f"Pedestrian/path polygon candidates: {report.get('pedestrian_polygon_candidate_count')}",
-        f"Pedestrian line candidates: {report.get('pedestrian_line_candidate_count')}",
-        f"Path line candidates: {report.get('path_line_candidate_count')}",
-        f"Pedestrian polygon type counts: {_markdown_value(report.get('pedestrian_polygon_type_counts'))}",
-        f"Pedestrian line type counts: {_markdown_value(report.get('pedestrian_line_type_counts'))}",
-        f"Path line type counts: {_markdown_value(report.get('path_line_type_counts'))}",
+        *_feature_summary_lines(report),
         "",
-        "| Camera | Camera zoom | Tile zoom | Tiles | Road | Pedestrian/path polygons | Pedestrian lines | Path lines | Polygon types | Pedestrian line types | Path line types |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        *_markdown_table_header(
+            (("Camera", "---"), ("Camera zoom", "---:"), ("Tile zoom", "---:"), ("Tiles", "---:"))
+        ),
     ]
     camera_reports = report.get("cameras")
     rows = camera_reports if isinstance(camera_reports, list) else []
@@ -499,22 +544,19 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
         if not isinstance(camera_report, dict):
             continue
         camera = camera_report.get("camera") if isinstance(camera_report.get("camera"), dict) else {}
+        tiles = (
+            f"{_markdown_value(camera_report.get('decoded_tile_count'))}/"
+            f"{_markdown_value(camera_report.get('tile_count'))}"
+        )
         lines.append(
-            "| {camera_name} | {camera_zoom} | {tile_zoom} | {tiles} | {road} | {polygons} | {pedestrian_lines} | {path_lines} | {polygon_types} | {pedestrian_types} | {path_types} |".format(
-                camera_name=_markdown_value(camera.get("name")),
-                camera_zoom=_markdown_value(camera.get("zoom")),
-                tile_zoom=_markdown_value(camera_report.get("tile_zoom")),
-                tiles=(
-                    f"{_markdown_value(camera_report.get('decoded_tile_count'))}/"
-                    f"{_markdown_value(camera_report.get('tile_count'))}"
-                ),
-                road=_markdown_value(camera_report.get("road_feature_count")),
-                polygons=_markdown_value(camera_report.get("pedestrian_polygon_candidate_count")),
-                pedestrian_lines=_markdown_value(camera_report.get("pedestrian_line_candidate_count")),
-                path_lines=_markdown_value(camera_report.get("path_line_candidate_count")),
-                polygon_types=_markdown_value(camera_report.get("pedestrian_polygon_type_counts")),
-                pedestrian_types=_markdown_value(camera_report.get("pedestrian_line_type_counts")),
-                path_types=_markdown_value(camera_report.get("path_line_type_counts")),
+            _markdown_table_row(
+                [
+                    camera.get("name"),
+                    camera.get("zoom"),
+                    camera_report.get("tile_zoom"),
+                    tiles,
+                    *_road_feature_table_cells(camera_report),
+                ]
             )
         )
     return "\n".join(lines) + "\n"
