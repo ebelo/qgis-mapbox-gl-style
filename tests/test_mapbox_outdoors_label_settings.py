@@ -38,6 +38,48 @@ class FakeProperties:
         return self._keys
 
 
+class FakeColor:
+    def __init__(self, name):
+        self._name = name
+
+    def name(self):
+        return self._name
+
+
+class FakeTextBuffer:
+    def enabled(self):
+        return True
+
+    def size(self):
+        return 0.5291666667
+
+    def sizeUnit(self):
+        return SimpleNamespace(name="Millimeters")
+
+    def color(self):
+        return FakeColor("#dcdcd4")
+
+    def opacity(self):
+        return 0.75
+
+
+class FakeTextFormat:
+    def size(self):
+        return 2.5135416667
+
+    def sizeUnit(self):
+        return SimpleNamespace(name="Millimeters")
+
+    def color(self):
+        return FakeColor("#626250")
+
+    def opacity(self):
+        return 0.9
+
+    def buffer(self):
+        return FakeTextBuffer()
+
+
 class FakeStyle:
     def __init__(self, *, style_name, layer_name):
         self._style_name = style_name
@@ -76,9 +118,19 @@ class FakeSettings:
     repeatDistanceUnit = SimpleNamespace(name="Millimeters")
     displayAll = False
     obstacle = True
+    placementFlags = 1
+    labelPerPart = False
+    mergeLines = False
+    maxCurvedCharAngleIn = 25.0
+    maxCurvedCharAngleOut = -25.0
+    overrunDistance = 0.0
+    overrunDistanceUnit = SimpleNamespace(name="Millimeters")
 
     def dataDefinedProperties(self):
         return FakeProperties([87, 50])
+
+    def format(self):
+        return FakeTextFormat()
 
 
 class FakeQgsApplication:
@@ -239,6 +291,22 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(record["repeat_distance_unit"], "Millimeters")
         self.assertFalse(record["display_all"])
         self.assertTrue(record["obstacle"])
+        self.assertEqual(record["placement_flags"], 1)
+        self.assertFalse(record["label_per_part"])
+        self.assertFalse(record["merge_lines"])
+        self.assertEqual(record["max_curved_char_angle_in"], 25.0)
+        self.assertEqual(record["max_curved_char_angle_out"], -25.0)
+        self.assertEqual(record["overrun_distance"], 0.0)
+        self.assertEqual(record["overrun_distance_unit"], "Millimeters")
+        self.assertAlmostEqual(record["text_size"], 2.5135416667)
+        self.assertEqual(record["text_size_unit"], "Millimeters")
+        self.assertEqual(record["text_color"], "#626250")
+        self.assertEqual(record["text_opacity"], 0.9)
+        self.assertTrue(record["buffer_enabled"])
+        self.assertAlmostEqual(record["buffer_size"], 0.5291666667)
+        self.assertEqual(record["buffer_size_unit"], "Millimeters")
+        self.assertEqual(record["buffer_color"], "#dcdcd4")
+        self.assertEqual(record["buffer_opacity"], 0.75)
         self.assertEqual(record["data_defined_property_keys"], [50, 87])
 
     def test_ensure_qgis_application_reuses_or_creates_application(self):
@@ -419,6 +487,22 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance_unit": "Millimeters",
                     "display_all": False,
                     "obstacle": True,
+                    "placement_flags": 1,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                    "max_curved_char_angle_in": 25.0,
+                    "max_curved_char_angle_out": -25.0,
+                    "overrun_distance": 0.0,
+                    "overrun_distance_unit": "Millimeters",
+                    "text_size": 2.5135416667,
+                    "text_size_unit": "Millimeters",
+                    "text_color": "#626250",
+                    "text_opacity": 0.9,
+                    "buffer_enabled": True,
+                    "buffer_size": 0.5291666667,
+                    "buffer_size_unit": "Millimeters",
+                    "buffer_color": "#dcdcd4",
+                    "buffer_opacity": 0.75,
                     "data_defined_property_keys": ["pipe|key"],
                 }
             ],
@@ -432,7 +516,27 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("contour-label", markdown)
         self.assertIn("concat", markdown)
         self.assertIn("Millimeters", markdown)
+        self.assertIn("#626250", markdown)
+        self.assertIn("#dcdcd4", markdown)
+        self.assertIn("25/-25", markdown)
         self.assertIn("pipe\\|key", markdown)
+
+    def test_summary_markdown_collapses_empty_compound_cells(self):
+        report = {
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "generated": "2026-05-18T10:02:00+00:00",
+            "sprite_context_loaded": False,
+            "sprite_definition_count": 0,
+            "label_count": 1,
+            "labels": [{"style_name": "sparse-label"}],
+        }
+
+        markdown = build_summary_markdown(report)
+
+        self.assertIn("sparse-label", markdown)
+        self.assertNotIn("— —", markdown)
+        self.assertNotIn("—/—", markdown)
 
     def test_write_report_writes_json_and_summary(self):
         report = {

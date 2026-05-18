@@ -105,6 +105,29 @@ def _settings_value(settings: object, name: str) -> object:
     return _enum_name(value) if name.endswith("Unit") or name == "placement" else value
 
 
+def _color_name(value: object) -> object:
+    name = _method_value(value, "name")
+    return name if isinstance(name, str) else None
+
+
+def _label_format_record(settings: object) -> dict[str, object]:
+    text_format = _method_value(settings, "format")
+    buffer = _method_value(text_format, "buffer") if text_format is not None else None
+    text_color = _method_value(text_format, "color") if text_format is not None else None
+    buffer_color = _method_value(buffer, "color") if buffer is not None else None
+    return {
+        "text_size": _method_value(text_format, "size") if text_format is not None else None,
+        "text_size_unit": _enum_name(_method_value(text_format, "sizeUnit")) if text_format is not None else None,
+        "text_color": _color_name(text_color),
+        "text_opacity": _method_value(text_format, "opacity") if text_format is not None else None,
+        "buffer_enabled": _method_value(buffer, "enabled") if buffer is not None else None,
+        "buffer_size": _method_value(buffer, "size") if buffer is not None else None,
+        "buffer_size_unit": _enum_name(_method_value(buffer, "sizeUnit")) if buffer is not None else None,
+        "buffer_color": _color_name(buffer_color),
+        "buffer_opacity": _method_value(buffer, "opacity") if buffer is not None else None,
+    }
+
+
 def _data_defined_property_keys(settings: object) -> list[object]:
     properties = _method_value(settings, "dataDefinedProperties")
     keys = _method_value(properties, "propertyKeys") if properties is not None else None
@@ -135,6 +158,14 @@ def label_settings_record(style: object, settings: object) -> dict[str, object]:
         "repeat_distance_unit": _settings_value(settings, "repeatDistanceUnit"),
         "display_all": _settings_value(settings, "displayAll"),
         "obstacle": _settings_value(settings, "obstacle"),
+        "placement_flags": _settings_value(settings, "placementFlags"),
+        "label_per_part": _settings_value(settings, "labelPerPart"),
+        "merge_lines": _settings_value(settings, "mergeLines"),
+        "max_curved_char_angle_in": _settings_value(settings, "maxCurvedCharAngleIn"),
+        "max_curved_char_angle_out": _settings_value(settings, "maxCurvedCharAngleOut"),
+        "overrun_distance": _settings_value(settings, "overrunDistance"),
+        "overrun_distance_unit": _settings_value(settings, "overrunDistanceUnit"),
+        **_label_format_record(settings),
         "data_defined_property_keys": _data_defined_property_keys(settings),
     }
 
@@ -298,6 +329,13 @@ def _markdown_value(value: object) -> str:
     return str(value).replace("|", "\\|")
 
 
+def _compound_markdown_value(*values: object, separator: str = " ") -> str:
+    rendered_values = [_markdown_value(value) for value in values]
+    if all(value == "—" for value in rendered_values):
+        return "—"
+    return separator.join(rendered_values)
+
+
 def build_summary_markdown(report: dict[str, object]) -> str:
     labels = report.get("labels")
     rows = labels if isinstance(labels, list) else []
@@ -309,14 +347,14 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
         "",
-        "| Base layer | Style | Source layer | Field | Expr | Priority | Placement | Repeat distance | Repeat unit | Display all | Obstacle | Data-defined keys |",
-        "| --- | --- | --- | --- | --- | ---: | --- | ---: | --- | --- | --- | --- |",
+        "| Base layer | Style | Source layer | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Curve angles | Overrun | Data-defined keys |",
+        "| --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {base} | {style} | {source} | {field} | {expr} | {priority} | {placement} | {repeat} | {unit} | {display_all} | {obstacle} | {keys} |".format(
+            "| {base} | {style} | {source} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {curve_angles} | {overrun} | {keys} |".format(
                 base=_markdown_value(row.get("base_style_layer_id")),
                 style=_markdown_value(row.get("style_name")),
                 source=_markdown_value(row.get("source_layer")),
@@ -324,10 +362,29 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 expr=_markdown_value(row.get("is_expression")),
                 priority=_markdown_value(row.get("priority")),
                 placement=_markdown_value(row.get("placement")),
+                placement_flags=_markdown_value(row.get("placement_flags")),
                 repeat=_markdown_value(row.get("repeat_distance")),
                 unit=_markdown_value(row.get("repeat_distance_unit")),
                 display_all=_markdown_value(row.get("display_all")),
                 obstacle=_markdown_value(row.get("obstacle")),
+                text_size=_compound_markdown_value(row.get("text_size"), row.get("text_size_unit")),
+                text_color=_markdown_value(row.get("text_color")),
+                text_opacity=_markdown_value(row.get("text_opacity")),
+                buffer_enabled=_markdown_value(row.get("buffer_enabled")),
+                buffer_size=_compound_markdown_value(row.get("buffer_size"), row.get("buffer_size_unit")),
+                buffer_color=_markdown_value(row.get("buffer_color")),
+                buffer_opacity=_markdown_value(row.get("buffer_opacity")),
+                label_per_part=_markdown_value(row.get("label_per_part")),
+                merge_lines=_markdown_value(row.get("merge_lines")),
+                curve_angles=_compound_markdown_value(
+                    row.get("max_curved_char_angle_in"),
+                    row.get("max_curved_char_angle_out"),
+                    separator="/",
+                ),
+                overrun=_compound_markdown_value(
+                    row.get("overrun_distance"),
+                    row.get("overrun_distance_unit"),
+                ),
                 keys=_markdown_value(row.get("data_defined_property_keys")),
             )
         )
