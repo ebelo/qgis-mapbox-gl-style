@@ -168,6 +168,41 @@ def _apply_label_settings(
     return changed
 
 
+def apply_mapbox_label_priority(labeling) -> None:
+    try:
+        from qgis.core import QgsProperty, Qgis  # noqa: PLC0415
+
+        styles = list(labeling.styles())
+        changed = False
+        for style in styles:
+            layer_name = _label_style_mapbox_layer_id(style)
+            priority = _label_priority(layer_name, style)
+            repeat_distance = _label_repeat_distance(layer_name, style)
+            if priority is None and repeat_distance is None and layer_name != "contour-label":
+                continue
+            settings = style.labelSettings()
+            if settings is None:
+                continue
+            field_expression = _label_field_expression(layer_name, settings)
+            if priority is None and repeat_distance is None and field_expression is None:
+                continue
+            if _apply_label_settings(
+                settings,
+                layer_name=layer_name,
+                priority=priority,
+                repeat_distance=repeat_distance,
+                field_expression=field_expression,
+                qgs_property=QgsProperty,
+                qgis=Qgis,
+            ):
+                style.setLabelSettings(settings)
+                changed = True
+        if changed:
+            labeling.setStyles(styles)
+    except (RuntimeError, AttributeError):
+        logger.debug("Mapbox GL style application skipped", exc_info=True)
+
+
 class BackgroundMapService:
     """Manages Mapbox background tile layers (raster and vector) in the QGIS project.
 
@@ -294,38 +329,7 @@ class BackgroundMapService:
         return False
 
     def _apply_label_priority(self, labeling) -> None:
-        try:
-            from qgis.core import QgsProperty, Qgis  # noqa: PLC0415
-
-            styles = list(labeling.styles())
-            changed = False
-            for style in styles:
-                layer_name = _label_style_mapbox_layer_id(style)
-                priority = _label_priority(layer_name, style)
-                repeat_distance = _label_repeat_distance(layer_name, style)
-                if priority is None and repeat_distance is None and layer_name != "contour-label":
-                    continue
-                settings = style.labelSettings()
-                if settings is None:
-                    continue
-                field_expression = _label_field_expression(layer_name, settings)
-                if priority is None and repeat_distance is None and field_expression is None:
-                    continue
-                if _apply_label_settings(
-                    settings,
-                    layer_name=layer_name,
-                    priority=priority,
-                    repeat_distance=repeat_distance,
-                    field_expression=field_expression,
-                    qgs_property=QgsProperty,
-                    qgis=Qgis,
-                ):
-                    style.setLabelSettings(settings)
-                    changed = True
-            if changed:
-                labeling.setStyles(styles)
-        except (RuntimeError, AttributeError):
-            logger.debug("Mapbox GL style application skipped", exc_info=True)
+        apply_mapbox_label_priority(labeling)
 
     def _apply_sprite_resources_to_context(self, ctx: object, sprite_resources: MapboxSpriteResources | None) -> None:
         if sprite_resources is None:
