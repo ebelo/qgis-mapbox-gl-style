@@ -1588,6 +1588,7 @@ def _line_label_repetition_candidate_rows(layers: list[dict[str, object]]) -> li
     for layer in layers:
         if not _is_line_label_repetition_candidate_layer(layer):
             continue
+        layout = layer.get("layout") if isinstance(layer.get("layout"), dict) else {}
         controls = _label_density_control_properties(layer)
         control_set = set(controls)
         rows.append(
@@ -1597,6 +1598,8 @@ def _line_label_repetition_candidate_rows(layers: list[dict[str, object]]) -> li
                 "source_layer": str(layer.get("source_layer") or ""),
                 "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
                 _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
+                "symbol_placement": layout.get("symbol-placement"),
+                "symbol_spacing": layout.get("symbol-spacing") if "symbol-spacing" in layout else None,
                 "line_label_control_properties": controls,
                 _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
@@ -3805,22 +3808,34 @@ def _markdown_line_label_repetition_candidate_table(
         return [empty, ""]
     lines = [
         (
-            "| Layer group | Layer | Source layer | Zoom | Filter operators | Line-label controls | "
-            "Simplified/substituted by qfit | QGIS-dependent controls |"
+            "| Layer group | Layer | Source layer | Zoom | Filter operators | Symbol placement | "
+            "Symbol spacing | Line-label controls | Simplified/substituted by qfit | QGIS-dependent controls |"
         ),
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
+        symbol_placement = row.get("symbol_placement")
+        symbol_spacing = row.get("symbol_spacing")
         lines.append(
             (
                 "| `{group}` | `{layer}` | `{source_layer}` | {zoom} | `{filter_operators}` | "
-                "{controls} | {simplified} | {unresolved} |"
+                "{symbol_placement} | {symbol_spacing} | {controls} | {simplified} | {unresolved} |"
             ).format(
                 group=row.get("group", ""),
                 layer=row.get("layer", ""),
                 source_layer=row.get("source_layer", ""),
                 zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
                 filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
+                symbol_placement=(
+                    f"<code>{html.escape(_compact_json(symbol_placement))}</code>"
+                    if symbol_placement is not None
+                    else "—"
+                ),
+                symbol_spacing=(
+                    f"<code>{html.escape(_compact_json(symbol_spacing))}</code>"
+                    if symbol_spacing is not None
+                    else "—"
+                ),
                 controls=_markdown_list(list(row.get("line_label_control_properties") or [])),
                 simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
                 unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),

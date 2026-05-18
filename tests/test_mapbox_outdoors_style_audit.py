@@ -522,6 +522,17 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
                         },
                     },
                     {
+                        "id": "path-pedestrian-label",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "minzoom": 12,
+                        "layout": {
+                            "symbol-placement": "line",
+                            "text-field": ["get", "name"],
+                            "text-size": 9,
+                        },
+                    },
+                    {
                         "id": "poi-label",
                         "type": "symbol",
                         "source-layer": "poi_label",
@@ -540,13 +551,24 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         candidates = audit["summary"]["line_label_repetition_candidates"]
         self.assertEqual(
             [candidate["layer"] for candidate in candidates],
-            ["road-label", "road-shield", "waterway-label"],
+            ["path-pedestrian-label", "road-label", "road-shield", "waterway-label"],
         )
-        road_candidate, shield_candidate, waterway_candidate = candidates
+        path_candidate, road_candidate, shield_candidate, waterway_candidate = candidates
+        self.assertEqual(path_candidate["group"], "roads/trails")
+        self.assertEqual(path_candidate["source_layer"], "road")
+        self.assertEqual(path_candidate["zoom_band"], "z≥12")
+        self.assertEqual(path_candidate["symbol_placement"], "line")
+        self.assertIsNone(path_candidate["symbol_spacing"])
+        self.assertEqual(
+            path_candidate["line_label_control_properties"],
+            ["layout.symbol-placement", "layout.text-field", "layout.text-size"],
+        )
         self.assertEqual(road_candidate["group"], "roads/trails")
         self.assertEqual(road_candidate["source_layer"], "road")
         self.assertEqual(road_candidate["zoom_band"], "z≥10")
         self.assertEqual(road_candidate["filter_operator_signature"], "==, all, get, has")
+        self.assertEqual(road_candidate["symbol_placement"], "line")
+        self.assertEqual(road_candidate["symbol_spacing"], ["step", ["zoom"], 150, 14, 250])
         self.assertEqual(
             road_candidate["line_label_control_properties"],
             ["filter", "layout.symbol-placement", "layout.symbol-spacing", "layout.text-field", "layout.text-size"],
@@ -557,6 +579,7 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertEqual(shield_candidate["source_layer"], "road")
         self.assertEqual(shield_candidate["zoom_band"], "z≥6")
         self.assertEqual(shield_candidate["filter_operator_signature"], "<=, all, get, has")
+        self.assertEqual(shield_candidate["symbol_placement"], ["step", ["zoom"], "point", 11, "line"])
         self.assertEqual(
             shield_candidate["line_label_control_properties"],
             ["filter", "layout.symbol-placement", "layout.symbol-spacing", "layout.text-field"],
@@ -568,20 +591,24 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         )
         self.assertEqual(waterway_candidate["group"], "water")
         self.assertEqual(waterway_candidate["source_layer"], "natural_label")
+        self.assertEqual(
+            waterway_candidate["symbol_spacing"],
+            ["interpolate", ["linear", 1], ["zoom"], 15, 250, 17, 400],
+        )
         self.assertEqual(waterway_candidate["qfit_simplified_control_properties"], ["layout.symbol-spacing"])
         self.assertEqual(waterway_candidate["qgis_dependent_control_properties"], ["filter"])
         self.assertEqual(
             audit["summary"]["line_label_repetition_candidates_by_layer_group"],
-            [{"group": "roads/trails", "count": 2}, {"group": "water", "count": 1}],
+            [{"group": "roads/trails", "count": 3}, {"group": "water", "count": 1}],
         )
         self.assertEqual(
             audit["summary"]["line_label_repetition_controls_by_property"],
             [
+                {"property": "layout.symbol-placement", "count": 4},
+                {"property": "layout.text-field", "count": 4},
                 {"property": "filter", "count": 3},
-                {"property": "layout.symbol-placement", "count": 3},
                 {"property": "layout.symbol-spacing", "count": 3},
-                {"property": "layout.text-field", "count": 3},
-                {"property": "layout.text-size", "count": 2},
+                {"property": "layout.text-size", "count": 3},
                 {"property": "layout.text-max-angle", "count": 1},
             ],
         )
@@ -604,6 +631,13 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("#### Line label repetition controls by property", markdown)
         self.assertIn("#### Line label repetition controls simplified/substituted by qfit", markdown)
         self.assertIn("#### Line label repetition QGIS-dependent controls", markdown)
+        self.assertIn("Symbol placement", markdown)
+        self.assertIn("Symbol spacing", markdown)
+        self.assertIn(
+            "| `roads/trails` | `path-pedestrian-label` | `road` | z≥12 | `(none)` | "
+            "<code>&quot;line&quot;</code> | — |",
+            markdown,
+        )
         self.assertIn("| `roads/trails` | `road-label` | `road` | z≥10 | `==, all, get, has` |", markdown)
         self.assertIn("| `roads/trails` | `road-shield` | `road` | z≥6 | `<=, all, get, has` |", markdown)
         self.assertIn("| `water` | `waterway-label` | `natural_label` | z≥13 | `==, get` |", markdown)
