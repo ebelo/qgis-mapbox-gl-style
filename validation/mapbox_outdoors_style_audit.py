@@ -4455,6 +4455,21 @@ def _markdown_probe_unresolved_property_sections(
     ]
 
 
+def _markdown_sprite_context_converter_overview(probe: object) -> list[str]:
+    if not isinstance(probe, dict):
+        return []
+    summary = probe.get("summary")
+    if not isinstance(summary, dict):
+        return []
+    return [
+        f"After qfit preprocessing with sprite context: {summary.get('count', 0)}",
+        (
+            "Sprite context warning count delta from qfit preprocessing: "
+            f"{probe.get('warning_count_delta_from_qfit', 0)}"
+        ),
+    ]
+
+
 def _markdown_line_opacity_probe(probe: object) -> list[str]:
     lines = _markdown_expression_property_probe(
         probe,
@@ -5247,6 +5262,7 @@ def _markdown_qgis_converter_warnings(report: object) -> list[str]:
         "",
         f"Raw style warnings: {raw.get('count', 0)}",
         f"After qfit preprocessing: {qfit.get('count', 0)}",
+        *_markdown_sprite_context_converter_overview(sprite_context_probe),
         f"Warning count delta: {report.get('warning_count_delta', 0)}",
         "",
     ]
