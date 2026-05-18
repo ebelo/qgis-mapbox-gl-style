@@ -327,6 +327,9 @@ def label_settings_record(style: object, settings: object) -> dict[str, object]:
         "placement_flags": _settings_value(settings, "placementFlags"),
         "label_per_part": _settings_value(settings, "labelPerPart"),
         "merge_lines": _settings_value(settings, "mergeLines"),
+        "geometry_generator": _settings_value(settings, "geometryGenerator"),
+        "geometry_generator_enabled": _settings_value(settings, "geometryGeneratorEnabled"),
+        "geometry_generator_type": _enum_name(_settings_value(settings, "geometryGeneratorType")),
         "max_curved_char_angle_in": _settings_value(settings, "maxCurvedCharAngleIn"),
         "max_curved_char_angle_out": _settings_value(settings, "maxCurvedCharAngleOut"),
         "overrun_distance": _settings_value(settings, "overrunDistance"),
@@ -508,6 +511,23 @@ def _compound_markdown_value(*values: object, separator: str = " ") -> str:
     return separator.join(rendered_values)
 
 
+def _geometry_generator_markdown_value(row: dict[str, object]) -> str:
+    if row.get("geometry_generator_enabled") is False:
+        return "no"
+    generator = row.get("geometry_generator")
+    if (
+        row.get("geometry_generator_enabled") is None
+        and row.get("geometry_generator_type") is None
+        and (generator is None or generator == "")
+    ):
+        return "—"
+    return _compound_markdown_value(
+        row.get("geometry_generator_enabled"),
+        row.get("geometry_generator_type"),
+        row.get("geometry_generator"),
+    )
+
+
 def _json_markdown_value(value: object) -> str:
     if value is None or value == {} or value == []:
         return "—"
@@ -539,14 +559,14 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
         "",
-        "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Curve angles | Overrun | Data-defined keys |",
-        "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- |",
+        "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Geometry generator | Curve angles | Overrun | Data-defined keys |",
+        "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {base} | {style} | {source} | {geometry} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {curve_angles} | {overrun} | {keys} |".format(
+            "| {base} | {style} | {source} | {geometry} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {generator} | {curve_angles} | {overrun} | {keys} |".format(
                 base=_markdown_value(row.get("base_style_layer_id")),
                 style=_markdown_value(row.get("style_name")),
                 source=_markdown_value(row.get("source_layer")),
@@ -569,6 +589,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 buffer_opacity=_markdown_value(row.get("buffer_opacity")),
                 label_per_part=_markdown_value(row.get("label_per_part")),
                 merge_lines=_markdown_value(row.get("merge_lines")),
+                generator=_geometry_generator_markdown_value(row),
                 curve_angles=_compound_markdown_value(
                     row.get("max_curved_char_angle_in"),
                     row.get("max_curved_char_angle_out"),

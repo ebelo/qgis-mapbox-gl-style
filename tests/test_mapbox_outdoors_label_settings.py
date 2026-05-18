@@ -15,6 +15,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _convert_style_to_labeling,
     _ensure_qgis_application,
     _fetch_sprite_resources,
+    _geometry_generator_markdown_value,
     _label_settings_report,
     _load_original_style,
     _postprocessed_label_records,
@@ -126,6 +127,9 @@ class FakeSettings:
     placementFlags = 1
     labelPerPart = False
     mergeLines = False
+    geometryGenerator = "boundary($geometry)"
+    geometryGeneratorEnabled = True
+    geometryGeneratorType = SimpleNamespace(name="Line")
     maxCurvedCharAngleIn = 25.0
     maxCurvedCharAngleOut = -25.0
     overrunDistance = 0.0
@@ -300,6 +304,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(record["placement_flags"], 1)
         self.assertFalse(record["label_per_part"])
         self.assertFalse(record["merge_lines"])
+        self.assertEqual(record["geometry_generator"], "boundary($geometry)")
+        self.assertTrue(record["geometry_generator_enabled"])
+        self.assertEqual(record["geometry_generator_type"], "Line")
         self.assertEqual(record["max_curved_char_angle_in"], 25.0)
         self.assertEqual(record["max_curved_char_angle_out"], -25.0)
         self.assertEqual(record["overrun_distance"], 0.0)
@@ -628,6 +635,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "placement_flags": 1,
                     "label_per_part": False,
                     "merge_lines": False,
+                    "geometry_generator": "boundary($geometry)",
+                    "geometry_generator_enabled": True,
+                    "geometry_generator_type": "Line",
                     "max_curved_char_angle_in": 25.0,
                     "max_curved_char_angle_out": -25.0,
                     "overrun_distance": 0.0,
@@ -671,6 +681,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("Sprite context loaded: yes", markdown)
         self.assertIn("contour-label", markdown)
         self.assertIn("| contour-label | contour-label | contour | Line |", markdown)
+        self.assertIn("yes Line boundary($geometry)", markdown)
         self.assertIn("concat", markdown)
         self.assertIn("Millimeters", markdown)
         self.assertIn("#626250", markdown)
@@ -682,6 +693,29 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("| contour-label | contour-label | contour-label | contour | 12+", markdown)
         self.assertIn("\"symbol-placement\":\"line\"", markdown)
         self.assertIn("\"text-halo-color\":\"#dcdcd4\"", markdown)
+
+    def test_geometry_generator_markdown_handles_missing_disabled_and_enabled_values(self):
+        self.assertEqual(_geometry_generator_markdown_value({}), "—")
+        self.assertEqual(
+            _geometry_generator_markdown_value(
+                {
+                    "geometry_generator": "",
+                    "geometry_generator_enabled": False,
+                    "geometry_generator_type": "Point",
+                }
+            ),
+            "no",
+        )
+        self.assertEqual(
+            _geometry_generator_markdown_value(
+                {
+                    "geometry_generator": "boundary($geometry)",
+                    "geometry_generator_enabled": True,
+                    "geometry_generator_type": "Line",
+                }
+            ),
+            "yes Line boundary($geometry)",
+        )
 
     def test_summary_markdown_collapses_empty_compound_cells(self):
         report = {
