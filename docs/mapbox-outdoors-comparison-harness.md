@@ -185,6 +185,16 @@ python3 validation/mapbox_outdoors_comparison.py \
 
 This probe renders an extra QGIS vector-tile label rule named `contour-label-polygon-perimeter-probe`, limited to contour label candidate indices 5 and 10, with polygon geometry and curved perimeter placement. Use it to test whether QGIS can place contour labels on the polygon candidate geometry before considering a production rendering change. It is diagnostic output only; compare the browser reference, QGIS render, and diff image before treating the result as evidence for a qfit style change.
 
+To compare QGIS' polygon placement with a line-output geometry-generator approach, use the boundary-generator probe instead:
+
+```bash
+python3 validation/mapbox_outdoors_comparison.py \
+  zermatt-piste-z17-outdoors \
+  --qgis-contour-boundary-generator-label-probe
+```
+
+This renders a separate diagnostic rule named `contour-label-boundary-generator-probe` for the same contour label candidates, but labels the generated `boundary($geometry)` line output with curved line placement. Use it to check whether QGIS' line-label engine behaves better on polygon-derived contour boundaries than direct polygon perimeter placement. It is also diagnostic output only.
+
 ## Road feature diagnostic
 
 When road/path hierarchy, high-detail trail behavior, road shields, or oneway arrows are the candidate parity slice, inspect the underlying road vector-tile features before changing QGIS style preprocessing:

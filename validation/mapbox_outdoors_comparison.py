@@ -46,6 +46,10 @@ CONTACT_SHEET_COLUMNS = (
 QGIS_CONTOUR_POLYGON_LABEL_PROBE_STYLE_NAME = "contour-label-polygon-perimeter-probe"
 QGIS_CONTOUR_POLYGON_LABEL_PROBE_FILTER = '("index" = 5 OR "index" = 10)'
 QGIS_CONTOUR_POLYGON_LABEL_PROBE_MIN_ZOOM = 11
+QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_STYLE_NAME = "contour-label-boundary-generator-probe"
+QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_EXPRESSION = "boundary($geometry)"
+QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_FILTER = QGIS_CONTOUR_POLYGON_LABEL_PROBE_FILTER
+QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_MIN_ZOOM = QGIS_CONTOUR_POLYGON_LABEL_PROBE_MIN_ZOOM
 MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE = "metrics_available"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING = "manifest_missing"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE = "manifest_unreadable"
@@ -183,6 +187,7 @@ class ComparisonConfig:
     output_root: Path
     style_json_path: Path | None = None
     qgis_contour_polygon_label_probe: bool = False
+    qgis_contour_boundary_generator_label_probe: bool = False
     browser: bool = True
     qgis: bool = True
     diff: bool = True
@@ -198,6 +203,7 @@ class ComparisonResult:
     diff_captured: bool
     qgis_preprocessed_style_captured: bool = False
     qgis_contour_polygon_label_probe: bool = False
+    qgis_contour_boundary_generator_label_probe: bool = False
     image_metrics: dict[str, object] = dataclasses.field(default_factory=dict)
     style_json_path: str | None = None
 
@@ -301,6 +307,9 @@ def _redacted_manifest(
         },
         "style_json_path": result.style_json_path,
         "qgis_contour_polygon_label_probe": result.qgis_contour_polygon_label_probe,
+        "qgis_contour_boundary_generator_label_probe": (
+            result.qgis_contour_boundary_generator_label_probe
+        ),
         "captured": {
             "browser_reference": result.browser_captured,
             "qgis_vector_render": result.qgis_captured,
@@ -585,6 +594,51 @@ def _append_qgis_contour_polygon_label_probe(layer: object) -> None:
     layer.setLabelsEnabled(True)
 
 
+def _append_qgis_contour_boundary_generator_label_probe(layer: object) -> None:
+    from qgis.core import (  # type: ignore[import-not-found] # noqa: PLC0415
+        QgsPalLayerSettings,
+        QgsVectorTileBasicLabeling,
+        QgsVectorTileBasicLabelingStyle,
+        Qgis,
+    )
+
+    labeling = _method_value(layer, "labeling")
+    styles = list(_method_value(labeling, "styles") or [])
+    if any(
+        _method_text(style, "styleName") == QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_STYLE_NAME
+        for style in styles
+    ):
+        return
+
+    source_settings = None
+    for style in styles:
+        if _is_contour_label_style(style):
+            source_settings = _method_value(style, "labelSettings")
+            break
+
+    settings = QgsPalLayerSettings()
+    settings.fieldName = 'concat("ele", \' m\')'
+    settings.isExpression = True
+    settings.placement = getattr(QgsPalLayerSettings, "Curved", QgsPalLayerSettings.Line)
+    settings.priority = max(3, _settings_priority(source_settings))
+    settings.geometryGenerator = QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_EXPRESSION
+    settings.geometryGeneratorEnabled = True
+    settings.geometryGeneratorType = Qgis.GeometryType.Line
+
+    probe_style = QgsVectorTileBasicLabelingStyle()
+    probe_style.setStyleName(QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_STYLE_NAME)
+    probe_style.setLayerName("contour")
+    probe_style.setGeometryType(Qgis.GeometryType.Polygon)
+    probe_style.setFilterExpression(QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_FILTER)
+    probe_style.setMinZoomLevel(QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_MIN_ZOOM)
+    probe_style.setLabelSettings(settings)
+
+    updated_labeling = QgsVectorTileBasicLabeling()
+    updated_labeling.setStyles([*styles, probe_style])
+    layer.setLabeling(updated_labeling)
+    layer.setLabelsEnabled(True)
+
+
 def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     *,
     camera: MapboxComparisonCamera,
@@ -593,6 +647,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     style_definition: dict[str, object] | None = None,
     qgis_preprocessed_style_path: Path | None = None,
     qgis_contour_polygon_label_probe: bool = False,
+    qgis_contour_boundary_generator_label_probe: bool = False,
 ) -> None:
     _ensure_package_parent_on_path()
     _ensure_headless_qt_platform()
@@ -665,6 +720,8 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
         BackgroundMapService()._apply_mapbox_gl_style(layer, simplified_style, sprite_resources=sprite_resources)
         if qgis_contour_polygon_label_probe:
             _append_qgis_contour_polygon_label_probe(layer)
+        if qgis_contour_boundary_generator_label_probe:
+            _append_qgis_contour_boundary_generator_label_probe(layer)
 
         destination_crs = QgsCoordinateReferenceSystem("EPSG:3857")
         settings = QgsMapSettings()
@@ -785,6 +842,9 @@ def run_comparison(
             style_definition=style_definition,
             qgis_preprocessed_style_path=paths.qgis_preprocessed_style_json,
             qgis_contour_polygon_label_probe=config.qgis_contour_polygon_label_probe,
+            qgis_contour_boundary_generator_label_probe=(
+                config.qgis_contour_boundary_generator_label_probe
+            ),
         )
         qgis_captured = True
         qgis_preprocessed_style_captured = paths.qgis_preprocessed_style_json.exists()
@@ -805,6 +865,9 @@ def run_comparison(
         diff_captured=diff_captured,
         qgis_preprocessed_style_captured=qgis_preprocessed_style_captured,
         qgis_contour_polygon_label_probe=config.qgis_contour_polygon_label_probe,
+        qgis_contour_boundary_generator_label_probe=(
+            config.qgis_contour_boundary_generator_label_probe
+        ),
         image_metrics=image_metrics,
         style_json_path=str(config.style_json_path) if config.style_json_path is not None else None,
     )
@@ -876,6 +939,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--qgis-contour-boundary-generator-label-probe",
+        action="store_true",
+        help=(
+            "Append a diagnostic QGIS contour-label style using a boundary($geometry) "
+            "line geometry generator before rendering. Use only for #949 visual probes."
+        ),
+    )
+    parser.add_argument(
         "--skip-diff",
         action="store_true",
         help="Skip diff image generation.",
@@ -921,6 +992,9 @@ def _comparison_config(
         output_root=output_root,
         style_json_path=args.style_json,
         qgis_contour_polygon_label_probe=args.qgis_contour_polygon_label_probe,
+        qgis_contour_boundary_generator_label_probe=(
+            args.qgis_contour_boundary_generator_label_probe
+        ),
         browser=not args.skip_browser,
         qgis=not args.skip_qgis,
         diff=not args.skip_diff,
@@ -964,6 +1038,8 @@ def _single_camera_subprocess_command(
         command.append("--skip-qgis")
     if args.qgis_contour_polygon_label_probe:
         command.append("--qgis-contour-polygon-label-probe")
+    if args.qgis_contour_boundary_generator_label_probe:
+        command.append("--qgis-contour-boundary-generator-label-probe")
     if args.skip_diff:
         command.append("--skip-diff")
     command.extend(["--browser-timeout-ms", str(args.browser_timeout_ms)])
