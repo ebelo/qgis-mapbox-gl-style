@@ -1564,12 +1564,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][1]["layout"]["text-max-width"], text_max_width)
         self.assertEqual(result["layers"][2]["layout"]["text-anchor"], text_anchor)
 
-    def test_road_exit_shield_concat_icon_uses_reflen_sprite_match_fallback(self):
+    def test_road_exit_shield_concat_icon_expands_to_reflen_sprite_layers(self):
         exit_icon = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
         other_concat_icon = ["concat", "motorway-exit-", ["get", "reflen"]]
         style = {
             "layers": [
-                {"id": "road-exit-shield", "layout": {"icon-image": exit_icon}},
+                {
+                    "id": "road-exit-shield",
+                    "filter": ["all", ["has", "reflen"], ["<=", ["get", "reflen"], 9]],
+                    "layout": {"icon-image": exit_icon, "text-field": ["get", "ref"]},
+                },
                 {"id": "road-number-shield", "layout": {"icon-image": exit_icon}},
                 {"id": "road-exit-shield", "layout": {"icon-image": other_concat_icon}},
             ]
@@ -1578,51 +1582,83 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = simplify_mapbox_style_expressions(style)
 
         self.assertEqual(
-            result["layers"][0]["layout"]["icon-image"],
+            [layer["id"] for layer in result["layers"][:9]],
+            [f"road-exit-shield-{reflen}" for reflen in range(1, 10)],
+        )
+        self.assertEqual(result["layers"][0]["layout"]["icon-image"], "motorway-exit-1")
+        self.assertEqual(result["layers"][0]["layout"]["text-field"], ["get", "ref"])
+        self.assertEqual(result["layers"][8]["layout"]["icon-image"], "motorway-exit-9")
+        self.assertEqual(
+            result["layers"][1]["filter"],
             [
-                "match",
-                ["get", "reflen"],
-                1,
-                "motorway-exit-1",
-                "1",
-                "motorway-exit-1",
-                2,
-                "motorway-exit-2",
-                "2",
-                "motorway-exit-2",
-                3,
-                "motorway-exit-3",
-                "3",
-                "motorway-exit-3",
-                4,
-                "motorway-exit-4",
-                "4",
-                "motorway-exit-4",
-                5,
-                "motorway-exit-5",
-                "5",
-                "motorway-exit-5",
-                6,
-                "motorway-exit-6",
-                "6",
-                "motorway-exit-6",
-                7,
-                "motorway-exit-7",
-                "7",
-                "motorway-exit-7",
-                8,
-                "motorway-exit-8",
-                "8",
-                "motorway-exit-8",
-                9,
-                "motorway-exit-9",
-                "9",
-                "motorway-exit-9",
-                "motorway-exit-1",
+                "all",
+                ["has", "reflen"],
+                [
+                    "match",
+                    ["get", "reflen"],
+                    1,
+                    True,
+                    "1",
+                    True,
+                    2,
+                    True,
+                    "2",
+                    True,
+                    3,
+                    True,
+                    "3",
+                    True,
+                    4,
+                    True,
+                    "4",
+                    True,
+                    5,
+                    True,
+                    "5",
+                    True,
+                    6,
+                    True,
+                    "6",
+                    True,
+                    7,
+                    True,
+                    "7",
+                    True,
+                    8,
+                    True,
+                    "8",
+                    True,
+                    9,
+                    True,
+                    "9",
+                    True,
+                    False,
+                ],
+                ["match", ["get", "reflen"], 2, True, "2", True, False],
             ],
         )
-        self.assertEqual(result["layers"][1]["layout"]["icon-image"], exit_icon)
-        self.assertEqual(result["layers"][2]["layout"]["icon-image"], other_concat_icon)
+        self.assertEqual(result["layers"][9]["layout"]["icon-image"], exit_icon)
+        self.assertEqual(result["layers"][10]["layout"]["icon-image"], other_concat_icon)
+
+    def test_road_exit_shield_split_preserves_disabled_filter(self):
+        exit_icon = ["concat", "motorway-exit-", ["to-string", ["get", "reflen"]]]
+        style = {
+            "layers": [
+                {
+                    "id": "road-exit-shield",
+                    "filter": False,
+                    "layout": {"icon-image": exit_icon},
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [f"road-exit-shield-{reflen}" for reflen in range(1, 10)],
+        )
+        self.assertTrue(all(layer["filter"] == ["==", 1, 0] for layer in result["layers"]))
 
     @staticmethod
     def _road_number_shield_icon_case():
