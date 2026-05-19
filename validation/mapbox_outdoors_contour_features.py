@@ -41,6 +41,15 @@ POLYGON_SHAPE_MIXED_RECTANGULAR = "mixed_rectangular"
 POLYGON_SHAPE_NON_RECTANGULAR_ONLY = "non_rectangular_only"
 POLYGON_SHAPE_UNSUPPORTED_ONLY = "unsupported_only"
 POLYGON_SHAPE_MIXED_POLYGON_SHAPES = "mixed_polygon_shapes"
+CANDIDATE_BOUNDARY_SEGMENT_STAT_KEYS = (
+    "feature_count",
+    "ring_count",
+    "point_count",
+    "segment_count",
+    "axis_aligned_segment_count",
+    "diagonal_segment_count",
+    "bbox_edge_segment_count",
+)
 
 TileFetcher = Callable[[str], bytes]
 TileDecoder = Callable[[bytes], dict[str, object]]
@@ -457,11 +466,96 @@ def _candidate_polygon_shape_summary(shape_counts: dict[str, int]) -> dict[str, 
     }
 
 
+def _iter_polygon_rings(feature: dict[str, object]) -> Iterable[object]:
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        return
+    geometry_type = _geometry_type(feature)
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Polygon" and isinstance(coordinates, (list, tuple)):
+        yield from coordinates
+        return
+    if geometry_type == "MultiPolygon" and isinstance(coordinates, (list, tuple)):
+        for polygon in coordinates:
+            if isinstance(polygon, (list, tuple)):
+                yield from polygon
+
+
+def _empty_candidate_boundary_segment_stats() -> dict[str, int]:
+    return dict.fromkeys(CANDIDATE_BOUNDARY_SEGMENT_STAT_KEYS, 0)
+
+
+def _points_from_ring(ring: object) -> list[tuple[float, float]]:
+    if not isinstance(ring, (list, tuple)):
+        return []
+    return [
+        (float(coordinate[0]), float(coordinate[1]))
+        for coordinate in ring
+        if _is_coordinate_pair(coordinate)
+    ]
+
+
+def _segment_is_bbox_edge(
+    first: tuple[float, float],
+    second: tuple[float, float],
+    bounds: list[float] | None,
+) -> bool:
+    if bounds is None or len(bounds) != 4:
+        return False
+    min_x, min_y, max_x, max_y = bounds
+    return (
+        (first[0] == second[0] and first[0] in {min_x, max_x})
+        or (first[1] == second[1] and first[1] in {min_y, max_y})
+    )
+
+
+def _candidate_polygon_boundary_segment_stats(feature: dict[str, object]) -> dict[str, int]:
+    stats = _empty_candidate_boundary_segment_stats()
+    if _candidate_polygon_shape(feature) is None:
+        return stats
+    geometry_summary = _geometry_summary(feature)
+    bounds_value = geometry_summary.get("bounds")
+    bounds = [float(value) for value in bounds_value] if isinstance(bounds_value, list) else None
+    stats["feature_count"] = 1
+    for ring in _iter_polygon_rings(feature):
+        points = _points_from_ring(ring)
+        if not points:
+            continue
+        stats["ring_count"] += 1
+        stats["point_count"] += len(points)
+        for first, second in zip(points, points[1:]):
+            stats["segment_count"] += 1
+            if first[0] == second[0] or first[1] == second[1]:
+                stats["axis_aligned_segment_count"] += 1
+            else:
+                stats["diagonal_segment_count"] += 1
+            if _segment_is_bbox_edge(first, second, bounds):
+                stats["bbox_edge_segment_count"] += 1
+    return stats
+
+
+def _sum_candidate_polygon_boundary_segment_stats(features: list[dict[str, object]]) -> dict[str, dict[str, int]]:
+    stats_by_shape: dict[str, dict[str, int]] = {}
+    for feature in features:
+        shape = _candidate_polygon_shape(feature)
+        if shape is None:
+            continue
+        shape_stats = stats_by_shape.setdefault(shape, _empty_candidate_boundary_segment_stats())
+        candidate_stats = _candidate_polygon_boundary_segment_stats(feature)
+        for key in CANDIDATE_BOUNDARY_SEGMENT_STAT_KEYS:
+            shape_stats[key] += candidate_stats[key]
+    return dict(sorted(stats_by_shape.items()))
+
+
 def _candidate_sample(tile: dict[str, int], feature: dict[str, object]) -> dict[str, object]:
     properties = _feature_properties(feature)
     sample = {key: properties[key] for key in SAMPLE_PROPERTY_KEYS if key in properties}
     sample["tile"] = tile
     sample["geometry"] = _geometry_summary(feature)
+    polygon_shape = _candidate_polygon_shape(feature)
+    if polygon_shape is not None:
+        sample["polygon_shape"] = polygon_shape
+        sample["boundary_segment_stats"] = _candidate_polygon_boundary_segment_stats(feature)
     sample["property_keys"] = sorted(str(key) for key in properties.keys())
     return sample
 
@@ -486,6 +580,7 @@ def contour_tile_record(
     candidates = [feature for feature in features if is_contour_label_candidate(_feature_properties(feature))]
     candidate_geometry_type_counts = _count_geometry_types(candidates)
     candidate_polygon_shape_counts = _count_candidate_polygon_shapes(candidates)
+    candidate_polygon_boundary_segment_stats = _sum_candidate_polygon_boundary_segment_stats(candidates)
     return {
         **tile,
         "status": "decoded",
@@ -498,6 +593,7 @@ def contour_tile_record(
         "candidate_label_geometry": _candidate_label_geometry(candidate_geometry_type_counts),
         "candidate_polygon_shape_counts": candidate_polygon_shape_counts,
         "candidate_polygon_shape": _candidate_polygon_shape_summary(candidate_polygon_shape_counts),
+        "candidate_polygon_boundary_segment_stats": candidate_polygon_boundary_segment_stats,
         "sample_candidates": [
             _candidate_sample(tile, feature) for feature in candidates[:MAX_SAMPLE_CANDIDATES]
         ],
@@ -514,6 +610,27 @@ def _combined_record_counts(tile_records: list[dict[str, object]], count_key: st
             if isinstance(count, int):
                 counts[str(index)] = counts.get(str(index), 0) + count
     return dict(sorted(counts.items()))
+
+
+def _combined_nested_record_counts(
+    records: list[dict[str, object]],
+    count_key: str,
+) -> dict[str, dict[str, int]]:
+    counts: dict[str, dict[str, int]] = {}
+    for record in records:
+        record_counts = record.get(count_key)
+        if not isinstance(record_counts, dict):
+            continue
+        for group, group_counts in record_counts.items():
+            if not isinstance(group_counts, dict):
+                continue
+            group_key = str(group)
+            target_counts = counts.setdefault(group_key, {})
+            for key, count in group_counts.items():
+                if isinstance(count, int):
+                    stat_key = str(key)
+                    target_counts[stat_key] = target_counts.get(stat_key, 0) + count
+    return dict(sorted((group, dict(sorted(group_counts.items()))) for group, group_counts in counts.items()))
 
 
 def _combined_index_counts(tile_records: list[dict[str, object]]) -> dict[str, int]:
@@ -604,6 +721,10 @@ def collect_contour_feature_report(
     generated = config.now or dt.datetime.now(dt.timezone.utc)
     candidate_geometry_type_counts = _combined_record_counts(tile_records, "candidate_geometry_type_counts")
     candidate_polygon_shape_counts = _combined_record_counts(tile_records, "candidate_polygon_shape_counts")
+    candidate_polygon_boundary_segment_stats = _combined_nested_record_counts(
+        tile_records,
+        "candidate_polygon_boundary_segment_stats",
+    )
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -632,6 +753,7 @@ def collect_contour_feature_report(
         "candidate_label_geometry": _candidate_label_geometry(candidate_geometry_type_counts),
         "candidate_polygon_shape_counts": candidate_polygon_shape_counts,
         "candidate_polygon_shape": _candidate_polygon_shape_summary(candidate_polygon_shape_counts),
+        "candidate_polygon_boundary_segment_stats": candidate_polygon_boundary_segment_stats,
         "sample_candidates": _combined_samples(tile_records),
         "tiles": tile_records,
     }
@@ -671,6 +793,7 @@ def _all_camera_row(report: dict[str, object]) -> dict[str, object]:
             else None
         ),
         "candidate_polygon_shape_counts": report.get("candidate_polygon_shape_counts"),
+        "candidate_polygon_boundary_segment_stats": report.get("candidate_polygon_boundary_segment_stats"),
     }
 
 
@@ -749,6 +872,10 @@ def collect_all_camera_contour_feature_report(
             rows,
             "candidate_polygon_shape_status",
         ),
+        "candidate_polygon_boundary_segment_stats": _combined_nested_record_counts(
+            rows,
+            "candidate_polygon_boundary_segment_stats",
+        ),
         "cameras": rows,
     }
 
@@ -777,9 +904,10 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Candidate geometry types: {_markdown_value(report.get('candidate_geometry_type_counts'))}",
         f"Candidate label geometry: {_markdown_value(report.get('candidate_label_geometry'))}",
         f"Candidate polygon shapes: {_markdown_value(report.get('candidate_polygon_shape'))}",
+        f"Candidate polygon boundary segments: {_markdown_value(report.get('candidate_polygon_boundary_segment_stats'))}",
         "",
-        "| z | x | y | Status | Contour features | Label candidates | Index counts | Geometry types | Candidate geometry types | Candidate polygon shapes |",
-        "| ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- | --- |",
+        "| z | x | y | Status | Contour features | Label candidates | Index counts | Geometry types | Candidate geometry types | Candidate polygon shapes | Candidate polygon boundary segments |",
+        "| ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- | --- | --- |",
     ]
     tiles = report.get("tiles")
     tile_rows = tiles if isinstance(tiles, list) else []
@@ -787,7 +915,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         if not isinstance(tile, dict):
             continue
         lines.append(
-            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} | {geometry_counts} | {candidate_geometry_counts} | {candidate_polygon_shapes} |".format(
+            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} | {geometry_counts} | {candidate_geometry_counts} | {candidate_polygon_shapes} | {candidate_boundary_segments} |".format(
                 z=_markdown_value(tile.get("z")),
                 x=_markdown_value(tile.get("x")),
                 y=_markdown_value(tile.get("y")),
@@ -798,6 +926,9 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 geometry_counts=_markdown_value(tile.get("geometry_type_counts")),
                 candidate_geometry_counts=_markdown_value(tile.get("candidate_geometry_type_counts")),
                 candidate_polygon_shapes=_markdown_value(tile.get("candidate_polygon_shape_counts")),
+                candidate_boundary_segments=_markdown_value(
+                    tile.get("candidate_polygon_boundary_segment_stats")
+                ),
             )
         )
     samples = report.get("sample_candidates")
@@ -830,15 +961,16 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
         f"Contour-label candidates (index 5/10): {report.get('contour_label_candidate_count')}",
         f"Candidate label geometry statuses: {_markdown_value(report.get('candidate_label_geometry_statuses'))}",
         f"Candidate polygon shape statuses: {_markdown_value(report.get('candidate_polygon_shape_statuses'))}",
+        f"Candidate polygon boundary segments: {_markdown_value(report.get('candidate_polygon_boundary_segment_stats'))}",
         "",
-        "| Camera | Status | Camera zoom | Tile zoom | Tiles decoded | Contour features | Label candidates | Candidate label geometry | Candidate geometry types | Candidate polygon shape | Candidate polygon shapes | Error |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+        "| Camera | Status | Camera zoom | Tile zoom | Tiles decoded | Contour features | Label candidates | Candidate label geometry | Candidate geometry types | Candidate polygon shape | Candidate polygon shapes | Candidate polygon boundary segments | Error |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for camera in camera_rows:
         if not isinstance(camera, dict):
             continue
         lines.append(
-            "| {camera} | {status} | {camera_zoom} | {tile_zoom} | {decoded}/{tile_count} | {feature_count} | {candidate_count} | {candidate_geometry} | {candidate_geometry_types} | {candidate_polygon_shape} | {candidate_polygon_shapes} | {error} |".format(
+            "| {camera} | {status} | {camera_zoom} | {tile_zoom} | {decoded}/{tile_count} | {feature_count} | {candidate_count} | {candidate_geometry} | {candidate_geometry_types} | {candidate_polygon_shape} | {candidate_polygon_shapes} | {candidate_boundary_segments} | {error} |".format(
                 camera=_markdown_value(camera.get("camera")),
                 status=_markdown_value(camera.get("status")),
                 camera_zoom=_markdown_value(camera.get("camera_zoom")),
@@ -851,6 +983,9 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 candidate_geometry_types=_markdown_value(camera.get("candidate_geometry_type_counts")),
                 candidate_polygon_shape=_markdown_value(camera.get("candidate_polygon_shape_status")),
                 candidate_polygon_shapes=_markdown_value(camera.get("candidate_polygon_shape_counts")),
+                candidate_boundary_segments=_markdown_value(
+                    camera.get("candidate_polygon_boundary_segment_stats")
+                ),
                 error=_markdown_value(camera.get("error")),
             )
         )

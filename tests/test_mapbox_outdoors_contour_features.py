@@ -141,6 +141,24 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             tile_fetcher=lambda _url: gzip.compress(b"tile"),
             tile_decoder=decoder,
         )
+        rectangular_boundary_stats = {
+            "feature_count": 1,
+            "ring_count": 1,
+            "point_count": 5,
+            "segment_count": 4,
+            "axis_aligned_segment_count": 4,
+            "diagonal_segment_count": 0,
+            "bbox_edge_segment_count": 4,
+        }
+        non_rectangular_boundary_stats = {
+            "feature_count": 1,
+            "ring_count": 1,
+            "point_count": 4,
+            "segment_count": 3,
+            "axis_aligned_segment_count": 2,
+            "diagonal_segment_count": 1,
+            "bbox_edge_segment_count": 2,
+        }
 
         self.assertEqual(record["status"], "decoded")
         self.assertEqual(record["contour_feature_count"], 3)
@@ -160,6 +178,13 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         )
         self.assertEqual(record["candidate_polygon_shape_counts"], {"non_rectangular": 1, "rectangular": 1})
         self.assertEqual(
+            record["candidate_polygon_boundary_segment_stats"],
+            {
+                "non_rectangular": non_rectangular_boundary_stats,
+                "rectangular": rectangular_boundary_stats,
+            },
+        )
+        self.assertEqual(
             record["candidate_polygon_shape"],
             {
                 "status": "mixed_rectangular",
@@ -174,6 +199,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             record["sample_candidates"][0]["geometry"],
             {"type": "Polygon", "point_count": 5, "part_count": 1, "bounds": [0.0, 0.0, 2.0, 2.0]},
         )
+        self.assertEqual(record["sample_candidates"][0]["polygon_shape"], "rectangular")
+        self.assertEqual(record["sample_candidates"][0]["boundary_segment_stats"], rectangular_boundary_stats)
         self.assertEqual(record["sample_candidates"][1]["property_keys"], ["ele", "extra", "index"])
 
     def test_contour_tile_record_marks_line_compatible_candidate_geometry(self):
@@ -206,6 +233,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "other_count": 0,
             },
         )
+        self.assertEqual(record["candidate_polygon_boundary_segment_stats"], {})
 
     def test_contour_tile_record_covers_remaining_candidate_geometry_statuses(self):
         cases = [
@@ -427,6 +455,20 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(report["candidate_label_geometry"]["line_compatible_count"], 0)
         self.assertEqual(report["candidate_polygon_shape_counts"], {"rectangular": 2})
         self.assertEqual(report["candidate_polygon_shape"]["status"], "rectangular_only")
+        self.assertEqual(
+            report["candidate_polygon_boundary_segment_stats"],
+            {
+                "rectangular": {
+                    "feature_count": 2,
+                    "ring_count": 2,
+                    "point_count": 10,
+                    "segment_count": 8,
+                    "axis_aligned_segment_count": 8,
+                    "diagonal_segment_count": 0,
+                    "bbox_edge_segment_count": 8,
+                }
+            },
+        )
 
     def test_collect_all_camera_contour_feature_report_aggregates_camera_rows(self):
         style_calls = []
@@ -486,6 +528,20 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(report["candidate_label_geometry_statuses"], {"polygon_only": 2})
         self.assertEqual(report["candidate_polygon_shape_statuses"], {"rectangular_only": 2})
         self.assertEqual(
+            report["candidate_polygon_boundary_segment_stats"],
+            {
+                "rectangular": {
+                    "feature_count": 2,
+                    "ring_count": 2,
+                    "point_count": 10,
+                    "segment_count": 8,
+                    "axis_aligned_segment_count": 8,
+                    "diagonal_segment_count": 0,
+                    "bbox_edge_segment_count": 8,
+                }
+            },
+        )
+        self.assertEqual(
             [camera["camera"] for camera in report["cameras"]],
             ["chamonix-trails-z14-outdoors", "zermatt-trails-z18-outdoors"],
         )
@@ -493,6 +549,33 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(
             [camera["candidate_polygon_shape_status"] for camera in report["cameras"]],
             ["rectangular_only", "rectangular_only"],
+        )
+        self.assertEqual(
+            [camera["candidate_polygon_boundary_segment_stats"] for camera in report["cameras"]],
+            [
+                {
+                    "rectangular": {
+                        "feature_count": 1,
+                        "ring_count": 1,
+                        "point_count": 5,
+                        "segment_count": 4,
+                        "axis_aligned_segment_count": 4,
+                        "diagonal_segment_count": 0,
+                        "bbox_edge_segment_count": 4,
+                    }
+                },
+                {
+                    "rectangular": {
+                        "feature_count": 1,
+                        "ring_count": 1,
+                        "point_count": 5,
+                        "segment_count": 4,
+                        "axis_aligned_segment_count": 4,
+                        "diagonal_segment_count": 0,
+                        "bbox_edge_segment_count": 4,
+                    }
+                },
+            ],
         )
         self.assertNotIn("camera_reports", report)
 
@@ -556,6 +639,17 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "non_rectangular_count": 0,
                 "unsupported_count": 0,
             },
+            "candidate_polygon_boundary_segment_stats": {
+                "rectangular": {
+                    "feature_count": 2,
+                    "ring_count": 2,
+                    "point_count": 10,
+                    "segment_count": 8,
+                    "axis_aligned_segment_count": 8,
+                    "diagonal_segment_count": 0,
+                    "bbox_edge_segment_count": 8,
+                }
+            },
             "sample_candidates": [{"ele": 1000, "index": 5, "geometry": {"type": "Polygon"}}],
             "tiles": [
                 {
@@ -569,6 +663,17 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "geometry_type_counts": {"LineString": 1, "Polygon": 2},
                     "candidate_geometry_type_counts": {"Polygon": 2},
                     "candidate_polygon_shape_counts": {"rectangular": 2},
+                    "candidate_polygon_boundary_segment_stats": {
+                        "rectangular": {
+                            "feature_count": 2,
+                            "ring_count": 2,
+                            "point_count": 10,
+                            "segment_count": 8,
+                            "axis_aligned_segment_count": 8,
+                            "diagonal_segment_count": 0,
+                            "bbox_edge_segment_count": 8,
+                        }
+                    },
                 }
             ],
         }
@@ -578,6 +683,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertIn('Candidate geometry types: {"Polygon":2}', markdown)
         self.assertIn('Candidate label geometry: {"candidate_count":2', markdown)
         self.assertIn('Candidate polygon shapes: {"non_rectangular_count":0', markdown)
+        self.assertIn('Candidate polygon boundary segments: {"rectangular":{', markdown)
         self.assertIn('{"rectangular":2}', markdown)
         self.assertIn("| 14 | 8504 | 5833 | decoded | 3 | 2 |", markdown)
         self.assertIn("Sample contour-label candidates", markdown)
@@ -603,6 +709,17 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "contour_label_candidate_count": 2,
             "candidate_label_geometry_statuses": {"no_candidates": 1, "polygon_only": 1},
             "candidate_polygon_shape_statuses": {"no_polygon_candidates": 1, "rectangular_only": 1},
+            "candidate_polygon_boundary_segment_stats": {
+                "rectangular": {
+                    "feature_count": 2,
+                    "ring_count": 2,
+                    "point_count": 10,
+                    "segment_count": 8,
+                    "axis_aligned_segment_count": 8,
+                    "diagonal_segment_count": 0,
+                    "bbox_edge_segment_count": 8,
+                }
+            },
             "cameras": [
                 {
                     "status": "decoded",
@@ -617,6 +734,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "candidate_geometry_type_counts": {},
                     "candidate_polygon_shape_status": "no_polygon_candidates",
                     "candidate_polygon_shape_counts": {},
+                    "candidate_polygon_boundary_segment_stats": {},
                 },
                 {
                     "status": "decoded",
@@ -631,6 +749,17 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "candidate_geometry_type_counts": {"Polygon": 2},
                     "candidate_polygon_shape_status": "rectangular_only",
                     "candidate_polygon_shape_counts": {"rectangular": 2},
+                    "candidate_polygon_boundary_segment_stats": {
+                        "rectangular": {
+                            "feature_count": 2,
+                            "ring_count": 2,
+                            "point_count": 10,
+                            "segment_count": 8,
+                            "axis_aligned_segment_count": 8,
+                            "diagonal_segment_count": 0,
+                            "bbox_edge_segment_count": 8,
+                        }
+                    },
                 },
             ],
         }
@@ -640,6 +769,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertIn('Camera statuses: {"decoded":2}', markdown)
         self.assertIn('Candidate label geometry statuses: {"no_candidates":1,"polygon_only":1}', markdown)
         self.assertIn('Candidate polygon shape statuses: {"no_polygon_candidates":1,"rectangular_only":1}', markdown)
+        self.assertIn('Candidate polygon boundary segments: {"rectangular":{', markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | decoded | 14.0 | 14 | 1/1 | 4 | 2 | polygon_only |", markdown)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -668,6 +798,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "candidate_label_geometry": {"status": "polygon_only"},
             "candidate_polygon_shape_counts": {},
             "candidate_polygon_shape": {"status": "no_polygon_candidates"},
+            "candidate_polygon_boundary_segment_stats": {},
             "sample_candidates": [],
             "tiles": [],
         }
@@ -705,6 +836,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "contour_label_candidate_count": 2,
             "candidate_label_geometry_statuses": {"polygon_only": 1},
             "candidate_polygon_shape_statuses": {"rectangular_only": 1},
+            "candidate_polygon_boundary_segment_stats": {"rectangular": {"feature_count": 2}},
             "cameras": [
                 {
                     "status": "decoded",
@@ -719,6 +851,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "candidate_geometry_type_counts": {"Polygon": 2},
                     "candidate_polygon_shape_status": "rectangular_only",
                     "candidate_polygon_shape_counts": {"rectangular": 2},
+                    "candidate_polygon_boundary_segment_stats": {"rectangular": {"feature_count": 2}},
                 }
             ],
         }
