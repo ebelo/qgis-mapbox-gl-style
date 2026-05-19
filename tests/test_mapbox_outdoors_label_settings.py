@@ -770,14 +770,99 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         )
         self.assertEqual(rows[2]["omission_reasons"], {"settlement symbol-sort-key encoded by qfit split": 1})
 
+    def test_source_label_control_omission_summary_groups_icon_image_split_omissions(self):
+        rows = _source_label_control_omission_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "poi-label",
+                    "style_name": "poi-label-z17-plus-text",
+                    "qfit_style_layer_id": "poi-label-z17-plus-text",
+                    "qfit_filter": [">=", ["get", "sizerank"], 13.0],
+                    "layout": {
+                        "icon-image": ["image", ["get", "maki"]],
+                        "text-field": ["get", "name"],
+                    },
+                    "paint": {},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                },
+                {
+                    "base_style_layer_id": "settlement-minor-label",
+                    "style_name": "settlement-minor-label-z8-to-z10-name",
+                    "qfit_style_layer_id": "settlement-minor-label-z8-to-z10-name",
+                    "qfit_minzoom": 8,
+                    "layout": {
+                        "icon-image": [
+                            "step",
+                            ["zoom"],
+                            ["case", ["==", ["get", "capital"], 2], "border-dot-13", "dot-11"],
+                            8,
+                            "",
+                        ],
+                        "text-field": ["get", "name"],
+                    },
+                    "paint": {},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                },
+            ]
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["poi-label", "settlement-minor-label"])
+        self.assertEqual(rows[0]["omission_reasons"], {"icon-image encoded by label visibility split": 1})
+        self.assertEqual(rows[1]["omission_reasons"], {"settlement icon-image empty at qfit zoom split": 1})
+
+    def test_source_label_unresolved_control_summary_keeps_non_zoom_empty_icon_fallbacks(self):
+        rows = _source_label_unresolved_control_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "settlement-minor-label",
+                    "style_name": "settlement-minor-label-z8-to-z10-name",
+                    "qfit_style_layer_id": "settlement-minor-label-z8-to-z10-name",
+                    "qfit_minzoom": 8,
+                    "layout": {
+                        "icon-image": ["case", ["==", ["get", "capital"], 2], "dot-11", ""],
+                        "text-field": ["get", "name"],
+                    },
+                    "paint": {},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                },
+                {
+                    "base_style_layer_id": "settlement-minor-label",
+                    "style_name": "settlement-minor-label-z10-plus-name",
+                    "qfit_style_layer_id": "settlement-minor-label-z10-plus-name",
+                    "qfit_minzoom": 10,
+                    "layout": {
+                        "icon-image": ["step", ["zoom"], "dot-10", 8, "", 9, "dot-11"],
+                        "text-field": ["get", "name"],
+                    },
+                    "paint": {},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                }
+            ]
+        )
+
+        self.assertEqual(rows[0]["base_style_layer_id"], "settlement-minor-label")
+        self.assertEqual(rows[0]["unresolved_controls"], {"layout.icon-image": 2})
+
     def test_source_label_unresolved_control_summary_ignores_known_qfit_omissions(self):
         rows = _source_label_unresolved_control_summary_rows(
             [
                 {
                     "base_style_layer_id": "settlement-major-label",
-                    "style_name": "settlement-major-label-z4-to-z6-dot-11-left",
-                    "qfit_style_layer_id": "settlement-major-label-z4-to-z6-dot-11-left",
+                    "style_name": "settlement-major-label-z8-plus-name",
+                    "qfit_style_layer_id": "settlement-major-label-z8-plus-name",
+                    "qfit_minzoom": 8,
                     "layout": {
+                        "icon-image": [
+                            "step",
+                            ["zoom"],
+                            ["case", ["==", ["get", "capital"], 2], "border-dot-13", "dot-11"],
+                            8,
+                            "",
+                        ],
                         "symbol-sort-key": ["get", "symbolrank"],
                         "text-anchor": ["get", "text_anchor"],
                         "text-field": ["get", "name"],
@@ -799,7 +884,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "base_style_layer_id": "poi-label",
                     "style_name": "poi-label-z16-plus-text",
                     "qfit_style_layer_id": "poi-label-z16-plus-text",
-                    "layout": {"text-field": ["get", "name"]},
+                    "qfit_filter": [">=", ["get", "sizerank"], 13.0],
+                    "layout": {
+                        "icon-image": ["image", ["get", "maki"]],
+                        "text-field": ["get", "name"],
+                    },
                     "paint": {"text-color": "#69575d", "text-halo-color": "#ffffff"},
                     "qfit_layout": {"text-field": ["get", "name"]},
                     "qfit_paint": {"text-color": "#69575d"},

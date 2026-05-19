@@ -610,11 +610,48 @@ def _is_icon_visibility_split(row: dict[str, object]) -> bool:
     return style_id.endswith(("-icon", "-text")) and _nested_contains_value(row.get("qfit_filter"), "sizerank")
 
 
+def _is_text_split_icon_image_omission(row: dict[str, object], section: str, key: str) -> bool:
+    style_id = str(row.get("qfit_style_layer_id") or row.get("style_name") or "")
+    return (
+        section == "layout"
+        and key == "icon-image"
+        and style_id.endswith("-text")
+        and _nested_contains_value(row.get("qfit_filter"), "sizerank")
+    )
+
+
+def _zoom_step_outputs_at_or_before(value: object, zoom: float, expected: object) -> bool:
+    if not isinstance(value, list) or len(value) < 4 or value[0] != "step" or value[1] != ["zoom"]:
+        return False
+    output = value[2]
+    for index in range(3, len(value) - 1, 2):
+        stop = value[index]
+        if isinstance(stop, (int, float)) and stop <= zoom:
+            output = value[index + 1]
+    return output == expected
+
+
+def _is_settlement_zoom_empty_icon_omission(row: dict[str, object], section: str, key: str) -> bool:
+    if section != "layout" or key != "icon-image":
+        return False
+    base_layer = str(row.get("base_style_layer_id") or row.get("style_name") or "")
+    if base_layer not in {"settlement-major-label", "settlement-minor-label"}:
+        return False
+    qfit_minzoom = row.get("qfit_minzoom")
+    return isinstance(qfit_minzoom, (int, float)) and _zoom_step_outputs_at_or_before(
+        _source_icon_image(row), qfit_minzoom, ""
+    )
+
+
 def _known_missing_control_reason(row: dict[str, object], section: str, key: str) -> str | None:
     if _is_empty_icon_image_omission(row, section, key):
         return "empty icon-image removed"
     if _is_settlement_sort_key_omission(row, section, key):
         return "settlement symbol-sort-key encoded by qfit split"
+    if _is_text_split_icon_image_omission(row, section, key):
+        return "icon-image encoded by label visibility split"
+    if _is_settlement_zoom_empty_icon_omission(row, section, key):
+        return "settlement icon-image empty at qfit zoom split"
     if section == "paint" and key == "icon-opacity":
         if _is_icon_opacity_without_qgis_icon(row):
             return "icon-opacity removed with no QGIS icon"
