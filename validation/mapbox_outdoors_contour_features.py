@@ -32,6 +32,15 @@ LABEL_GEOMETRY_LINE_COMPATIBLE = "line_compatible"
 LABEL_GEOMETRY_MIXED_WITH_LINES = "mixed_with_line_compatible"
 LABEL_GEOMETRY_POLYGON_ONLY = "polygon_only"
 LABEL_GEOMETRY_NO_LINE_COMPATIBLE = "no_line_compatible"
+POLYGON_SHAPE_RECTANGULAR = "rectangular"
+POLYGON_SHAPE_NON_RECTANGULAR = "non_rectangular"
+POLYGON_SHAPE_UNSUPPORTED = "unsupported"
+POLYGON_SHAPE_NO_POLYGON_CANDIDATES = "no_polygon_candidates"
+POLYGON_SHAPE_RECTANGULAR_ONLY = "rectangular_only"
+POLYGON_SHAPE_MIXED_RECTANGULAR = "mixed_rectangular"
+POLYGON_SHAPE_NON_RECTANGULAR_ONLY = "non_rectangular_only"
+POLYGON_SHAPE_UNSUPPORTED_ONLY = "unsupported_only"
+POLYGON_SHAPE_MIXED_POLYGON_SHAPES = "mixed_polygon_shapes"
 
 TileFetcher = Callable[[str], bytes]
 TileDecoder = Callable[[bytes], dict[str, object]]
@@ -331,6 +340,75 @@ def _count_geometry_family(geometry_type_counts: dict[str, int], geometry_types:
     return sum(count for geometry_type, count in geometry_type_counts.items() if geometry_type in geometry_types)
 
 
+def _ring_is_axis_aligned_rectangle(coordinates: object) -> bool:
+    if not isinstance(coordinates, (list, tuple)) or len(coordinates) < 5:
+        return False
+    if not all(_is_coordinate_pair(coordinate) for coordinate in coordinates):
+        return False
+    points = [(float(coordinate[0]), float(coordinate[1])) for coordinate in coordinates]
+    if points[0] != points[-1]:
+        return False
+    ring_points = set(points[:-1])
+    xs = [point[0] for point in ring_points]
+    ys = [point[1] for point in ring_points]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    if min_x == max_x or min_y == max_y:
+        return False
+    corners = {
+        (min_x, min_y),
+        (min_x, max_y),
+        (max_x, min_y),
+        (max_x, max_y),
+    }
+    return corners.issubset(ring_points) and all(
+        x in {min_x, max_x} or y in {min_y, max_y} for x, y in ring_points
+    )
+
+
+def _polygon_coordinate_shape(coordinates: object) -> str:
+    if not isinstance(coordinates, (list, tuple)) or len(coordinates) != 1:
+        return POLYGON_SHAPE_UNSUPPORTED
+    ring = coordinates[0]
+    if not isinstance(ring, (list, tuple)):
+        return POLYGON_SHAPE_UNSUPPORTED
+    return (
+        POLYGON_SHAPE_RECTANGULAR
+        if _ring_is_axis_aligned_rectangle(ring)
+        else POLYGON_SHAPE_NON_RECTANGULAR
+    )
+
+
+def _candidate_polygon_shape(feature: dict[str, object]) -> str | None:
+    geometry_type = _geometry_type(feature)
+    if geometry_type not in POLYGON_GEOMETRY_TYPES:
+        return None
+    geometry = feature.get("geometry")
+    if not isinstance(geometry, dict):
+        return POLYGON_SHAPE_UNSUPPORTED
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Polygon":
+        return _polygon_coordinate_shape(coordinates)
+    if not isinstance(coordinates, (list, tuple)) or not coordinates:
+        return POLYGON_SHAPE_UNSUPPORTED
+    shapes = [_polygon_coordinate_shape(polygon) for polygon in coordinates]
+    if all(shape == POLYGON_SHAPE_RECTANGULAR for shape in shapes):
+        return POLYGON_SHAPE_RECTANGULAR
+    if any(shape == POLYGON_SHAPE_NON_RECTANGULAR for shape in shapes):
+        return POLYGON_SHAPE_NON_RECTANGULAR
+    return POLYGON_SHAPE_UNSUPPORTED
+
+
+def _count_candidate_polygon_shapes(features: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for feature in features:
+        shape = _candidate_polygon_shape(feature)
+        if shape is None:
+            continue
+        counts[shape] = counts.get(shape, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _candidate_label_geometry(geometry_type_counts: dict[str, int]) -> dict[str, object]:
     total = sum(geometry_type_counts.values())
     line_compatible_count = _count_geometry_family(geometry_type_counts, LINE_COMPATIBLE_GEOMETRY_TYPES)
@@ -351,6 +429,31 @@ def _candidate_label_geometry(geometry_type_counts: dict[str, int]) -> dict[str,
         "line_compatible_count": line_compatible_count,
         "polygon_count": polygon_count,
         "other_count": other_count,
+    }
+
+
+def _candidate_polygon_shape_summary(shape_counts: dict[str, int]) -> dict[str, object]:
+    total = sum(shape_counts.values())
+    rectangular_count = shape_counts.get(POLYGON_SHAPE_RECTANGULAR, 0)
+    non_rectangular_count = shape_counts.get(POLYGON_SHAPE_NON_RECTANGULAR, 0)
+    unsupported_count = shape_counts.get(POLYGON_SHAPE_UNSUPPORTED, 0)
+    status = POLYGON_SHAPE_NO_POLYGON_CANDIDATES
+    if total and rectangular_count == total:
+        status = POLYGON_SHAPE_RECTANGULAR_ONLY
+    elif rectangular_count:
+        status = POLYGON_SHAPE_MIXED_RECTANGULAR
+    elif total and non_rectangular_count == total:
+        status = POLYGON_SHAPE_NON_RECTANGULAR_ONLY
+    elif total and unsupported_count == total:
+        status = POLYGON_SHAPE_UNSUPPORTED_ONLY
+    elif total:
+        status = POLYGON_SHAPE_MIXED_POLYGON_SHAPES
+    return {
+        "status": status,
+        "polygon_candidate_count": total,
+        "rectangular_count": rectangular_count,
+        "non_rectangular_count": non_rectangular_count,
+        "unsupported_count": unsupported_count,
     }
 
 
@@ -382,6 +485,7 @@ def contour_tile_record(
     features = _decoded_layer_features(decoded, CONTOUR_SOURCE_LAYER)
     candidates = [feature for feature in features if is_contour_label_candidate(_feature_properties(feature))]
     candidate_geometry_type_counts = _count_geometry_types(candidates)
+    candidate_polygon_shape_counts = _count_candidate_polygon_shapes(candidates)
     return {
         **tile,
         "status": "decoded",
@@ -392,6 +496,8 @@ def contour_tile_record(
         "geometry_type_counts": _count_geometry_types(features),
         "candidate_geometry_type_counts": candidate_geometry_type_counts,
         "candidate_label_geometry": _candidate_label_geometry(candidate_geometry_type_counts),
+        "candidate_polygon_shape_counts": candidate_polygon_shape_counts,
+        "candidate_polygon_shape": _candidate_polygon_shape_summary(candidate_polygon_shape_counts),
         "sample_candidates": [
             _candidate_sample(tile, feature) for feature in candidates[:MAX_SAMPLE_CANDIDATES]
         ],
@@ -497,6 +603,7 @@ def collect_contour_feature_report(
     decoded_tile_count = sum(1 for tile in tile_records if tile.get("status") == "decoded")
     generated = config.now or dt.datetime.now(dt.timezone.utc)
     candidate_geometry_type_counts = _combined_record_counts(tile_records, "candidate_geometry_type_counts")
+    candidate_polygon_shape_counts = _combined_record_counts(tile_records, "candidate_polygon_shape_counts")
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -523,6 +630,8 @@ def collect_contour_feature_report(
         "geometry_type_counts": _combined_record_counts(tile_records, "geometry_type_counts"),
         "candidate_geometry_type_counts": candidate_geometry_type_counts,
         "candidate_label_geometry": _candidate_label_geometry(candidate_geometry_type_counts),
+        "candidate_polygon_shape_counts": candidate_polygon_shape_counts,
+        "candidate_polygon_shape": _candidate_polygon_shape_summary(candidate_polygon_shape_counts),
         "sample_candidates": _combined_samples(tile_records),
         "tiles": tile_records,
     }
@@ -556,6 +665,12 @@ def _all_camera_row(report: dict[str, object]) -> dict[str, object]:
         "contour_label_candidate_count": report.get("contour_label_candidate_count"),
         "candidate_label_geometry_status": candidate_geometry.get("status"),
         "candidate_geometry_type_counts": report.get("candidate_geometry_type_counts"),
+        "candidate_polygon_shape_status": (
+            report.get("candidate_polygon_shape", {}).get("status")
+            if isinstance(report.get("candidate_polygon_shape"), dict)
+            else None
+        ),
+        "candidate_polygon_shape_counts": report.get("candidate_polygon_shape_counts"),
     }
 
 
@@ -630,6 +745,10 @@ def collect_all_camera_contour_feature_report(
             rows,
             "candidate_label_geometry_status",
         ),
+        "candidate_polygon_shape_statuses": _all_camera_summary_counts(
+            rows,
+            "candidate_polygon_shape_status",
+        ),
         "cameras": rows,
     }
 
@@ -657,9 +776,10 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Geometry types: {_markdown_value(report.get('geometry_type_counts'))}",
         f"Candidate geometry types: {_markdown_value(report.get('candidate_geometry_type_counts'))}",
         f"Candidate label geometry: {_markdown_value(report.get('candidate_label_geometry'))}",
+        f"Candidate polygon shapes: {_markdown_value(report.get('candidate_polygon_shape'))}",
         "",
-        "| z | x | y | Status | Contour features | Label candidates | Index counts | Geometry types | Candidate geometry types |",
-        "| ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- |",
+        "| z | x | y | Status | Contour features | Label candidates | Index counts | Geometry types | Candidate geometry types | Candidate polygon shapes |",
+        "| ---: | ---: | ---: | --- | ---: | ---: | --- | --- | --- | --- |",
     ]
     tiles = report.get("tiles")
     tile_rows = tiles if isinstance(tiles, list) else []
@@ -667,7 +787,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         if not isinstance(tile, dict):
             continue
         lines.append(
-            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} | {geometry_counts} | {candidate_geometry_counts} |".format(
+            "| {z} | {x} | {y} | {status} | {feature_count} | {candidate_count} | {index_counts} | {geometry_counts} | {candidate_geometry_counts} | {candidate_polygon_shapes} |".format(
                 z=_markdown_value(tile.get("z")),
                 x=_markdown_value(tile.get("x")),
                 y=_markdown_value(tile.get("y")),
@@ -677,6 +797,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 index_counts=_markdown_value(tile.get("index_counts")),
                 geometry_counts=_markdown_value(tile.get("geometry_type_counts")),
                 candidate_geometry_counts=_markdown_value(tile.get("candidate_geometry_type_counts")),
+                candidate_polygon_shapes=_markdown_value(tile.get("candidate_polygon_shape_counts")),
             )
         )
     samples = report.get("sample_candidates")
@@ -708,15 +829,16 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
         f"Contour features: {report.get('contour_feature_count')}",
         f"Contour-label candidates (index 5/10): {report.get('contour_label_candidate_count')}",
         f"Candidate label geometry statuses: {_markdown_value(report.get('candidate_label_geometry_statuses'))}",
+        f"Candidate polygon shape statuses: {_markdown_value(report.get('candidate_polygon_shape_statuses'))}",
         "",
-        "| Camera | Status | Camera zoom | Tile zoom | Tiles decoded | Contour features | Label candidates | Candidate label geometry | Candidate geometry types | Error |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+        "| Camera | Status | Camera zoom | Tile zoom | Tiles decoded | Contour features | Label candidates | Candidate label geometry | Candidate geometry types | Candidate polygon shape | Candidate polygon shapes | Error |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
     ]
     for camera in camera_rows:
         if not isinstance(camera, dict):
             continue
         lines.append(
-            "| {camera} | {status} | {camera_zoom} | {tile_zoom} | {decoded}/{tile_count} | {feature_count} | {candidate_count} | {candidate_geometry} | {candidate_geometry_types} | {error} |".format(
+            "| {camera} | {status} | {camera_zoom} | {tile_zoom} | {decoded}/{tile_count} | {feature_count} | {candidate_count} | {candidate_geometry} | {candidate_geometry_types} | {candidate_polygon_shape} | {candidate_polygon_shapes} | {error} |".format(
                 camera=_markdown_value(camera.get("camera")),
                 status=_markdown_value(camera.get("status")),
                 camera_zoom=_markdown_value(camera.get("camera_zoom")),
@@ -727,6 +849,8 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 candidate_count=_markdown_value(camera.get("contour_label_candidate_count")),
                 candidate_geometry=_markdown_value(camera.get("candidate_label_geometry_status")),
                 candidate_geometry_types=_markdown_value(camera.get("candidate_geometry_type_counts")),
+                candidate_polygon_shape=_markdown_value(camera.get("candidate_polygon_shape_status")),
+                candidate_polygon_shapes=_markdown_value(camera.get("candidate_polygon_shape_counts")),
                 error=_markdown_value(camera.get("error")),
             )
         )

@@ -114,7 +114,10 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "contour": {
                     "features": [
                         {
-                            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 0]]]},
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+                            },
                             "properties": {"ele": 1200, "index": 5, "class": "contour"},
                         },
                         {
@@ -155,10 +158,21 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "other_count": 0,
             },
         )
+        self.assertEqual(record["candidate_polygon_shape_counts"], {"non_rectangular": 1, "rectangular": 1})
+        self.assertEqual(
+            record["candidate_polygon_shape"],
+            {
+                "status": "mixed_rectangular",
+                "polygon_candidate_count": 2,
+                "rectangular_count": 1,
+                "non_rectangular_count": 1,
+                "unsupported_count": 0,
+            },
+        )
         self.assertEqual(record["sample_candidates"][0]["ele"], 1200)
         self.assertEqual(
             record["sample_candidates"][0]["geometry"],
-            {"type": "Polygon", "point_count": 4, "part_count": 1, "bounds": [0.0, 0.0, 2.0, 2.0]},
+            {"type": "Polygon", "point_count": 5, "part_count": 1, "bounds": [0.0, 0.0, 2.0, 2.0]},
         )
         self.assertEqual(record["sample_candidates"][1]["property_keys"], ["ele", "extra", "index"])
 
@@ -251,6 +265,83 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
 
                 self.assertEqual(record["candidate_label_geometry"], expected)
 
+    def test_contour_tile_record_summarizes_candidate_polygon_shapes(self):
+        cases = [
+            (
+                [
+                    {
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[0, 0], [1, 0], [2, 0], [2, 1], [2, 2], [0, 2], [0, 0]]],
+                        },
+                        "properties": {"index": 5},
+                    },
+                    {
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[0, 0], [2, 0], [1, 1], [0, 0]]],
+                        },
+                        "properties": {"index": 10},
+                    },
+                    {
+                        "geometry": {
+                            "type": "MultiPolygon",
+                            "coordinates": [[[[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]]]],
+                        },
+                        "properties": {"index": "5"},
+                    },
+                ],
+                {"non_rectangular": 1, "rectangular": 2},
+                {
+                    "status": "mixed_rectangular",
+                    "polygon_candidate_count": 3,
+                    "rectangular_count": 2,
+                    "non_rectangular_count": 1,
+                    "unsupported_count": 0,
+                },
+            ),
+            (
+                [
+                    {
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [[[0, 0], [2, 0], [1, 1], [0, 0]]],
+                        },
+                        "properties": {"index": 5},
+                    },
+                    {
+                        "geometry": {
+                            "type": "Polygon",
+                            "coordinates": [
+                                [[10, 10], [12, 10], [12, 12], [10, 12], [10, 10]],
+                                [[10.5, 10.5], [11, 10.5], [11, 11], [10.5, 10.5]],
+                            ],
+                        },
+                        "properties": {"index": 10},
+                    },
+                ],
+                {"non_rectangular": 1, "unsupported": 1},
+                {
+                    "status": "mixed_polygon_shapes",
+                    "polygon_candidate_count": 2,
+                    "rectangular_count": 0,
+                    "non_rectangular_count": 1,
+                    "unsupported_count": 1,
+                },
+            ),
+        ]
+        for features, expected_counts, expected_summary in cases:
+            with self.subTest(status=expected_summary["status"]):
+                record = contour_tile_record(
+                    tile={"z": 14, "x": 8504, "y": 5833},
+                    tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+                    tile_fetcher=lambda _url: gzip.compress(b"tile"),
+                    tile_decoder=lambda _payload, features=features: {"contour": {"features": features}},
+                )
+
+                self.assertEqual(record["candidate_polygon_shape_counts"], expected_counts)
+                self.assertEqual(record["candidate_polygon_shape"], expected_summary)
+
     def test_contour_tile_record_reports_fetch_or_decode_errors(self):
         def failing_fetcher(_url):
             raise RuntimeError("offline")
@@ -291,7 +382,10 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "contour": {
                     "features": [
                         {
-                            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                            },
                             "properties": {"ele": 1000, "index": 5},
                         },
                         {
@@ -299,7 +393,10 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                             "properties": {"ele": 1010, "index": 1},
                         },
                         {
-                            "geometry": {"type": "Polygon", "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 2]]]},
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
+                            },
                             "properties": {"ele": 1200, "index": 10},
                         },
                     ]
@@ -328,6 +425,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(report["candidate_geometry_type_counts"], {"Polygon": 2})
         self.assertEqual(report["candidate_label_geometry"]["status"], "polygon_only")
         self.assertEqual(report["candidate_label_geometry"]["line_compatible_count"], 0)
+        self.assertEqual(report["candidate_polygon_shape_counts"], {"rectangular": 2})
+        self.assertEqual(report["candidate_polygon_shape"]["status"], "rectangular_only")
 
     def test_collect_all_camera_contour_feature_report_aggregates_camera_rows(self):
         style_calls = []
@@ -350,7 +449,10 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "contour": {
                     "features": [
                         {
-                            "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]]},
+                            "geometry": {
+                                "type": "Polygon",
+                                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+                            },
                             "properties": {"ele": 1000, "index": 5},
                         },
                         {
@@ -382,11 +484,16 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertEqual(report["contour_feature_count"], 4)
         self.assertEqual(report["contour_label_candidate_count"], 2)
         self.assertEqual(report["candidate_label_geometry_statuses"], {"polygon_only": 2})
+        self.assertEqual(report["candidate_polygon_shape_statuses"], {"rectangular_only": 2})
         self.assertEqual(
             [camera["camera"] for camera in report["cameras"]],
             ["chamonix-trails-z14-outdoors", "zermatt-trails-z18-outdoors"],
         )
         self.assertEqual([camera["status"] for camera in report["cameras"]], ["decoded", "decoded"])
+        self.assertEqual(
+            [camera["candidate_polygon_shape_status"] for camera in report["cameras"]],
+            ["rectangular_only", "rectangular_only"],
+        )
         self.assertNotIn("camera_reports", report)
 
     def test_collect_all_camera_contour_feature_report_keeps_camera_errors(self):
@@ -441,6 +548,14 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                 "polygon_count": 2,
                 "other_count": 0,
             },
+            "candidate_polygon_shape_counts": {"rectangular": 2},
+            "candidate_polygon_shape": {
+                "status": "rectangular_only",
+                "polygon_candidate_count": 2,
+                "rectangular_count": 2,
+                "non_rectangular_count": 0,
+                "unsupported_count": 0,
+            },
             "sample_candidates": [{"ele": 1000, "index": 5, "geometry": {"type": "Polygon"}}],
             "tiles": [
                 {
@@ -453,6 +568,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "index_counts": {"1": 1, "5": 2},
                     "geometry_type_counts": {"LineString": 1, "Polygon": 2},
                     "candidate_geometry_type_counts": {"Polygon": 2},
+                    "candidate_polygon_shape_counts": {"rectangular": 2},
                 }
             ],
         }
@@ -461,6 +577,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertIn("Contour-label candidates (index 5/10): 2", markdown)
         self.assertIn('Candidate geometry types: {"Polygon":2}', markdown)
         self.assertIn('Candidate label geometry: {"candidate_count":2', markdown)
+        self.assertIn('Candidate polygon shapes: {"non_rectangular_count":0', markdown)
+        self.assertIn('{"rectangular":2}', markdown)
         self.assertIn("| 14 | 8504 | 5833 | decoded | 3 | 2 |", markdown)
         self.assertIn("Sample contour-label candidates", markdown)
 
@@ -484,6 +602,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "contour_feature_count": 4,
             "contour_label_candidate_count": 2,
             "candidate_label_geometry_statuses": {"no_candidates": 1, "polygon_only": 1},
+            "candidate_polygon_shape_statuses": {"no_polygon_candidates": 1, "rectangular_only": 1},
             "cameras": [
                 {
                     "status": "decoded",
@@ -496,6 +615,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "contour_label_candidate_count": 0,
                     "candidate_label_geometry_status": "no_candidates",
                     "candidate_geometry_type_counts": {},
+                    "candidate_polygon_shape_status": "no_polygon_candidates",
+                    "candidate_polygon_shape_counts": {},
                 },
                 {
                     "status": "decoded",
@@ -508,6 +629,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "contour_label_candidate_count": 2,
                     "candidate_label_geometry_status": "polygon_only",
                     "candidate_geometry_type_counts": {"Polygon": 2},
+                    "candidate_polygon_shape_status": "rectangular_only",
+                    "candidate_polygon_shape_counts": {"rectangular": 2},
                 },
             ],
         }
@@ -516,6 +639,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
         self.assertIn("# Mapbox Outdoors contour feature diagnostic - all cameras", markdown)
         self.assertIn('Camera statuses: {"decoded":2}', markdown)
         self.assertIn('Candidate label geometry statuses: {"no_candidates":1,"polygon_only":1}', markdown)
+        self.assertIn('Candidate polygon shape statuses: {"no_polygon_candidates":1,"rectangular_only":1}', markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | decoded | 14.0 | 14 | 1/1 | 4 | 2 | polygon_only |", markdown)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -542,6 +666,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "geometry_type_counts": {},
             "candidate_geometry_type_counts": {},
             "candidate_label_geometry": {"status": "polygon_only"},
+            "candidate_polygon_shape_counts": {},
+            "candidate_polygon_shape": {"status": "no_polygon_candidates"},
             "sample_candidates": [],
             "tiles": [],
         }
@@ -578,6 +704,7 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
             "contour_feature_count": 3,
             "contour_label_candidate_count": 2,
             "candidate_label_geometry_statuses": {"polygon_only": 1},
+            "candidate_polygon_shape_statuses": {"rectangular_only": 1},
             "cameras": [
                 {
                     "status": "decoded",
@@ -590,6 +717,8 @@ class MapboxOutdoorsContourFeatureTests(unittest.TestCase):
                     "contour_label_candidate_count": 2,
                     "candidate_label_geometry_status": "polygon_only",
                     "candidate_geometry_type_counts": {"Polygon": 2},
+                    "candidate_polygon_shape_status": "rectangular_only",
+                    "candidate_polygon_shape_counts": {"rectangular": 2},
                 }
             ],
         }
