@@ -21,6 +21,7 @@ from qfit.validation.mapbox_outdoors_road_features import (
     build_summary_markdown,
     collect_all_camera_road_feature_report,
     collect_road_feature_report,
+    is_oneway_arrow_candidate,
     is_path_line_candidate,
     is_pedestrian_line_candidate,
     is_pedestrian_polygon_candidate,
@@ -109,6 +110,11 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         step_path_line = _feature("LineString", {"class": "path", "type": "steps", "structure": "none"})
         bridge_step_line = _feature("LineString", {"class": "path", "type": "steps", "structure": "bridge"})
         tunnel_step_line = _feature("LineString", {"class": "path", "type": "steps", "structure": "tunnel"})
+        low_zoom_street_oneway = _feature("LineString", {"class": "street", "structure": "none", "oneway": "true"})
+        high_zoom_track_oneway = _feature("LineString", {"class": "track", "structure": "none", "oneway": "true"})
+        motorway_oneway = _feature("LineString", {"class": "motorway", "structure": "bridge", "oneway": "true"})
+        bool_oneway = _feature("LineString", {"class": "street", "structure": "none", "oneway": True})
+        unsupported_oneway_class = _feature("LineString", {"class": "path", "structure": "none", "oneway": "true"})
         unsupported_step_line = _feature(
             "LineString",
             {"class": "path", "type": "steps", "structure": "unsupported"},
@@ -132,6 +138,16 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertTrue(is_step_line_candidate(step_path_line))
         self.assertTrue(is_step_line_candidate(bridge_step_line))
         self.assertTrue(is_step_line_candidate(tunnel_step_line))
+        self.assertFalse(is_oneway_arrow_candidate(low_zoom_street_oneway, tile_zoom=15))
+        self.assertTrue(is_oneway_arrow_candidate(low_zoom_street_oneway, tile_zoom=16))
+        self.assertFalse(is_oneway_arrow_candidate(low_zoom_street_oneway))
+        self.assertFalse(is_oneway_arrow_candidate(high_zoom_track_oneway, tile_zoom=15))
+        self.assertTrue(is_oneway_arrow_candidate(high_zoom_track_oneway, tile_zoom=16))
+        self.assertFalse(is_oneway_arrow_candidate(high_zoom_track_oneway))
+        self.assertFalse(is_oneway_arrow_candidate(motorway_oneway, tile_zoom=15))
+        self.assertTrue(is_oneway_arrow_candidate(motorway_oneway, tile_zoom=16))
+        self.assertFalse(is_oneway_arrow_candidate(bool_oneway, tile_zoom=16))
+        self.assertFalse(is_oneway_arrow_candidate(unsupported_oneway_class, tile_zoom=16))
         self.assertFalse(is_step_line_candidate(unsupported_step_line))
         self.assertFalse(is_step_line_candidate(sidewalk_path_line))
         self.assertFalse(is_path_line_candidate(sidewalk_path_line, tile_zoom=15))
@@ -156,6 +172,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": -1}),
             _feature("LineString", {"class": "path", "type": "footway", "structure": "none", "surface": "unpaved"}),
             _feature("MultiLineString", {"class": "path", "type": "steps", "structure": "none", "layer": 0, "surface": "paved"}),
+            _feature("LineString", {"class": "street", "structure": "none", "layer": 0, "oneway": "true"}),
+            _feature("LineString", {"class": "motorway", "structure": "bridge", "oneway": "true"}),
             _feature("LineString", {"class": "street", "type": "street", "structure": "none"}),
         ]
 
@@ -170,11 +188,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         )
 
         self.assertEqual(record["status"], "decoded")
-        self.assertEqual(record["road_feature_count"], 8)
+        self.assertEqual(record["road_feature_count"], 10)
         self.assertEqual(record["pedestrian_polygon_candidate_count"], 2)
         self.assertEqual(record["pedestrian_line_candidate_count"], 1)
         self.assertEqual(record["path_line_candidate_count"], 1)
         self.assertEqual(record["step_line_candidate_count"], 1)
+        self.assertEqual(record["oneway_arrow_candidate_count"], 2)
         self.assertEqual(record["pedestrian_polygon_class_counts"], {"path": 1, "pedestrian": 1})
         self.assertEqual(record["pedestrian_polygon_type_counts"], {"footway": 1, "pedestrian": 1})
         self.assertEqual(record["pedestrian_polygon_structure_counts"], {"none": 2})
@@ -191,8 +210,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(record["step_line_structure_counts"], {"none": 1})
         self.assertEqual(record["step_line_layer_counts"], {"0": 1})
         self.assertEqual(record["step_line_surface_counts"], {"paved": 1})
+        self.assertEqual(record["oneway_arrow_class_counts"], {"motorway": 1, "street": 1})
+        self.assertEqual(record["oneway_arrow_structure_counts"], {"bridge": 1, "none": 1})
+        self.assertEqual(record["oneway_arrow_layer_counts"], {"(missing)": 1, "0": 1})
         self.assertEqual(record["sample_pedestrian_polygons"][0]["properties"]["class"], "pedestrian")
         self.assertEqual(record["sample_step_lines"][0]["properties"]["type"], "steps")
+        self.assertEqual(record["sample_oneway_arrow_lines"][0]["properties"]["oneway"], "true")
 
     def test_road_tile_record_accepts_flat_layer_lists_and_summarizes_irregular_features(self):
         road_features = [
@@ -223,6 +246,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(record["road_feature_count"], 4)
         self.assertEqual(record["pedestrian_polygon_candidate_count"], 2)
         self.assertEqual(record["pedestrian_line_candidate_count"], 1)
+        self.assertEqual(record["oneway_arrow_candidate_count"], 0)
         self.assertEqual(record["road_geometry_type_counts"]["(missing)"], 1)
         self.assertEqual(record["pedestrian_polygon_type_counts"], {'["plaza"]': 1, "(missing)": 1})
         self.assertEqual(record["pedestrian_polygon_structure_counts"], {"none": 2})
@@ -289,6 +313,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                             "LineString",
                             {"class": "path", "type": "steps", "structure": "bridge", "surface": "paved"},
                         ),
+                        _feature("LineString", {"class": "street", "structure": "none", "layer": 0, "oneway": "true"}),
                     ]
                 }
             }
@@ -305,11 +330,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["tile_zoom"], 0)
         self.assertEqual(report["tile_count"], 1)
         self.assertEqual(report["decoded_tile_count"], 1)
-        self.assertEqual(report["road_feature_count"], 4)
+        self.assertEqual(report["road_feature_count"], 5)
         self.assertEqual(report["pedestrian_polygon_candidate_count"], 1)
         self.assertEqual(report["pedestrian_line_candidate_count"], 1)
         self.assertEqual(report["path_line_candidate_count"], 1)
         self.assertEqual(report["step_line_candidate_count"], 1)
+        self.assertEqual(report["oneway_arrow_candidate_count"], 0)
         self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 1})
         self.assertEqual(report["pedestrian_polygon_structure_counts"], {"none": 1})
         self.assertEqual(report["pedestrian_polygon_layer_counts"], {"0": 1})
@@ -323,6 +349,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["step_line_structure_counts"], {"bridge": 1})
         self.assertEqual(report["step_line_layer_counts"], {"(missing)": 1})
         self.assertEqual(report["step_line_surface_counts"], {"paved": 1})
+        self.assertEqual(report["oneway_arrow_class_counts"], {})
+        self.assertEqual(report["oneway_arrow_structure_counts"], {})
+        self.assertEqual(report["oneway_arrow_layer_counts"], {})
         self.assertEqual(len(calls), 1)
         self.assertIn("mapbox.mapbox-streets-v8/0/0/0.mvt", calls[0])
 
@@ -416,6 +445,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                         "LineString",
                         {"class": "path", "type": "steps", "structure": "tunnel", "surface": "paved"},
                     ),
+                    _feature("LineString", {"class": "street", "structure": "none", "layer": 0, "oneway": "true"}),
                 ]
             }
 
@@ -431,11 +461,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["camera_count"], 2)
         self.assertEqual(report["tile_count"], 2)
         self.assertEqual(report["decoded_tile_count"], 2)
-        self.assertEqual(report["road_feature_count"], 8)
+        self.assertEqual(report["road_feature_count"], 10)
         self.assertEqual(report["pedestrian_polygon_candidate_count"], 2)
         self.assertEqual(report["pedestrian_line_candidate_count"], 2)
         self.assertEqual(report["path_line_candidate_count"], 2)
         self.assertEqual(report["step_line_candidate_count"], 2)
+        self.assertEqual(report["oneway_arrow_candidate_count"], 0)
         self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 2})
         self.assertEqual(report["pedestrian_polygon_structure_counts"], {"none": 2})
         self.assertEqual(report["pedestrian_polygon_layer_counts"], {"0": 2})
@@ -451,6 +482,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["step_line_structure_counts"], {"tunnel": 2})
         self.assertEqual(report["step_line_layer_counts"], {"(missing)": 2})
         self.assertEqual(report["step_line_surface_counts"], {"paved": 2})
+        self.assertEqual(report["oneway_arrow_class_counts"], {})
+        self.assertEqual(report["oneway_arrow_structure_counts"], {})
+        self.assertEqual(report["oneway_arrow_layer_counts"], {})
         self.assertEqual(style_calls, [("token", "mapbox", "outdoors-v12")])
         self.assertEqual(
             [camera_report["camera"]["name"] for camera_report in report["cameras"]],
@@ -466,11 +500,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "tile_zoom": 18,
             "decoded_tile_count": 1,
             "tile_count": 1,
-            "road_feature_count": 3,
+            "road_feature_count": 4,
             "pedestrian_polygon_candidate_count": 1,
             "pedestrian_line_candidate_count": 1,
             "path_line_candidate_count": 1,
             "step_line_candidate_count": 1,
+            "oneway_arrow_candidate_count": 1,
             "pedestrian_polygon_type_counts": {"pedestrian": 1},
             "pedestrian_polygon_structure_counts": {"none": 1},
             "pedestrian_polygon_layer_counts": {"0": 1},
@@ -486,10 +521,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "step_line_structure_counts": {"none": 1},
             "step_line_layer_counts": {"0": 1},
             "step_line_surface_counts": {"paved": 1},
+            "oneway_arrow_class_counts": {"street": 1},
+            "oneway_arrow_structure_counts": {"none": 1},
+            "oneway_arrow_layer_counts": {"0": 1},
             "sample_pedestrian_polygons": [{"properties": {"class": "pedestrian"}}],
             "sample_pedestrian_lines": [{"properties": {"class": "pedestrian"}}],
             "sample_path_lines": [{"properties": {"class": "path"}}],
             "sample_step_lines": [{"properties": {"type": "steps"}}],
+            "sample_oneway_arrow_lines": [{"properties": {"class": "street", "oneway": "true"}}],
             "tiles": [
                 "ignore-me",
                 {
@@ -497,11 +536,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "x": 1,
                     "y": 2,
                     "status": "decoded",
-                    "road_feature_count": 3,
+                    "road_feature_count": 4,
                     "pedestrian_polygon_candidate_count": 1,
                     "pedestrian_line_candidate_count": 1,
                     "path_line_candidate_count": 1,
                     "step_line_candidate_count": 1,
+                    "oneway_arrow_candidate_count": 1,
                     "pedestrian_polygon_type_counts": {"pedestrian": 1},
                     "pedestrian_polygon_structure_counts": {"none": 1},
                     "pedestrian_polygon_layer_counts": {"0": 1},
@@ -517,6 +557,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "step_line_structure_counts": {"none": 1},
                     "step_line_layer_counts": {"0": 1},
                     "step_line_surface_counts": {"paved": 1},
+                    "oneway_arrow_class_counts": {"street": 1},
+                    "oneway_arrow_structure_counts": {"none": 1},
+                    "oneway_arrow_layer_counts": {"0": 1},
                 }
             ],
         }
@@ -527,6 +570,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn("Pedestrian/path polygon candidates: 1", markdown)
         self.assertIn("Path line candidates: 1", markdown)
         self.assertIn("Step line candidates: 1", markdown)
+        self.assertIn("One-way arrow candidates: 1", markdown)
         self.assertIn('Pedestrian polygon structure counts: {"none":1}', markdown)
         self.assertIn('Pedestrian polygon layer counts: {"0":1}', markdown)
         self.assertIn('Pedestrian polygon surface counts: {"paved":1}', markdown)
@@ -539,10 +583,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn('Step line structure counts: {"none":1}', markdown)
         self.assertIn('Step line layer counts: {"0":1}', markdown)
         self.assertIn('Step line surface counts: {"paved":1}', markdown)
+        self.assertIn('One-way arrow class counts: {"street":1}', markdown)
+        self.assertIn('One-way arrow structure counts: {"none":1}', markdown)
+        self.assertIn('One-way arrow layer counts: {"0":1}', markdown)
         self.assertIn("## Sample pedestrian/path polygon candidates", markdown)
         self.assertIn("## Sample pedestrian line candidates", markdown)
         self.assertIn("## Sample path line candidates", markdown)
         self.assertIn("## Sample step line candidates", markdown)
+        self.assertIn("## Sample one-way arrow candidates", markdown)
 
     def test_build_all_camera_summary_markdown_includes_camera_rows(self):
         report = {
@@ -552,11 +600,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "camera_count": 1,
             "decoded_tile_count": 1,
             "tile_count": 1,
-            "road_feature_count": 3,
+            "road_feature_count": 4,
             "pedestrian_polygon_candidate_count": 1,
             "pedestrian_line_candidate_count": 1,
             "path_line_candidate_count": 1,
             "step_line_candidate_count": 1,
+            "oneway_arrow_candidate_count": 1,
             "pedestrian_polygon_type_counts": {"pedestrian": 1},
             "pedestrian_polygon_structure_counts": {"none": 1},
             "pedestrian_polygon_layer_counts": {"0": 1},
@@ -572,17 +621,21 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "step_line_structure_counts": {"bridge": 1},
             "step_line_layer_counts": {"(missing)": 1},
             "step_line_surface_counts": {"paved": 1},
+            "oneway_arrow_class_counts": {"street": 1},
+            "oneway_arrow_structure_counts": {"none": 1},
+            "oneway_arrow_layer_counts": {"0": 1},
             "cameras": [
                 {
                     "camera": {"name": "zermatt-trails-z18-outdoors", "zoom": 18.0},
                     "tile_zoom": 18,
                     "decoded_tile_count": 1,
                     "tile_count": 1,
-                    "road_feature_count": 3,
+                    "road_feature_count": 4,
                     "pedestrian_polygon_candidate_count": 1,
                     "pedestrian_line_candidate_count": 1,
                     "path_line_candidate_count": 1,
                     "step_line_candidate_count": 1,
+                    "oneway_arrow_candidate_count": 1,
                     "pedestrian_polygon_type_counts": {"pedestrian": 1},
                     "pedestrian_polygon_structure_counts": {"none": 1},
                     "pedestrian_polygon_layer_counts": {"0": 1},
@@ -598,6 +651,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "step_line_structure_counts": {"bridge": 1},
                     "step_line_layer_counts": {"(missing)": 1},
                     "step_line_surface_counts": {"paved": 1},
+                    "oneway_arrow_class_counts": {"street": 1},
+                    "oneway_arrow_structure_counts": {"none": 1},
+                    "oneway_arrow_layer_counts": {"0": 1},
                 }
             ],
         }
@@ -606,7 +662,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertIn("# Mapbox Outdoors road feature diagnostic - all cameras", markdown)
         self.assertIn("Cameras: 1", markdown)
-        self.assertIn("| zermatt-trails-z18-outdoors | 18.0 | 18 | 1/1 | 3 | 1 | 1 | 1 | 1 |", markdown)
+        self.assertIn("| zermatt-trails-z18-outdoors | 18.0 | 18 | 1/1 | 4 | 1 | 1 | 1 | 1 | 1 |", markdown)
 
     def test_write_report_writes_json_and_markdown(self):
         report = {

@@ -55,6 +55,22 @@ POLYGON_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
 LOW_ZOOM_PATH_EXCLUDED_TYPES = {"crossing", "sidewalk", "steps"}
 HIGH_ZOOM_PATH_EXCLUDED_TYPES = {"steps"}
 STEP_STRUCTURES = {"none", "ford", "bridge", "tunnel"}
+ONEWAY_ARROW_MIN_ZOOM = 16
+ONEWAY_ARROW_BLUE_CLASSES = {
+    "primary",
+    "primary_link",
+    "secondary",
+    "secondary_link",
+    "service",
+    "street",
+    "street_limited",
+    "tertiary",
+    "tertiary_link",
+    "track",
+}
+ONEWAY_ARROW_WHITE_CLASSES = {"motorway", "motorway_link", "trunk", "trunk_link"}
+ONEWAY_ARROW_CLASSES = ONEWAY_ARROW_BLUE_CLASSES | ONEWAY_ARROW_WHITE_CLASSES
+ONEWAY_ARROW_STRUCTURES = {"none", "ford", "bridge", "tunnel"}
 SAMPLE_PROPERTY_KEYS = (
     "class",
     "type",
@@ -157,6 +173,18 @@ def is_step_line_candidate(feature: dict[str, object]) -> bool:
     )
 
 
+def is_oneway_arrow_candidate(feature: dict[str, object], *, tile_zoom: int | None = None) -> bool:
+    properties = _feature_properties(feature)
+    return (
+        tile_zoom is not None
+        and tile_zoom >= ONEWAY_ARROW_MIN_ZOOM
+        and properties.get("oneway") == "true"
+        and properties.get("class") in ONEWAY_ARROW_CLASSES
+        and properties.get("structure") in ONEWAY_ARROW_STRUCTURES
+        and _geometry_type(feature) in LINE_GEOMETRY_TYPES
+    )
+
+
 def _count_by_property(features: Iterable[dict[str, object]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for feature in features:
@@ -207,6 +235,9 @@ def road_tile_record(
     pedestrian_lines = [feature for feature in road_features if is_pedestrian_line_candidate(feature)]
     path_lines = [feature for feature in road_features if is_path_line_candidate(feature, tile_zoom=tile.get("z"))]
     step_lines = [feature for feature in road_features if is_step_line_candidate(feature)]
+    oneway_arrow_lines = [
+        feature for feature in road_features if is_oneway_arrow_candidate(feature, tile_zoom=tile.get("z"))
+    ]
     return {
         **tile,
         "status": "decoded",
@@ -216,6 +247,7 @@ def road_tile_record(
         "pedestrian_line_candidate_count": len(pedestrian_lines),
         "path_line_candidate_count": len(path_lines),
         "step_line_candidate_count": len(step_lines),
+        "oneway_arrow_candidate_count": len(oneway_arrow_lines),
         "road_geometry_type_counts": _count_geometry_types(road_features),
         "pedestrian_polygon_class_counts": _count_by_property(pedestrian_polygons, "class"),
         "pedestrian_polygon_type_counts": _count_by_property(pedestrian_polygons, "type"),
@@ -233,6 +265,9 @@ def road_tile_record(
         "step_line_structure_counts": _count_by_property(step_lines, "structure"),
         "step_line_layer_counts": _count_by_property(step_lines, "layer"),
         "step_line_surface_counts": _count_by_property(step_lines, "surface"),
+        "oneway_arrow_class_counts": _count_by_property(oneway_arrow_lines, "class"),
+        "oneway_arrow_structure_counts": _count_by_property(oneway_arrow_lines, "structure"),
+        "oneway_arrow_layer_counts": _count_by_property(oneway_arrow_lines, "layer"),
         "sample_pedestrian_polygons": [
             _feature_sample(tile, feature) for feature in pedestrian_polygons[:MAX_SAMPLE_FEATURES]
         ],
@@ -241,6 +276,9 @@ def road_tile_record(
         ],
         "sample_path_lines": [_feature_sample(tile, feature) for feature in path_lines[:MAX_SAMPLE_FEATURES]],
         "sample_step_lines": [_feature_sample(tile, feature) for feature in step_lines[:MAX_SAMPLE_FEATURES]],
+        "sample_oneway_arrow_lines": [
+            _feature_sample(tile, feature) for feature in oneway_arrow_lines[:MAX_SAMPLE_FEATURES]
+        ],
     }
 
 
@@ -261,6 +299,7 @@ _SUMMARY_COUNT_FIELDS = (
     ("Pedestrian line candidates", "pedestrian_line_candidate_count"),
     ("Path line candidates", "path_line_candidate_count"),
     ("Step line candidates", "step_line_candidate_count"),
+    ("One-way arrow candidates", "oneway_arrow_candidate_count"),
 )
 _SUMMARY_COUNT_MAP_FIELDS = (
     ("Pedestrian polygon type counts", "pedestrian_polygon_type_counts"),
@@ -278,6 +317,9 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("Step line structure counts", "step_line_structure_counts"),
     ("Step line layer counts", "step_line_layer_counts"),
     ("Step line surface counts", "step_line_surface_counts"),
+    ("One-way arrow class counts", "oneway_arrow_class_counts"),
+    ("One-way arrow structure counts", "oneway_arrow_structure_counts"),
+    ("One-way arrow layer counts", "oneway_arrow_layer_counts"),
 )
 _ROAD_FEATURE_TABLE_FIELDS = (
     ("Road", "road_feature_count", "---:"),
@@ -285,6 +327,7 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Pedestrian lines", "pedestrian_line_candidate_count", "---:"),
     ("Path lines", "path_line_candidate_count", "---:"),
     ("Step lines", "step_line_candidate_count", "---:"),
+    ("One-way arrows", "oneway_arrow_candidate_count", "---:"),
     ("Polygon types", "pedestrian_polygon_type_counts", "---"),
     ("Polygon structures", "pedestrian_polygon_structure_counts", "---"),
     ("Polygon layers", "pedestrian_polygon_layer_counts", "---"),
@@ -300,6 +343,9 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Step structures", "step_line_structure_counts", "---"),
     ("Step layers", "step_line_layer_counts", "---"),
     ("Step surfaces", "step_line_surface_counts", "---"),
+    ("One-way arrow classes", "oneway_arrow_class_counts", "---"),
+    ("One-way arrow structures", "oneway_arrow_structure_counts", "---"),
+    ("One-way arrow layers", "oneway_arrow_layer_counts", "---"),
 )
 
 
@@ -424,6 +470,9 @@ def collect_road_feature_report(
         ),
         "path_line_candidate_count": sum(int(tile.get("path_line_candidate_count") or 0) for tile in tile_records),
         "step_line_candidate_count": sum(int(tile.get("step_line_candidate_count") or 0) for tile in tile_records),
+        "oneway_arrow_candidate_count": sum(
+            int(tile.get("oneway_arrow_candidate_count") or 0) for tile in tile_records
+        ),
         "road_geometry_type_counts": _combined_record_counts(tile_records, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(
             tile_records,
@@ -459,10 +508,14 @@ def collect_road_feature_report(
         "step_line_structure_counts": _combined_record_counts(tile_records, "step_line_structure_counts"),
         "step_line_layer_counts": _combined_record_counts(tile_records, "step_line_layer_counts"),
         "step_line_surface_counts": _combined_record_counts(tile_records, "step_line_surface_counts"),
+        "oneway_arrow_class_counts": _combined_record_counts(tile_records, "oneway_arrow_class_counts"),
+        "oneway_arrow_structure_counts": _combined_record_counts(tile_records, "oneway_arrow_structure_counts"),
+        "oneway_arrow_layer_counts": _combined_record_counts(tile_records, "oneway_arrow_layer_counts"),
         "sample_pedestrian_polygons": _combined_samples(tile_records, "sample_pedestrian_polygons"),
         "sample_pedestrian_lines": _combined_samples(tile_records, "sample_pedestrian_lines"),
         "sample_path_lines": _combined_samples(tile_records, "sample_path_lines"),
         "sample_step_lines": _combined_samples(tile_records, "sample_step_lines"),
+        "sample_oneway_arrow_lines": _combined_samples(tile_records, "sample_oneway_arrow_lines"),
         "tiles": tile_records,
     }
 
@@ -517,6 +570,7 @@ def collect_all_camera_road_feature_report(
         ),
         "path_line_candidate_count": _sum_reports(camera_reports, "path_line_candidate_count"),
         "step_line_candidate_count": _sum_reports(camera_reports, "step_line_candidate_count"),
+        "oneway_arrow_candidate_count": _sum_reports(camera_reports, "oneway_arrow_candidate_count"),
         "road_geometry_type_counts": _combined_record_counts(camera_reports, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(
             camera_reports,
@@ -561,6 +615,9 @@ def collect_all_camera_road_feature_report(
         "step_line_structure_counts": _combined_record_counts(camera_reports, "step_line_structure_counts"),
         "step_line_layer_counts": _combined_record_counts(camera_reports, "step_line_layer_counts"),
         "step_line_surface_counts": _combined_record_counts(camera_reports, "step_line_surface_counts"),
+        "oneway_arrow_class_counts": _combined_record_counts(camera_reports, "oneway_arrow_class_counts"),
+        "oneway_arrow_structure_counts": _combined_record_counts(camera_reports, "oneway_arrow_structure_counts"),
+        "oneway_arrow_layer_counts": _combined_record_counts(camera_reports, "oneway_arrow_layer_counts"),
         "cameras": camera_reports,
     }
 
@@ -589,6 +646,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         ("Sample pedestrian line candidates", "sample_pedestrian_lines"),
         ("Sample path line candidates", "sample_path_lines"),
         ("Sample step line candidates", "sample_step_lines"),
+        ("Sample one-way arrow candidates", "sample_oneway_arrow_lines"),
     )
     for heading, key in sample_sections:
         samples = report.get(key)
