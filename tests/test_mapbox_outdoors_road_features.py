@@ -25,6 +25,7 @@ from qfit.validation.mapbox_outdoors_road_features import (
     is_path_line_candidate,
     is_pedestrian_line_candidate,
     is_pedestrian_polygon_candidate,
+    is_road_exit_shield_candidate,
     is_road_number_shield_candidate,
     is_step_line_candidate,
     load_style_definition,
@@ -129,6 +130,13 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         zero_reflen_shield_line = _feature("LineString", {"class": "primary", "reflen": 0, "len": 6001})
         long_reflen_shield_line = _feature("LineString", {"class": "primary", "reflen": 7, "len": 6001})
         bool_reflen_shield_line = _feature("LineString", {"class": "primary", "reflen": True, "len": 6001})
+        road_exit_shield = _feature("Point", {"ref": "12", "reflen": 2})
+        string_reflen_road_exit_shield = _feature("Point", {"ref": "A1", "reflen": "2"})
+        low_zoom_road_exit_shield = _feature("Point", {"ref": "12", "reflen": 2})
+        missing_reflen_road_exit_shield = _feature("Point", {"ref": "12"})
+        zero_reflen_road_exit_shield = _feature("Point", {"ref": "12", "reflen": 0})
+        long_reflen_road_exit_shield = _feature("Point", {"ref": "1234567890", "reflen": 10})
+        bool_reflen_road_exit_shield = _feature("Point", {"ref": "12", "reflen": True})
         unsupported_step_line = _feature(
             "LineString",
             {"class": "path", "type": "steps", "structure": "unsupported"},
@@ -177,6 +185,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertFalse(is_road_number_shield_candidate(long_reflen_shield_line, tile_zoom=14))
         self.assertFalse(is_road_number_shield_candidate(bool_reflen_shield_line, tile_zoom=14))
         self.assertFalse(is_road_number_shield_candidate(z14_shield_line))
+        self.assertTrue(is_road_exit_shield_candidate(road_exit_shield, tile_zoom=14))
+        self.assertTrue(is_road_exit_shield_candidate(string_reflen_road_exit_shield, tile_zoom=14))
+        self.assertFalse(is_road_exit_shield_candidate(low_zoom_road_exit_shield, tile_zoom=13))
+        self.assertFalse(is_road_exit_shield_candidate(missing_reflen_road_exit_shield, tile_zoom=14))
+        self.assertFalse(is_road_exit_shield_candidate(zero_reflen_road_exit_shield, tile_zoom=14))
+        self.assertFalse(is_road_exit_shield_candidate(long_reflen_road_exit_shield, tile_zoom=14))
+        self.assertFalse(is_road_exit_shield_candidate(bool_reflen_road_exit_shield, tile_zoom=14))
+        self.assertFalse(is_road_exit_shield_candidate(road_exit_shield))
         self.assertFalse(is_step_line_candidate(unsupported_step_line))
         self.assertFalse(is_step_line_candidate(sidewalk_path_line))
         self.assertFalse(is_path_line_candidate(sidewalk_path_line, tile_zoom=15))
@@ -217,9 +233,16 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             _feature("LineString", {"class": "service", "reflen": 2, "structure": "none"}),
             _feature("LineString", {"class": "street", "type": "street", "structure": "none"}),
         ]
+        motorway_junction_features = [
+            _feature("Point", {"ref": "12", "reflen": 2}),
+            _feature("Point", {"ref": "1234567890", "reflen": 10}),
+        ]
 
         def decoder(_payload):
-            return {"road": {"features": road_features}}
+            return {
+                "road": {"features": road_features},
+                "motorway_junction": {"features": motorway_junction_features},
+            }
 
         record = road_tile_record(
             tile={"z": 18, "x": 136712, "y": 93238},
@@ -230,12 +253,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertEqual(record["status"], "decoded")
         self.assertEqual(record["road_feature_count"], 12)
+        self.assertEqual(record["motorway_junction_feature_count"], 2)
         self.assertEqual(record["pedestrian_polygon_candidate_count"], 2)
         self.assertEqual(record["pedestrian_line_candidate_count"], 1)
         self.assertEqual(record["path_line_candidate_count"], 1)
         self.assertEqual(record["step_line_candidate_count"], 1)
         self.assertEqual(record["oneway_arrow_candidate_count"], 2)
         self.assertEqual(record["road_number_shield_candidate_count"], 1)
+        self.assertEqual(record["road_exit_shield_candidate_count"], 1)
         self.assertEqual(record["pedestrian_polygon_class_counts"], {"path": 1, "pedestrian": 1})
         self.assertEqual(record["pedestrian_polygon_type_counts"], {"footway": 1, "pedestrian": 1})
         self.assertEqual(record["pedestrian_polygon_structure_counts"], {"none": 2})
@@ -282,10 +307,13 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             record["road_number_shield_signature_counts"],
             {"class=primary; reflen=2; shield=ch-primary; shield_beta=(missing); structure=none; layer=0": 1},
         )
+        self.assertEqual(record["road_exit_shield_reflen_counts"], {"2": 1})
+        self.assertEqual(record["road_exit_shield_signature_counts"], {"ref=12; reflen=2": 1})
         self.assertEqual(record["sample_pedestrian_polygons"][0]["properties"]["class"], "pedestrian")
         self.assertEqual(record["sample_step_lines"][0]["properties"]["type"], "steps")
         self.assertEqual(record["sample_oneway_arrow_lines"][0]["properties"]["oneway"], "true")
         self.assertEqual(record["sample_road_number_shields"][0]["properties"]["shield"], "ch-primary")
+        self.assertEqual(record["sample_road_exit_shields"][0]["properties"]["ref"], "12")
 
     def test_road_tile_record_accepts_flat_layer_lists_and_summarizes_irregular_features(self):
         road_features = [
@@ -314,10 +342,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertEqual(record["status"], "decoded")
         self.assertEqual(record["road_feature_count"], 4)
+        self.assertEqual(record["motorway_junction_feature_count"], 0)
         self.assertEqual(record["pedestrian_polygon_candidate_count"], 2)
         self.assertEqual(record["pedestrian_line_candidate_count"], 1)
         self.assertEqual(record["oneway_arrow_candidate_count"], 0)
         self.assertEqual(record["road_number_shield_candidate_count"], 0)
+        self.assertEqual(record["road_exit_shield_candidate_count"], 0)
         self.assertEqual(record["road_geometry_type_counts"]["(missing)"], 1)
         self.assertEqual(record["pedestrian_polygon_type_counts"], {'["plaza"]': 1, "(missing)": 1})
         self.assertEqual(record["pedestrian_polygon_structure_counts"], {"none": 2})
@@ -340,6 +370,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertEqual(record["status"], "decoded")
         self.assertEqual(record["road_feature_count"], 0)
+        self.assertEqual(record["motorway_junction_feature_count"], 0)
 
     def test_road_tile_record_marks_decode_errors(self):
         record = road_tile_record(
@@ -386,7 +417,10 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                         ),
                         _feature("LineString", {"class": "street", "structure": "none", "layer": 0, "oneway": "true"}),
                     ]
-                }
+                },
+                "motorway_junction": {
+                    "features": [_feature("Point", {"ref": "12", "reflen": 2})]
+                },
             }
 
         report = collect_road_feature_report(
@@ -402,12 +436,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["tile_count"], 1)
         self.assertEqual(report["decoded_tile_count"], 1)
         self.assertEqual(report["road_feature_count"], 5)
+        self.assertEqual(report["motorway_junction_feature_count"], 1)
         self.assertEqual(report["pedestrian_polygon_candidate_count"], 1)
         self.assertEqual(report["pedestrian_line_candidate_count"], 1)
         self.assertEqual(report["path_line_candidate_count"], 1)
         self.assertEqual(report["step_line_candidate_count"], 1)
         self.assertEqual(report["oneway_arrow_candidate_count"], 0)
         self.assertEqual(report["road_number_shield_candidate_count"], 0)
+        self.assertEqual(report["road_exit_shield_candidate_count"], 0)
         self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 1})
         self.assertEqual(report["pedestrian_polygon_structure_counts"], {"none": 1})
         self.assertEqual(report["pedestrian_polygon_layer_counts"], {"0": 1})
@@ -444,6 +480,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["road_number_shield_reflen_counts"], {})
         self.assertEqual(report["road_number_shield_structure_counts"], {})
         self.assertEqual(report["road_number_shield_layer_counts"], {})
+        self.assertEqual(report["road_exit_shield_reflen_counts"], {})
         self.assertEqual(len(calls), 1)
         self.assertIn("mapbox.mapbox-streets-v8/0/0/0.mvt", calls[0])
 
@@ -465,11 +502,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     now=generated,
                 ),
                 tile_fetcher=lambda _url: gzip.compress(b"tile"),
-                tile_decoder=lambda _payload: {"road": []},
+                tile_decoder=lambda _payload: {"road": [], "motorway_junction": []},
             )
 
         self.assertEqual(report["tileset_ids"], ["mapbox.mapbox-streets-v8"])
         self.assertEqual(report["road_feature_count"], 0)
+        self.assertEqual(report["motorway_junction_feature_count"], 0)
 
     def test_collect_road_feature_report_requires_token_for_style_and_tiles(self):
         with self.assertRaisesRegex(ValueError, "style-json"):
@@ -538,7 +576,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                         {"class": "path", "type": "steps", "structure": "tunnel", "surface": "paved"},
                     ),
                     _feature("LineString", {"class": "street", "structure": "none", "layer": 0, "oneway": "true"}),
-                ]
+                ],
+                "motorway_junction": [_feature("Point", {"ref": "12", "reflen": 2})],
             }
 
         report = collect_all_camera_road_feature_report(
@@ -554,12 +593,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["tile_count"], 2)
         self.assertEqual(report["decoded_tile_count"], 2)
         self.assertEqual(report["road_feature_count"], 10)
+        self.assertEqual(report["motorway_junction_feature_count"], 2)
         self.assertEqual(report["pedestrian_polygon_candidate_count"], 2)
         self.assertEqual(report["pedestrian_line_candidate_count"], 2)
         self.assertEqual(report["path_line_candidate_count"], 2)
         self.assertEqual(report["step_line_candidate_count"], 2)
         self.assertEqual(report["oneway_arrow_candidate_count"], 0)
         self.assertEqual(report["road_number_shield_candidate_count"], 0)
+        self.assertEqual(report["road_exit_shield_candidate_count"], 0)
         self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 2})
         self.assertEqual(report["pedestrian_polygon_structure_counts"], {"none": 2})
         self.assertEqual(report["pedestrian_polygon_layer_counts"], {"0": 2})
@@ -598,6 +639,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["road_number_shield_reflen_counts"], {})
         self.assertEqual(report["road_number_shield_structure_counts"], {})
         self.assertEqual(report["road_number_shield_layer_counts"], {})
+        self.assertEqual(report["road_exit_shield_reflen_counts"], {})
         self.assertEqual(style_calls, [("token", "mapbox", "outdoors-v12")])
         self.assertEqual(
             [camera_report["camera"]["name"] for camera_report in report["cameras"]],
@@ -609,6 +651,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         path_signature = "class=path; type=footway; surface=unpaved; structure=none; layer=(missing)"
         step_signature = "class=path; type=steps; surface=paved; structure=none; layer=0"
         shield_signature = "class=primary; reflen=2; shield=ch-primary; shield_beta=(missing); structure=none; layer=0"
+        exit_shield_signature = "ref=12; reflen=2"
         report = {
             "generated": "2026-05-18T14:12:00+00:00",
             "style_owner": "mapbox",
@@ -618,12 +661,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "decoded_tile_count": 1,
             "tile_count": 1,
             "road_feature_count": 4,
+            "motorway_junction_feature_count": 1,
             "pedestrian_polygon_candidate_count": 1,
             "pedestrian_line_candidate_count": 1,
             "path_line_candidate_count": 1,
             "step_line_candidate_count": 1,
             "oneway_arrow_candidate_count": 1,
             "road_number_shield_candidate_count": 1,
+            "road_exit_shield_candidate_count": 1,
             "pedestrian_polygon_type_counts": {"pedestrian": 1},
             "pedestrian_polygon_structure_counts": {"none": 1},
             "pedestrian_polygon_layer_counts": {"0": 1},
@@ -651,12 +696,15 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "road_number_shield_structure_counts": {"none": 1},
             "road_number_shield_layer_counts": {"0": 1},
             "road_number_shield_signature_counts": {shield_signature: 1},
+            "road_exit_shield_reflen_counts": {"2": 1},
+            "road_exit_shield_signature_counts": {exit_shield_signature: 1},
             "sample_pedestrian_polygons": [{"properties": {"class": "pedestrian"}}],
             "sample_pedestrian_lines": [{"properties": {"class": "pedestrian"}}],
             "sample_path_lines": [{"properties": {"class": "path"}}],
             "sample_step_lines": [{"properties": {"type": "steps"}}],
             "sample_oneway_arrow_lines": [{"properties": {"class": "street", "oneway": "true"}}],
             "sample_road_number_shields": [{"properties": {"class": "primary", "shield": "ch-primary"}}],
+            "sample_road_exit_shields": [{"properties": {"ref": "12", "reflen": 2}}],
             "tiles": [
                 "ignore-me",
                 {
@@ -665,12 +713,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "y": 2,
                     "status": "decoded",
                     "road_feature_count": 4,
+                    "motorway_junction_feature_count": 1,
                     "pedestrian_polygon_candidate_count": 1,
                     "pedestrian_line_candidate_count": 1,
                     "path_line_candidate_count": 1,
                     "step_line_candidate_count": 1,
                     "oneway_arrow_candidate_count": 1,
                     "road_number_shield_candidate_count": 1,
+                    "road_exit_shield_candidate_count": 1,
                     "pedestrian_polygon_type_counts": {"pedestrian": 1},
                     "pedestrian_polygon_structure_counts": {"none": 1},
                     "pedestrian_polygon_layer_counts": {"0": 1},
@@ -698,6 +748,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "road_number_shield_structure_counts": {"none": 1},
                     "road_number_shield_layer_counts": {"0": 1},
                     "road_number_shield_signature_counts": {shield_signature: 1},
+                    "road_exit_shield_reflen_counts": {"2": 1},
+                    "road_exit_shield_signature_counts": {exit_shield_signature: 1},
                 }
             ],
         }
@@ -710,6 +762,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn("Step line candidates: 1", markdown)
         self.assertIn("One-way arrow candidates: 1", markdown)
         self.assertIn("Road number shield candidates: 1", markdown)
+        self.assertIn("Road exit shield candidates: 1", markdown)
         self.assertIn('Pedestrian polygon structure counts: {"none":1}', markdown)
         self.assertIn('Pedestrian polygon layer counts: {"0":1}', markdown)
         self.assertIn('Pedestrian polygon surface counts: {"paved":1}', markdown)
@@ -734,18 +787,22 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn('Road number shield structure counts: {"none":1}', markdown)
         self.assertIn('Road number shield layer counts: {"0":1}', markdown)
         self.assertIn(f'Road number shield signatures: {{"{shield_signature}":1}}', markdown)
+        self.assertIn('Road exit shield reflen counts: {"2":1}', markdown)
+        self.assertIn(f'Road exit shield signatures: {{"{exit_shield_signature}":1}}', markdown)
         self.assertIn("## Sample pedestrian/path polygon candidates", markdown)
         self.assertIn("## Sample pedestrian line candidates", markdown)
         self.assertIn("## Sample path line candidates", markdown)
         self.assertIn("## Sample step line candidates", markdown)
         self.assertIn("## Sample one-way arrow candidates", markdown)
         self.assertIn("## Sample road number shield candidates", markdown)
+        self.assertIn("## Sample road exit shield candidates", markdown)
 
     def test_build_all_camera_summary_markdown_includes_camera_rows(self):
         pedestrian_signature = "class=pedestrian; type=pedestrian; surface=paved; structure=none; layer=0"
         path_signature = "class=path; type=footway; surface=unpaved; structure=none; layer=(missing)"
         step_signature = "class=path; type=steps; surface=paved; structure=bridge; layer=(missing)"
         shield_signature = "class=primary; reflen=2; shield=ch-primary; shield_beta=(missing); structure=none; layer=0"
+        exit_shield_signature = "ref=12; reflen=2"
         report = {
             "generated": "2026-05-18T15:40:00+00:00",
             "style_owner": "mapbox",
@@ -754,12 +811,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "decoded_tile_count": 1,
             "tile_count": 1,
             "road_feature_count": 4,
+            "motorway_junction_feature_count": 1,
             "pedestrian_polygon_candidate_count": 1,
             "pedestrian_line_candidate_count": 1,
             "path_line_candidate_count": 1,
             "step_line_candidate_count": 1,
             "oneway_arrow_candidate_count": 1,
             "road_number_shield_candidate_count": 1,
+            "road_exit_shield_candidate_count": 1,
             "pedestrian_polygon_type_counts": {"pedestrian": 1},
             "pedestrian_polygon_structure_counts": {"none": 1},
             "pedestrian_polygon_layer_counts": {"0": 1},
@@ -787,6 +846,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "road_number_shield_structure_counts": {"none": 1},
             "road_number_shield_layer_counts": {"0": 1},
             "road_number_shield_signature_counts": {shield_signature: 1},
+            "road_exit_shield_reflen_counts": {"2": 1},
+            "road_exit_shield_signature_counts": {exit_shield_signature: 1},
             "cameras": [
                 {
                     "camera": {"name": "zermatt-trails-z18-outdoors", "zoom": 18.0},
@@ -794,12 +855,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "decoded_tile_count": 1,
                     "tile_count": 1,
                     "road_feature_count": 4,
+                    "motorway_junction_feature_count": 1,
                     "pedestrian_polygon_candidate_count": 1,
                     "pedestrian_line_candidate_count": 1,
                     "path_line_candidate_count": 1,
                     "step_line_candidate_count": 1,
                     "oneway_arrow_candidate_count": 1,
                     "road_number_shield_candidate_count": 1,
+                    "road_exit_shield_candidate_count": 1,
                     "pedestrian_polygon_type_counts": {"pedestrian": 1},
                     "pedestrian_polygon_structure_counts": {"none": 1},
                     "pedestrian_polygon_layer_counts": {"0": 1},
@@ -827,6 +890,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "road_number_shield_structure_counts": {"none": 1},
                     "road_number_shield_layer_counts": {"0": 1},
                     "road_number_shield_signature_counts": {shield_signature: 1},
+                    "road_exit_shield_reflen_counts": {"2": 1},
+                    "road_exit_shield_signature_counts": {exit_shield_signature: 1},
                 }
             ],
         }
@@ -835,8 +900,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertIn("# Mapbox Outdoors road feature diagnostic - all cameras", markdown)
         self.assertIn("Cameras: 1", markdown)
-        self.assertIn("| zermatt-trails-z18-outdoors | 18.0 | 18 | 1/1 | 4 | 1 | 1 | 1 | 1 | 1 | 1 |", markdown)
+        self.assertIn("| zermatt-trails-z18-outdoors | 18.0 | 18 | 1/1 | 4 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |", markdown)
         self.assertIn(f'Path line signatures: {{"{path_signature}":1}}', markdown)
+        self.assertIn(f'Road exit shield signatures: {{"{exit_shield_signature}":1}}', markdown)
 
     def test_write_report_writes_json_and_markdown(self):
         report = {
