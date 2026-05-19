@@ -20,6 +20,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _label_style_summary_rows,
     _load_original_style,
     _postprocessed_label_records,
+    _source_label_control_summary_rows,
     _source_label_fanout_summary_rows,
     build_label_settings_paths,
     build_run_directory,
@@ -559,6 +560,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["count"], 1)
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["converted_label_styles"], 1)
+        self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
+        self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["source_label_rows"], 1)
         self.assertEqual(report["source_label_layer_count"], 1)
 
     def test_label_style_summary_groups_density_relevant_settings(self):
@@ -669,6 +672,52 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(settlement_row["field_names"], {'"name"': 1, '"name_en"': 1})
         self.assertEqual(rows[1]["qfit_zooms"], {"(missing)": 1})
 
+    def test_source_label_control_summary_groups_missing_qfit_controls(self):
+        rows = _source_label_control_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "layout": {
+                        "symbol-sort-key": ["get", "symbolrank"],
+                        "text-anchor": ["get", "text_anchor"],
+                        "text-field": ["get", "name"],
+                    },
+                    "paint": {"text-color": "#111111", "text-halo-color": "#ffffff"},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {"text-color": "#111111"},
+                },
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "layout": {"text-field": ["get", "name_en"], "text-radial-offset": 0.6},
+                    "paint": {"text-color": "#111111"},
+                    "qfit_layout": {"text-field": ["get", "name_en"], "text-radial-offset": 0.6},
+                    "qfit_paint": {},
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "layout": {"text-field": ["get", "name"]},
+                    "paint": {"text-color": "#69575d"},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {"text-color": "#69575d"},
+                },
+            ]
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["settlement-major-label", "poi-label"])
+        settlement_row = rows[0]
+        self.assertEqual(settlement_row["source_label_rows"], 2)
+        self.assertEqual(settlement_row["missing_control_count"], 4)
+        self.assertEqual(
+            settlement_row["source_layout_controls"],
+            {"text-field": 2, "symbol-sort-key": 1, "text-anchor": 1, "text-radial-offset": 1},
+        )
+        self.assertEqual(settlement_row["qfit_layout_controls"], {"text-field": 2, "text-radial-offset": 1})
+        self.assertEqual(settlement_row["missing_layout_controls"], {"symbol-sort-key": 1, "text-anchor": 1})
+        self.assertEqual(settlement_row["source_paint_controls"], {"text-color": 2, "text-halo-color": 1})
+        self.assertEqual(settlement_row["qfit_paint_controls"], {"text-color": 1})
+        self.assertEqual(settlement_row["missing_paint_controls"], {"text-color": 1, "text-halo-color": 1})
+        self.assertEqual(rows[1]["missing_control_count"], 0)
+
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
         modules = {
             **_fake_qgis_modules(),
@@ -760,6 +809,19 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "field_names": {'"name"': 1},
                 }
             ],
+            "source_label_control_summary_by_base_layer": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "source_label_rows": 1,
+                    "missing_control_count": 0,
+                    "source_layout_controls": {"symbol-placement": 1, "text-field": 1},
+                    "qfit_layout_controls": {"symbol-placement": 1, "text-field": 1},
+                    "missing_layout_controls": {},
+                    "source_paint_controls": {"text-color": 1, "text-halo-color": 1},
+                    "qfit_paint_controls": {"text-color": 1, "text-halo-color": 1},
+                    "missing_paint_controls": {},
+                }
+            ],
             "source_label_layer_count": 1,
             "labels": [
                 {
@@ -826,6 +888,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
         self.assertIn("## Source label fan-out by base layer", markdown)
         self.assertIn('| contour-label | 1 | 1 | 1 | contour=1 | 12+=1 | 12+=1 | "name"=1 |', markdown)
+        self.assertIn("## Source label control coverage by base layer", markdown)
+        self.assertIn(
+            "| contour-label | 1 | 0 | symbol-placement=1, text-field=1 | symbol-placement=1, text-field=1 | — | text-color=1, text-halo-color=1 | text-color=1, text-halo-color=1 | — |",
+            markdown,
+        )
         self.assertIn("## Converted QGIS label styles", markdown)
         self.assertIn("contour-label", markdown)
         self.assertIn("| contour-label | contour-label | contour | Line |", markdown)

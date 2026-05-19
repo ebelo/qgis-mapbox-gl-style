@@ -543,6 +543,64 @@ def _source_label_fanout_summary_rows(
     )
 
 
+def _section_key_names(value: object) -> tuple[str, ...]:
+    if not isinstance(value, dict):
+        return ()
+    return tuple(str(key) for key in value)
+
+
+def _missing_section_keys(row: dict[str, object], source_section: str, qfit_section: str) -> tuple[str, ...]:
+    source_keys = set(_section_key_names(row.get(source_section)))
+    qfit_keys = set(_section_key_names(row.get(qfit_section)))
+    return tuple(sorted(source_keys - qfit_keys))
+
+
+def _section_key_values(rows: list[dict[str, object]], section: str) -> Iterable[str]:
+    for row in rows:
+        yield from _section_key_names(row.get(section))
+
+
+def _missing_section_key_values(rows: list[dict[str, object]], source_section: str, qfit_section: str) -> Iterable[str]:
+    for row in rows:
+        yield from _missing_section_keys(row, source_section, qfit_section)
+
+
+def _source_label_control_summary_rows(source_label_layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in source_label_layers:
+        if not isinstance(row, dict):
+            continue
+        base_layer = str(row.get("base_style_layer_id") or row.get("style_name") or "")
+        if base_layer:
+            grouped[base_layer].append(row)
+
+    rows: list[dict[str, object]] = []
+    for base_layer, source_rows in grouped.items():
+        missing_layout = _sorted_count_map(_missing_section_key_values(source_rows, "layout", "qfit_layout"))
+        missing_paint = _sorted_count_map(_missing_section_key_values(source_rows, "paint", "qfit_paint"))
+        rows.append(
+            {
+                "base_style_layer_id": base_layer,
+                "source_label_rows": len(source_rows),
+                "missing_control_count": sum(missing_layout.values()) + sum(missing_paint.values()),
+                "source_layout_controls": _sorted_count_map(_section_key_values(source_rows, "layout")),
+                "qfit_layout_controls": _sorted_count_map(_section_key_values(source_rows, "qfit_layout")),
+                "missing_layout_controls": missing_layout,
+                "source_paint_controls": _sorted_count_map(_section_key_values(source_rows, "paint")),
+                "qfit_paint_controls": _sorted_count_map(_section_key_values(source_rows, "qfit_paint")),
+                "missing_paint_controls": missing_paint,
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -int(row["missing_control_count"]),
+            -int(row["source_label_rows"]),
+            str(row["base_style_layer_id"]),
+        ),
+    )
+
+
 def _label_settings_report(
     *,
     config: LabelSettingsConfig,
@@ -565,6 +623,7 @@ def _label_settings_report(
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
         "source_label_fanout_by_base_layer": _source_label_fanout_summary_rows(source_label_layer_rows, records),
+        "source_label_control_summary_by_base_layer": _source_label_control_summary_rows(source_label_layer_rows),
         "source_label_layer_count": len(source_label_layer_rows),
         "source_label_layers": source_label_layer_rows,
     }
@@ -735,6 +794,35 @@ def _append_source_label_fanout_summary(lines: list[str], summary_rows: list[obj
         lines.append("")
 
 
+def _append_source_label_control_summary(lines: list[str], summary_rows: list[object]) -> None:
+    if summary_rows:
+        lines.extend(
+            [
+                "## Source label control coverage by base layer",
+                "",
+                "| Base layer | Source rows | Missing controls | Source layout | QGIS layout | Missing layout | Source paint | QGIS paint | Missing paint |",
+                "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in summary_rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| {base} | {source_rows} | {missing_count} | {source_layout} | {qfit_layout} | {missing_layout} | {source_paint} | {qfit_paint} | {missing_paint} |".format(
+                    base=_markdown_value(row.get("base_style_layer_id")),
+                    source_rows=_markdown_value(row.get("source_label_rows")),
+                    missing_count=_markdown_value(row.get("missing_control_count")),
+                    source_layout=_count_map_markdown_value(row.get("source_layout_controls")),
+                    qfit_layout=_count_map_markdown_value(row.get("qfit_layout_controls")),
+                    missing_layout=_count_map_markdown_value(row.get("missing_layout_controls")),
+                    source_paint=_count_map_markdown_value(row.get("source_paint_controls")),
+                    qfit_paint=_count_map_markdown_value(row.get("qfit_paint_controls")),
+                    missing_paint=_count_map_markdown_value(row.get("missing_paint_controls")),
+                )
+            )
+        lines.append("")
+
+
 def _append_converted_label_rows(lines: list[str], rows: list[object]) -> None:
     lines.extend(
         [
@@ -831,6 +919,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     summary_rows = label_summary if isinstance(label_summary, list) else []
     source_fanout_summary = report.get("source_label_fanout_by_base_layer")
     source_fanout_rows = source_fanout_summary if isinstance(source_fanout_summary, list) else []
+    source_control_summary = report.get("source_label_control_summary_by_base_layer")
+    source_control_rows = source_control_summary if isinstance(source_control_summary, list) else []
     source_labels = report.get("source_label_layers")
     source_rows = source_labels if isinstance(source_labels, list) else []
     lines = [
@@ -844,6 +934,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     ]
     _append_label_style_summary(lines, summary_rows)
     _append_source_label_fanout_summary(lines, source_fanout_rows)
+    _append_source_label_control_summary(lines, source_control_rows)
     _append_converted_label_rows(lines, rows)
     _append_source_label_rows(lines, report, source_rows)
     return "\n".join(lines) + "\n"
