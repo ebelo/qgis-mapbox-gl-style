@@ -175,6 +175,16 @@ debug/mapbox-outdoors-contour-features/all-cameras/<UTC timestamp>/
 
 Use the aggregate table to check whether contour-label candidates are line-compatible, polygon-only, or absent across the z5-z18 comparison matrix. Per-camera status and error columns keep the batch useful when one camera fails before tile-level diagnostics can be collected. A polygon-only result means a Mapbox `symbol-spacing` or QGIS line-repeat tweak is not enough by itself; follow-up work should stay focused on QGIS vector-tile polygon/perimeter-label behavior or a separately validated contour-boundary overlay. The diagnostic also classifies polygon candidates as rectangular or non-rectangular so perimeter-label probes can distinguish likely tile/source-boundary polygons from shapes that might plausibly follow contour boundaries.
 
+When the contour diagnostic reports polygon-only label candidates, the screenshot harness can append a diagnostic-only QGIS polygon/perimeter label style for the `contour` source layer before rendering:
+
+```bash
+python3 validation/mapbox_outdoors_comparison.py \
+  zermatt-piste-z17-outdoors \
+  --qgis-contour-polygon-label-probe
+```
+
+This probe renders an extra QGIS vector-tile label rule named `contour-label-polygon-perimeter-probe`, limited to contour label candidate indices 5 and 10, with polygon geometry and curved perimeter placement. Use it to test whether QGIS can place contour labels on the polygon candidate geometry before considering a production rendering change. It is diagnostic output only; compare the browser reference, QGIS render, and diff image before treating the result as evidence for a qfit style change.
+
 ## Road feature diagnostic
 
 When road/path hierarchy, high-detail trail behavior, road shields, or oneway arrows are the candidate parity slice, inspect the underlying road vector-tile features before changing QGIS style preprocessing:
