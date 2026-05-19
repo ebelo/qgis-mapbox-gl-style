@@ -14,7 +14,7 @@ import tempfile
 from collections.abc import MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, TypeAlias
+from typing import Any, Callable, Iterable, TypeAlias
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = REPO_ROOT.parent
@@ -33,6 +33,16 @@ MATRIX_SUMMARY_METRIC_KEYS = (
     "ssim_status",
 )
 MATRIX_SUMMARY_OUTPUT_KEYS = ("browser_reference", "qgis_vector_render", "diff")
+CONTACT_SHEET_FILENAME = "contact-sheet.jpg"
+CONTACT_SHEET_THUMBNAIL_WIDTH = 320
+CONTACT_SHEET_LABEL_HEIGHT = 28
+CONTACT_SHEET_ROW_GAP = 12
+CONTACT_SHEET_COLUMN_GAP = 8
+CONTACT_SHEET_COLUMNS = (
+    ("browser_reference", "Mapbox GL"),
+    ("qgis_vector_render", "QGIS"),
+    ("diff", "Diff"),
+)
 MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE = "metrics_available"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING = "manifest_missing"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE = "manifest_unreadable"
@@ -903,7 +913,12 @@ def _manifest_path_from_child_stdout(stdout: str) -> Path | None:
     return manifest_path
 
 
-def _manifest_visual_outputs(manifest: dict[str, object], *, token: str) -> dict[str, str]:
+def _manifest_visual_outputs(
+    manifest: dict[str, object],
+    *,
+    token: str,
+    redact_outputs: bool = True,
+) -> dict[str, str]:
     outputs = manifest.get("outputs")
     captured = manifest.get("captured")
     if not isinstance(outputs, dict) or not isinstance(captured, dict):
@@ -912,7 +927,8 @@ def _manifest_visual_outputs(manifest: dict[str, object], *, token: str) -> dict
     for key in MATRIX_SUMMARY_OUTPUT_KEYS:
         output_path = outputs.get(key)
         if captured.get(key) is True and output_path:
-            visual_outputs[key] = redact_sensitive_text(str(output_path), token)
+            path_text = str(output_path)
+            visual_outputs[key] = redact_sensitive_text(path_text, token) if redact_outputs else path_text
     return visual_outputs
 
 
@@ -920,6 +936,7 @@ def _manifest_artifact_status_metrics_and_outputs(
     manifest_path: Path | None,
     *,
     token: str,
+    redact_outputs: bool = True,
 ) -> tuple[str, dict[str, object], dict[str, str]]:
     if manifest_path is None:
         return MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING, {}, {}
@@ -928,7 +945,11 @@ def _manifest_artifact_status_metrics_and_outputs(
     except (OSError, json.JSONDecodeError):
         return MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE, {}, {}
     metrics = loaded.get("metrics") if isinstance(loaded, dict) else None
-    outputs = _manifest_visual_outputs(loaded, token=token) if isinstance(loaded, dict) else {}
+    outputs = (
+        _manifest_visual_outputs(loaded, token=token, redact_outputs=redact_outputs)
+        if isinstance(loaded, dict)
+        else {}
+    )
     if not isinstance(metrics, dict):
         return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs
     metric_summary = {key: metrics[key] for key in MATRIX_SUMMARY_METRIC_KEYS if key in metrics}
@@ -966,6 +987,22 @@ def _all_camera_summary_entry(
     }
 
 
+def _all_camera_contact_sheet_entry(
+    *,
+    camera: MapboxComparisonCamera,
+    manifest_path: Path | None,
+) -> dict[str, object]:
+    _artifact_status, _metrics, outputs = _manifest_artifact_status_metrics_and_outputs(
+        manifest_path,
+        token="",
+        redact_outputs=False,
+    )
+    return {
+        "camera": camera.name,
+        "outputs": outputs,
+    }
+
+
 def _format_summary_metric(metrics: dict[str, object], key: str) -> str:
     value = metrics.get(key)
     if value is None:
@@ -973,6 +1010,185 @@ def _format_summary_metric(metrics: dict[str, object], key: str) -> str:
     if isinstance(value, float):
         return f"{value:.4f}"
     return str(value)
+
+
+def _contact_sheet_image_cell(
+    *,
+    label: str,
+    path_text: str | None,
+    thumbnail_width: int,
+    label_height: int,
+    font: object,
+    image_module: object,
+    image_draw_module: object,
+):
+    thumbnail_height = int(thumbnail_width * 9 / 16)
+    source_image = None
+    if path_text:
+        try:
+            with image_module.open(Path(path_text)) as opened_image:
+                source_image = opened_image.convert("RGB")
+        except OSError:
+            source_image = None
+    if source_image is not None:
+        try:
+            thumbnail_height = max(1, int(source_image.height * (thumbnail_width / source_image.width)))
+            image = source_image.resize(
+                (thumbnail_width, thumbnail_height),
+                _contact_sheet_lanczos_filter(image_module),
+            )
+        finally:
+            source_image.close()
+    else:
+        image = image_module.new("RGB", (thumbnail_width, thumbnail_height), "#f4f4f4")
+    cell = image_module.new("RGB", (thumbnail_width, thumbnail_height + label_height), "white")
+    draw = image_draw_module.Draw(cell)
+    draw.text((6, 6), label, fill=(0, 0, 0), font=font)
+    cell.paste(image, (0, label_height))
+    image.close()
+    return cell, source_image is not None
+
+
+def _contact_sheet_lanczos_filter(image_module: object) -> object:
+    resampling = getattr(image_module, "Resampling", None)
+    if resampling is not None and hasattr(resampling, "LANCZOS"):
+        return resampling.LANCZOS
+    return getattr(image_module, "LANCZOS", 1)
+
+
+def _contact_sheet_entry_outputs(entry: dict[str, object]) -> dict[object, object]:
+    outputs = entry.get("outputs")
+    return outputs if isinstance(outputs, dict) else {}
+
+
+def _contact_sheet_row_for_entry(
+    *,
+    entry: dict[str, object],
+    font: object,
+    image_module: object,
+    image_draw_module: object,
+):
+    outputs = _contact_sheet_entry_outputs(entry)
+    if not outputs:
+        return None, False
+    camera_name = str(entry.get("camera") or "unknown")
+    cells = []
+    loaded_any_image = False
+    for output_key, label in CONTACT_SHEET_COLUMNS:
+        path_text = outputs.get(output_key)
+        cell, loaded = _contact_sheet_image_cell(
+            label=f"{camera_name} - {label}",
+            path_text=str(path_text) if path_text else None,
+            thumbnail_width=CONTACT_SHEET_THUMBNAIL_WIDTH,
+            label_height=CONTACT_SHEET_LABEL_HEIGHT,
+            font=font,
+            image_module=image_module,
+            image_draw_module=image_draw_module,
+        )
+        cells.append(cell)
+        loaded_any_image = loaded_any_image or loaded
+    row_height = max(cell.height for cell in cells)
+    row_width = len(cells) * CONTACT_SHEET_THUMBNAIL_WIDTH + (len(cells) - 1) * CONTACT_SHEET_COLUMN_GAP
+    row = image_module.new("RGB", (row_width, row_height), "white")
+    x_offset = 0
+    for cell in cells:
+        row.paste(cell, (x_offset, 0))
+        x_offset += CONTACT_SHEET_THUMBNAIL_WIDTH + CONTACT_SHEET_COLUMN_GAP
+        cell.close()
+    return row, loaded_any_image
+
+
+def _write_contact_sheet(*, row_images: list[Any], output_path: Path, image_module: object) -> Path:
+    sheet_width = max(row.width for row in row_images)
+    sheet_height = sum(row.height for row in row_images) + CONTACT_SHEET_ROW_GAP * (len(row_images) - 1)
+    sheet = image_module.new("RGB", (sheet_width, sheet_height), "white")
+    y_offset = 0
+    for row in row_images:
+        sheet.paste(row, (0, y_offset))
+        y_offset += row.height + CONTACT_SHEET_ROW_GAP
+        row.close()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path, quality=90)
+    sheet.close()
+    return output_path
+
+
+def _contact_sheet_modules(
+    *,
+    image_module: object | None,
+    image_draw_module: object | None,
+    image_font_module: object | None,
+) -> tuple[object, object, object] | None:
+    if image_module is not None and image_draw_module is not None and image_font_module is not None:
+        return image_module, image_draw_module, image_font_module
+    try:
+        from PIL import Image, ImageDraw, ImageFont  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    return image_module or Image, image_draw_module or ImageDraw, image_font_module or ImageFont
+
+
+def _contact_sheet_font(image_font_module: object) -> object:
+    try:
+        return image_font_module.truetype("DejaVuSans.ttf", 14)
+    except OSError:
+        return image_font_module.load_default()
+
+
+def _contact_sheet_rows(
+    *,
+    entries: list[dict[str, object]],
+    font: object,
+    image_module: object,
+    image_draw_module: object,
+) -> tuple[list[Any], bool]:
+    row_images = []
+    loaded_any_image = False
+    for entry in entries:
+        row, loaded = _contact_sheet_row_for_entry(
+            entry=entry,
+            font=font,
+            image_module=image_module,
+            image_draw_module=image_draw_module,
+        )
+        if row is not None:
+            row_images.append(row)
+        loaded_any_image = loaded_any_image or loaded
+    return row_images, loaded_any_image
+
+
+def _close_contact_sheet_rows(row_images: list[Any]) -> None:
+    for row in row_images:
+        row.close()
+
+
+def build_all_cameras_contact_sheet(
+    *,
+    entries: list[dict[str, object]],
+    output_path: Path,
+    image_module: object | None = None,
+    image_draw_module: object | None = None,
+    image_font_module: object | None = None,
+) -> Path | None:
+    modules = _contact_sheet_modules(
+        image_module=image_module,
+        image_draw_module=image_draw_module,
+        image_font_module=image_font_module,
+    )
+    if modules is None:
+        return None
+    image_module, image_draw_module, image_font_module = modules
+    font = _contact_sheet_font(image_font_module)
+    row_images, loaded_any_image = _contact_sheet_rows(
+        entries=entries,
+        font=font,
+        image_module=image_module,
+        image_draw_module=image_draw_module,
+    )
+    if not row_images or not loaded_any_image:
+        _close_contact_sheet_rows(row_images)
+        return None
+    return _write_contact_sheet(row_images=row_images, output_path=output_path, image_module=image_module)
 
 
 def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
@@ -1005,6 +1221,8 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
             "",
             "## Image artifacts",
             "",
+            f"Contact sheet: `{summary.get('contact_sheet') or '—'}`",
+            "",
             "| Camera | Mapbox GL reference | QGIS vector render | Diff |",
             "| --- | --- | --- | --- |",
         ]
@@ -1036,6 +1254,7 @@ def _write_all_cameras_summary(
     args: argparse.Namespace,
     output_root: Path,
     entries: list[dict[str, object]],
+    contact_sheet_entries: list[dict[str, object]] | None = None,
     token: str,
 ) -> tuple[Path, Path]:
     generated_at = _utc_timestamp()
@@ -1063,6 +1282,15 @@ def _write_all_cameras_summary(
     }
     summary_json = run_dir / "summary.json"
     summary_markdown = run_dir / "summary.md"
+    contact_sheet_path = build_all_cameras_contact_sheet(
+        entries=contact_sheet_entries if contact_sheet_entries is not None else entries,
+        output_path=run_dir / CONTACT_SHEET_FILENAME,
+    )
+    summary["contact_sheet"] = (
+        redact_sensitive_text(str(contact_sheet_path), token)
+        if contact_sheet_path is not None
+        else None
+    )
     summary_json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     summary_markdown.write_text(_all_cameras_summary_markdown(summary), encoding="utf-8")
     return summary_json, summary_markdown
@@ -1077,6 +1305,7 @@ def _run_all_cameras_in_subprocesses(
 ) -> None:
     failures: list[str] = []
     summary_entries: list[dict[str, object]] = []
+    contact_sheet_entries: list[dict[str, object]] = []
     for camera in cameras:
         timeout_seconds = _camera_subprocess_timeout_seconds(args)
         try:
@@ -1105,6 +1334,7 @@ def _run_all_cameras_in_subprocesses(
                     token=token,
                 )
             )
+            contact_sheet_entries.append(_all_camera_contact_sheet_entry(camera=camera, manifest_path=None))
             failures.append(f"{camera.name} (timeout after {timeout_seconds:g}s)")
             print(
                 f"error: camera {camera.name} timed out after {timeout_seconds:g}s; continuing.",
@@ -1123,6 +1353,9 @@ def _run_all_cameras_in_subprocesses(
                 token=token,
             )
         )
+        contact_sheet_entries.append(
+            _all_camera_contact_sheet_entry(camera=camera, manifest_path=manifest_path)
+        )
         if completed.returncode != 0:
             failures.append(f"{camera.name} (exit {completed.returncode})")
             print(
@@ -1133,6 +1366,7 @@ def _run_all_cameras_in_subprocesses(
         args=args,
         output_root=output_root,
         entries=summary_entries,
+        contact_sheet_entries=contact_sheet_entries,
         token=token,
     )
     print(f"Matrix summary: {redact_sensitive_text(str(summary_json), token)}")

@@ -14,9 +14,13 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_comparison import (
     CAMERAS,
+    CONTACT_SHEET_COLUMN_GAP,
+    CONTACT_SHEET_COLUMNS,
+    CONTACT_SHEET_THUMBNAIL_WIDTH,
     ComparisonConfig,
     DEFAULT_OUTPUT_ROOT,
     MapboxComparisonCamera,
+    build_all_cameras_contact_sheet,
     build_comparison_paths,
     build_image_diff,
     build_mapbox_gl_html,
@@ -437,6 +441,148 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             self.assertEqual(metrics["changed_pixel_ratio"], 0.5)
             self.assertIn("ssim_status", metrics)
 
+    def test_build_all_cameras_contact_sheet_writes_preview_grid(self):
+        try:
+            from PIL import Image
+        except ImportError:  # pragma: no cover - local dependency guard
+            self.skipTest("Pillow is not available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            browser_path = root / "mapbox-gl-reference.png"
+            qgis_path = root / "qgis-vector-render.png"
+            diff_path = root / "mapbox-gl-vs-qgis-diff.png"
+            Image.new("RGB", (16, 9), (255, 255, 255)).save(browser_path)
+            Image.new("RGB", (16, 9), (128, 128, 128)).save(qgis_path)
+            Image.new("RGB", (16, 9), (255, 0, 255)).save(diff_path)
+            output_path = root / "contact-sheet.jpg"
+
+            result = build_all_cameras_contact_sheet(
+                entries=[
+                    {
+                        "camera": "test-camera",
+                        "outputs": {
+                            "browser_reference": str(browser_path),
+                            "qgis_vector_render": str(qgis_path),
+                            "diff": str(diff_path),
+                        },
+                    }
+                ],
+                output_path=output_path,
+            )
+
+            self.assertEqual(result, output_path)
+            self.assertTrue(output_path.exists())
+            expected_width = (
+                len(CONTACT_SHEET_COLUMNS) * CONTACT_SHEET_THUMBNAIL_WIDTH
+                + (len(CONTACT_SHEET_COLUMNS) - 1) * CONTACT_SHEET_COLUMN_GAP
+            )
+            with Image.open(output_path) as contact_sheet:
+                self.assertEqual(contact_sheet.width, expected_width)
+                self.assertGreater(contact_sheet.height, 180)
+
+    def test_build_all_cameras_contact_sheet_uses_optional_pillow_api(self):
+        fallback_lanczos = object()
+        resize_filters = []
+
+        class FakeImage:
+            def __init__(self, width, height):
+                self.width = width
+                self.height = height
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc, _traceback):
+                return False
+
+            def close(self):
+                pass
+
+            def convert(self, _mode):
+                return FakeImage(self.width, self.height)
+
+            def paste(self, _image, _position):
+                pass
+
+            def resize(self, size, _resampling):
+                resize_filters.append(_resampling)
+                return FakeImage(*size)
+
+            def save(self, output_path, **_kwargs):
+                Path(output_path).write_bytes(PNG_PLACEHOLDER)
+
+        fake_pil = types.ModuleType("PIL")
+        fake_image = types.ModuleType("PIL.Image")
+        fake_image.LANCZOS = fallback_lanczos
+        fake_image.new = lambda _mode, size, _color: FakeImage(*size)
+
+        def fake_open(path):
+            if "missing" in str(path):
+                raise OSError("missing image")
+            return FakeImage(16, 9)
+
+        fake_image.open = fake_open
+        fake_draw = types.ModuleType("PIL.ImageDraw")
+        fake_draw.Draw = lambda _image: types.SimpleNamespace(text=lambda *_args, **_kwargs: None)
+        fake_font = types.ModuleType("PIL.ImageFont")
+        fake_font.truetype = lambda *_args, **_kwargs: object()
+        fake_font.load_default = lambda: object()
+        fake_pil.Image = fake_image
+        fake_pil.ImageDraw = fake_draw
+        fake_pil.ImageFont = fake_font
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "contact-sheet.jpg"
+            with patch.dict(
+                sys.modules,
+                {
+                    "PIL": fake_pil,
+                    "PIL.Image": fake_image,
+                    "PIL.ImageDraw": fake_draw,
+                    "PIL.ImageFont": fake_font,
+                },
+            ):
+                result = build_all_cameras_contact_sheet(
+                    entries=[
+                        {
+                            "camera": "test-camera",
+                            "outputs": {
+                                "browser_reference": "loaded.png",
+                                "qgis_vector_render": "missing.png",
+                            },
+                        },
+                        {"camera": "empty-camera"},
+                    ],
+                    output_path=output_path,
+                )
+
+            self.assertEqual(result, output_path)
+            self.assertEqual(output_path.read_bytes(), PNG_PLACEHOLDER)
+            self.assertIn(fallback_lanczos, resize_filters)
+
+    def test_build_all_cameras_contact_sheet_skips_placeholder_only_sheet(self):
+        try:
+            from PIL import Image as _Image  # noqa: F401
+        except ImportError:  # pragma: no cover - local dependency guard
+            self.skipTest("Pillow is not available")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "contact-sheet.jpg"
+
+            result = build_all_cameras_contact_sheet(
+                entries=[
+                    {
+                        "camera": "missing-camera",
+                        "outputs": {"browser_reference": str(Path(tmpdir) / "missing.png")},
+                    }
+                ],
+                output_path=output_path,
+            )
+
+            self.assertIsNone(result)
+            self.assertFalse(output_path.exists())
+
     def test_run_comparison_writes_manifest_without_token(self):
         def fake_browser_renderer(*, output_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
@@ -696,18 +842,31 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                     stderr="",
                 )
 
-            with patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run):
-                with patch("builtins.print") as print_mock:
-                    result = mapbox_outdoors_comparison.main([
-                        "--all-cameras",
-                        "--mapbox-token",
-                        "test-mapbox-token",
-                        "--output-root",
-                        str(output_root),
-                        "--skip-browser",
-                        "--skip-qgis",
-                        "--skip-diff",
-                    ])
+            contact_sheet_calls = []
+
+            def fake_contact_sheet(*, entries, output_path, **_kwargs):
+                contact_sheet_calls.append(entries)
+                output_path.write_bytes(PNG_PLACEHOLDER)
+                return output_path
+
+            with (
+                patch("qfit.validation.mapbox_outdoors_comparison.subprocess.run", side_effect=fake_run),
+                patch(
+                    "qfit.validation.mapbox_outdoors_comparison.build_all_cameras_contact_sheet",
+                    side_effect=fake_contact_sheet,
+                ),
+                patch("builtins.print") as print_mock,
+            ):
+                result = mapbox_outdoors_comparison.main([
+                    "--all-cameras",
+                    "--mapbox-token",
+                    "test-mapbox-token",
+                    "--output-root",
+                    str(output_root),
+                    "--skip-browser",
+                    "--skip-qgis",
+                    "--skip-diff",
+                ])
 
             summary_json = next((output_root / "all-cameras").glob("*/summary.json"), None)
             self.assertIsNotNone(summary_json, "all-cameras summary.json should be written")
@@ -724,11 +883,14 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(summary["cameras"][0]["outputs"]["browser_reference"].endswith("mapbox-gl-reference.png"))
         self.assertTrue(summary["cameras"][0]["outputs"]["qgis_vector_render"].endswith("qgis-vector-render.png"))
         self.assertTrue(summary["cameras"][0]["outputs"]["diff"].endswith("mapbox-gl-vs-qgis-diff.png"))
+        self.assertTrue(summary["contact_sheet"].endswith("contact-sheet.jpg"))
+        self.assertIn("test-mapbox-token", contact_sheet_calls[0][0]["outputs"]["browser_reference"])
         self.assertIn(
             "| `switzerland-alps-z5-outdoors` | passed | `metrics_available` | 5.35 | 0.1000 |",
             summary_text,
         )
         self.assertIn("## Image artifacts", summary_text)
+        self.assertIn("Contact sheet:", summary_text)
         self.assertIn("mapbox-gl-reference.png", summary_text)
         self.assertIn("qgis-vector-render.png", summary_text)
         self.assertIn("mapbox-gl-vs-qgis-diff.png", summary_text)
