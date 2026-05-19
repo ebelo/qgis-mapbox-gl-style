@@ -483,6 +483,8 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
     def test_build_all_cameras_contact_sheet_uses_optional_pillow_api(self):
         fallback_lanczos = object()
+        default_font = object()
+        drawn_fonts = []
         resize_filters = []
 
         class FakeImage:
@@ -524,10 +526,16 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
         fake_image.open = fake_open
         fake_draw = types.ModuleType("PIL.ImageDraw")
-        fake_draw.Draw = lambda _image: types.SimpleNamespace(text=lambda *_args, **_kwargs: None)
+        fake_draw.Draw = lambda _image: types.SimpleNamespace(
+            text=lambda *_args, **kwargs: drawn_fonts.append(kwargs.get("font"))
+        )
         fake_font = types.ModuleType("PIL.ImageFont")
-        fake_font.truetype = lambda *_args, **_kwargs: object()
-        fake_font.load_default = lambda: object()
+
+        def fake_truetype(*_args, **_kwargs):
+            raise ImportError("_imagingft")
+
+        fake_font.truetype = fake_truetype
+        fake_font.load_default = lambda: default_font
         fake_pil.Image = fake_image
         fake_pil.ImageDraw = fake_draw
         fake_pil.ImageFont = fake_font
@@ -559,6 +567,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
             self.assertEqual(result, output_path)
             self.assertEqual(output_path.read_bytes(), PNG_PLACEHOLDER)
+            self.assertIn(default_font, drawn_fonts)
             self.assertIn(fallback_lanczos, resize_filters)
 
     def test_build_all_cameras_contact_sheet_skips_placeholder_only_sheet(self):

@@ -1131,7 +1131,7 @@ def _contact_sheet_modules(
 def _contact_sheet_font(image_font_module: object) -> object:
     try:
         return image_font_module.truetype("DejaVuSans.ttf", 14)
-    except OSError:
+    except (ImportError, OSError):
         return image_font_module.load_default()
 
 
