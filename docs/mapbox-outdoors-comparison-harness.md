@@ -195,6 +195,16 @@ python3 validation/mapbox_outdoors_comparison.py \
 
 This renders a separate diagnostic rule named `contour-label-boundary-generator-probe` for the same contour label candidates, but labels the generated `boundary($geometry)` line output with curved line placement. Use it to check whether QGIS' line-label engine behaves better on polygon-derived contour boundaries than direct polygon perimeter placement. It is also diagnostic output only.
 
+To test whether removing obvious polygon bounding-box edges improves the contour-label candidate geometry, use the bbox-edge-difference probe:
+
+```bash
+python3 validation/mapbox_outdoors_comparison.py \
+  zermatt-piste-z17-outdoors \
+  --qgis-contour-bbox-edge-difference-label-probe
+```
+
+This renders a diagnostic rule named `contour-label-bbox-edge-difference-probe` using `line_merge(difference(boundary($geometry), boundary(bounds($geometry))))` as the label geometry generator. It is intended to compare whether filtering rectangular/tile-edge-like boundary pieces before QGIS line labeling reduces the over-labeling seen in the broader contour probes.
+
 ## Road feature diagnostic
 
 When road/path hierarchy, high-detail trail behavior, road shields, or oneway arrows are the candidate parity slice, inspect the underlying road vector-tile features before changing QGIS style preprocessing:

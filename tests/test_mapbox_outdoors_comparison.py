@@ -20,6 +20,10 @@ from qfit.validation.mapbox_outdoors_comparison import (
     ComparisonConfig,
     DEFAULT_OUTPUT_ROOT,
     MapboxComparisonCamera,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_EXPRESSION,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_FILTER,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_MIN_ZOOM,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_STYLE_NAME,
     QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_EXPRESSION,
     QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_FILTER,
     QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_MIN_ZOOM,
@@ -27,6 +31,7 @@ from qfit.validation.mapbox_outdoors_comparison import (
     QGIS_CONTOUR_POLYGON_LABEL_PROBE_FILTER,
     QGIS_CONTOUR_POLYGON_LABEL_PROBE_MIN_ZOOM,
     QGIS_CONTOUR_POLYGON_LABEL_PROBE_STYLE_NAME,
+    _append_qgis_contour_bbox_edge_difference_label_probe,
     _append_qgis_contour_boundary_generator_label_probe,
     _append_qgis_contour_polygon_label_probe,
     build_all_cameras_contact_sheet,
@@ -507,7 +512,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(probe_settings.repeatDistance, 0.0)
         self.assertIsNone(probe_settings.repeatDistanceUnit)
 
-    def test_append_qgis_contour_boundary_generator_label_probe_adds_line_generator_style(self):
+    def test_append_qgis_contour_line_generator_label_probes_add_line_generator_style(self):
         class FakeQgis:
             class GeometryType:
                 Line = "Line"
@@ -589,46 +594,61 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             def setLabelsEnabled(self, value):
                 self.labels_enabled = value
 
-        source_settings = FakePalLayerSettings()
-        source_settings.priority = 6
-        source_style = FakeLabelingStyle()
-        source_style.setStyleName("contour-label")
-        source_style.setLayerName("contour")
-        source_style.setLabelSettings(source_settings)
-        layer = FakeLayer(FakeLabeling([source_style]))
-        FakePalLayerSettings.constructed_sources = []
-
         fake_core = types.ModuleType("qgis.core")
         fake_core.Qgis = FakeQgis
         fake_core.QgsPalLayerSettings = FakePalLayerSettings
         fake_core.QgsVectorTileBasicLabeling = FakeLabeling
         fake_core.QgsVectorTileBasicLabelingStyle = FakeLabelingStyle
+        cases = [
+            (
+                _append_qgis_contour_boundary_generator_label_probe,
+                QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_STYLE_NAME,
+                QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_FILTER,
+                QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_MIN_ZOOM,
+                QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_EXPRESSION,
+            ),
+            (
+                _append_qgis_contour_bbox_edge_difference_label_probe,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_STYLE_NAME,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_FILTER,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_MIN_ZOOM,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_EXPRESSION,
+            ),
+        ]
 
-        with patch.dict(sys.modules, {"qgis": types.ModuleType("qgis"), "qgis.core": fake_core}):
-            _append_qgis_contour_boundary_generator_label_probe(layer)
-            _append_qgis_contour_boundary_generator_label_probe(layer)
+        for append_probe, style_name, filter_expression, min_zoom, geometry_generator in cases:
+            with self.subTest(style_name=style_name):
+                source_settings = FakePalLayerSettings()
+                source_settings.priority = 6
+                source_style = FakeLabelingStyle()
+                source_style.setStyleName("contour-label")
+                source_style.setLayerName("contour")
+                source_style.setLabelSettings(source_settings)
+                layer = FakeLayer(FakeLabeling([source_style]))
+                FakePalLayerSettings.constructed_sources = []
 
-        self.assertEqual(FakePalLayerSettings.constructed_sources, [None])
-        styles = layer.labeling().styles()
-        self.assertEqual(len(styles), 2)
-        self.assertTrue(layer.labels_enabled)
-        probe_style = styles[1]
-        probe_settings = probe_style.labelSettings()
-        self.assertEqual(probe_style.styleName(), QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_STYLE_NAME)
-        self.assertEqual(probe_style.layerName(), "contour")
-        self.assertEqual(probe_style.geometryType(), FakeQgis.GeometryType.Polygon)
-        self.assertEqual(probe_style.filterExpression(), QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_FILTER)
-        self.assertEqual(probe_style.minZoomLevel(), QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_MIN_ZOOM)
-        self.assertEqual(probe_settings.fieldName, 'concat("ele", \' m\')')
-        self.assertTrue(probe_settings.isExpression)
-        self.assertEqual(probe_settings.placement, FakePalLayerSettings.Curved)
-        self.assertEqual(probe_settings.priority, 6)
-        self.assertEqual(
-            probe_settings.geometryGenerator,
-            QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_EXPRESSION,
-        )
-        self.assertTrue(probe_settings.geometryGeneratorEnabled)
-        self.assertEqual(probe_settings.geometryGeneratorType, FakeQgis.GeometryType.Line)
+                with patch.dict(sys.modules, {"qgis": types.ModuleType("qgis"), "qgis.core": fake_core}):
+                    append_probe(layer)
+                    append_probe(layer)
+
+                self.assertEqual(FakePalLayerSettings.constructed_sources, [None])
+                styles = layer.labeling().styles()
+                self.assertEqual(len(styles), 2)
+                self.assertTrue(layer.labels_enabled)
+                probe_style = styles[1]
+                probe_settings = probe_style.labelSettings()
+                self.assertEqual(probe_style.styleName(), style_name)
+                self.assertEqual(probe_style.layerName(), "contour")
+                self.assertEqual(probe_style.geometryType(), FakeQgis.GeometryType.Polygon)
+                self.assertEqual(probe_style.filterExpression(), filter_expression)
+                self.assertEqual(probe_style.minZoomLevel(), min_zoom)
+                self.assertEqual(probe_settings.fieldName, 'concat("ele", \' m\')')
+                self.assertTrue(probe_settings.isExpression)
+                self.assertEqual(probe_settings.placement, FakePalLayerSettings.Curved)
+                self.assertEqual(probe_settings.priority, 6)
+                self.assertEqual(probe_settings.geometryGenerator, geometry_generator)
+                self.assertTrue(probe_settings.geometryGeneratorEnabled)
+                self.assertEqual(probe_settings.geometryGeneratorType, FakeQgis.GeometryType.Line)
 
     def test_headless_qt_platform_defaults_to_offscreen_without_overriding_callers(self):
         from qfit.validation import mapbox_outdoors_comparison
@@ -896,10 +916,12 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             output_path,
             qgis_contour_polygon_label_probe,
             qgis_contour_boundary_generator_label_probe,
+            qgis_contour_bbox_edge_difference_label_probe,
             **_kwargs,
         ):
             captured["polygon_probe"] = qgis_contour_polygon_label_probe
             captured["boundary_generator_probe"] = qgis_contour_boundary_generator_label_probe
+            captured["bbox_edge_difference_probe"] = qgis_contour_bbox_edge_difference_label_probe
             output_path.write_bytes(PNG_PLACEHOLDER)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -910,6 +932,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                     output_root=Path(tmpdir),
                     qgis_contour_polygon_label_probe=True,
                     qgis_contour_boundary_generator_label_probe=True,
+                    qgis_contour_bbox_edge_difference_label_probe=True,
                     browser=False,
                     diff=False,
                     now=dt.datetime(2026, 5, 10, 19, 45, tzinfo=dt.timezone.utc),
@@ -921,10 +944,13 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
         self.assertTrue(captured["polygon_probe"])
         self.assertTrue(captured["boundary_generator_probe"])
+        self.assertTrue(captured["bbox_edge_difference_probe"])
         self.assertTrue(result.qgis_contour_polygon_label_probe)
         self.assertTrue(result.qgis_contour_boundary_generator_label_probe)
+        self.assertTrue(result.qgis_contour_bbox_edge_difference_label_probe)
         self.assertTrue(manifest["qgis_contour_polygon_label_probe"])
         self.assertTrue(manifest["qgis_contour_boundary_generator_label_probe"])
+        self.assertTrue(manifest["qgis_contour_bbox_edge_difference_label_probe"])
 
     def test_run_comparison_passes_downloaded_style_json_to_renderers(self):
         captured_style_definitions = []
@@ -1007,6 +1033,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             "--skip-qgis",
             "--qgis-contour-polygon-label-probe",
             "--qgis-contour-boundary-generator-label-probe",
+            "--qgis-contour-bbox-edge-difference-label-probe",
             "--browser-timeout-ms",
             "5000",
         ])
@@ -1018,6 +1045,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(args.skip_qgis)
         self.assertTrue(args.qgis_contour_polygon_label_probe)
         self.assertTrue(args.qgis_contour_boundary_generator_label_probe)
+        self.assertTrue(args.qgis_contour_bbox_edge_difference_label_probe)
         self.assertEqual(args.browser_timeout_ms, 5000)
 
     def test_main_all_cameras_runs_full_inspection_matrix(self):
@@ -1044,6 +1072,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                         "--skip-browser",
                         "--qgis-contour-polygon-label-probe",
                         "--qgis-contour-boundary-generator-label-probe",
+                        "--qgis-contour-bbox-edge-difference-label-probe",
                         "--skip-diff",
                         "--browser-timeout-ms",
                         "5000",
@@ -1061,6 +1090,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             self.assertIn("--skip-browser", command)
             self.assertIn("--qgis-contour-polygon-label-probe", command)
             self.assertIn("--qgis-contour-boundary-generator-label-probe", command)
+            self.assertIn("--qgis-contour-bbox-edge-difference-label-probe", command)
             self.assertIn("--skip-diff", command)
             self.assertEqual(kwargs["env"]["MAPBOX_ACCESS_TOKEN"], "test-mapbox-token")
             self.assertEqual(kwargs["cwd"], mapbox_outdoors_comparison.REPO_ROOT)
