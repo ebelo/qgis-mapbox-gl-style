@@ -20,6 +20,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _label_style_summary_rows,
     _load_original_style,
     _postprocessed_label_records,
+    _source_label_control_omission_summary_rows,
     _source_label_control_summary_rows,
     _source_label_fanout_summary_rows,
     build_label_settings_paths,
@@ -562,6 +563,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["converted_label_styles"], 1)
         self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["source_label_rows"], 1)
+        self.assertEqual(report["source_label_control_omission_summary_by_base_layer"], [])
         self.assertEqual(report["source_label_layer_count"], 1)
 
     def test_label_style_summary_groups_density_relevant_settings(self):
@@ -718,6 +720,54 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(settlement_row["missing_paint_controls"], {"text-color": 1, "text-halo-color": 1})
         self.assertEqual(rows[1]["missing_control_count"], 0)
 
+    def test_source_label_control_omission_summary_groups_known_qfit_omissions(self):
+        rows = _source_label_control_omission_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "style_name": "settlement-major-label-z4-to-z6-dot-11-left",
+                    "qfit_style_layer_id": "settlement-major-label-z4-to-z6-dot-11-left",
+                    "layout": {"symbol-sort-key": ["get", "symbolrank"], "text-field": ["get", "name"]},
+                    "paint": {},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                },
+                {
+                    "base_style_layer_id": "country-label",
+                    "style_name": "country-label",
+                    "qfit_style_layer_id": "country-label",
+                    "layout": {"icon-image": "", "text-field": ["get", "name"]},
+                    "paint": {"icon-opacity": 0.6, "text-color": "#111111"},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "style_name": "poi-label-z17-plus-icon",
+                    "qfit_style_layer_id": "poi-label-z17-plus-icon",
+                    "qfit_filter": [">=", ["get", "sizerank"], 13.0],
+                    "layout": {"icon-image": "restaurant", "text-field": ["get", "name"]},
+                    "paint": {"icon-opacity": ["step", ["get", "sizerank"], 0, 13.0, 1]},
+                    "qfit_layout": {"icon-image": "restaurant", "text-field": ["get", "name"]},
+                    "qfit_paint": {},
+                },
+            ]
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["country-label", "poi-label", "settlement-major-label"])
+        country_row = rows[0]
+        self.assertEqual(country_row["omitted_control_count"], 2)
+        self.assertEqual(country_row["omitted_controls"], {"layout.icon-image": 1, "paint.icon-opacity": 1})
+        self.assertEqual(
+            country_row["omission_reasons"],
+            {"empty icon-image removed": 1, "icon-opacity removed with no QGIS icon": 1},
+        )
+        self.assertEqual(
+            rows[1]["omission_reasons"],
+            {"icon-opacity encoded by label visibility split": 1},
+        )
+        self.assertEqual(rows[2]["omission_reasons"], {"settlement symbol-sort-key encoded by qfit split": 1})
+
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
         modules = {
             **_fake_qgis_modules(),
@@ -822,6 +872,18 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "missing_paint_controls": {},
                 }
             ],
+            "source_label_control_omission_summary_by_base_layer": [
+                {
+                    "base_style_layer_id": "country-label",
+                    "source_label_rows": 10,
+                    "omitted_control_count": 20,
+                    "omitted_controls": {"layout.icon-image": 10, "paint.icon-opacity": 10},
+                    "omission_reasons": {
+                        "empty icon-image removed": 10,
+                        "icon-opacity removed with no QGIS icon": 10,
+                    },
+                }
+            ],
             "source_label_layer_count": 1,
             "labels": [
                 {
@@ -891,6 +953,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("## Source label control coverage by base layer", markdown)
         self.assertIn(
             "| contour-label | 1 | 0 | symbol-placement=1, text-field=1 | symbol-placement=1, text-field=1 | — | text-color=1, text-halo-color=1 | text-color=1, text-halo-color=1 | — |",
+            markdown,
+        )
+        self.assertIn("## Known qfit label control omissions by base layer", markdown)
+        self.assertIn(
+            "| country-label | 10 | 20 | layout.icon-image=10, paint.icon-opacity=10 | empty icon-image removed=10, icon-opacity removed with no QGIS icon=10 |",
             markdown,
         )
         self.assertIn("## Converted QGIS label styles", markdown)
