@@ -56,6 +56,10 @@ LOW_ZOOM_PATH_EXCLUDED_TYPES = {"crossing", "sidewalk", "steps"}
 HIGH_ZOOM_PATH_EXCLUDED_TYPES = {"steps"}
 STEP_STRUCTURES = {"none", "ford", "bridge", "tunnel"}
 ONEWAY_ARROW_MIN_ZOOM = 16
+ROAD_NUMBER_SHIELD_MIN_ZOOM = 6
+ROAD_NUMBER_SHIELD_MAX_REFLEN = 6
+ROAD_NUMBER_SHIELD_EXCLUDED_CLASSES = {"pedestrian", "service"}
+ROAD_NUMBER_SHIELD_LINE_LENGTH_MIN = 2500.0
 ONEWAY_ARROW_BLUE_CLASSES = {
     "primary",
     "primary_link",
@@ -76,11 +80,16 @@ SAMPLE_PROPERTY_KEYS = (
     "type",
     "structure",
     "layer",
+    "ref",
+    "reflen",
+    "shield",
+    "shield_beta",
     "name",
     "oneway",
     "surface",
 )
 ROAD_FEATURE_SIGNATURE_KEYS = ("class", "type", "surface", "structure", "layer")
+ROAD_NUMBER_SHIELD_SIGNATURE_KEYS = ("class", "reflen", "shield", "shield_beta", "structure", "layer")
 
 
 @dataclass(frozen=True)
@@ -186,6 +195,40 @@ def is_oneway_arrow_candidate(feature: dict[str, object], *, tile_zoom: int | No
     )
 
 
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            number = float(value)
+        except ValueError:
+            return None
+        return number if math.isfinite(number) else None
+    return None
+
+
+def is_road_number_shield_candidate(feature: dict[str, object], *, tile_zoom: int | None = None) -> bool:
+    properties = _feature_properties(feature)
+    reflen = _finite_number(properties.get("reflen"))
+    if (
+        tile_zoom is None
+        or tile_zoom < ROAD_NUMBER_SHIELD_MIN_ZOOM
+        or properties.get("class") in ROAD_NUMBER_SHIELD_EXCLUDED_CLASSES
+        or reflen is None
+        or reflen <= 0
+        or reflen > ROAD_NUMBER_SHIELD_MAX_REFLEN
+    ):
+        return False
+    if tile_zoom < 11:
+        return _geometry_type(feature) == "Point"
+    if _geometry_type(feature) not in LINE_GEOMETRY_TYPES:
+        return False
+    length = _finite_number(properties.get("len"))
+    return length is not None and length > ROAD_NUMBER_SHIELD_LINE_LENGTH_MIN
+
+
 def _property_count_label(value: object) -> str:
     if isinstance(value, (dict, list)):
         value = json.dumps(value, sort_keys=True, separators=(",", ":"))
@@ -261,6 +304,9 @@ def road_tile_record(
     oneway_arrow_lines = [
         feature for feature in road_features if is_oneway_arrow_candidate(feature, tile_zoom=tile.get("z"))
     ]
+    road_number_shields = [
+        feature for feature in road_features if is_road_number_shield_candidate(feature, tile_zoom=tile.get("z"))
+    ]
     return {
         **tile,
         "status": "decoded",
@@ -271,6 +317,7 @@ def road_tile_record(
         "path_line_candidate_count": len(path_lines),
         "step_line_candidate_count": len(step_lines),
         "oneway_arrow_candidate_count": len(oneway_arrow_lines),
+        "road_number_shield_candidate_count": len(road_number_shields),
         "road_geometry_type_counts": _count_geometry_types(road_features),
         "pedestrian_polygon_class_counts": _count_by_property(pedestrian_polygons, "class"),
         "pedestrian_polygon_type_counts": _count_by_property(pedestrian_polygons, "type"),
@@ -301,6 +348,14 @@ def road_tile_record(
         "oneway_arrow_class_counts": _count_by_property(oneway_arrow_lines, "class"),
         "oneway_arrow_structure_counts": _count_by_property(oneway_arrow_lines, "structure"),
         "oneway_arrow_layer_counts": _count_by_property(oneway_arrow_lines, "layer"),
+        "road_number_shield_class_counts": _count_by_property(road_number_shields, "class"),
+        "road_number_shield_reflen_counts": _count_by_property(road_number_shields, "reflen"),
+        "road_number_shield_structure_counts": _count_by_property(road_number_shields, "structure"),
+        "road_number_shield_layer_counts": _count_by_property(road_number_shields, "layer"),
+        "road_number_shield_signature_counts": _count_property_signatures(
+            road_number_shields,
+            ROAD_NUMBER_SHIELD_SIGNATURE_KEYS,
+        ),
         "sample_pedestrian_polygons": [
             _feature_sample(tile, feature) for feature in pedestrian_polygons[:MAX_SAMPLE_FEATURES]
         ],
@@ -311,6 +366,9 @@ def road_tile_record(
         "sample_step_lines": [_feature_sample(tile, feature) for feature in step_lines[:MAX_SAMPLE_FEATURES]],
         "sample_oneway_arrow_lines": [
             _feature_sample(tile, feature) for feature in oneway_arrow_lines[:MAX_SAMPLE_FEATURES]
+        ],
+        "sample_road_number_shields": [
+            _feature_sample(tile, feature) for feature in road_number_shields[:MAX_SAMPLE_FEATURES]
         ],
     }
 
@@ -333,6 +391,7 @@ _SUMMARY_COUNT_FIELDS = (
     ("Path line candidates", "path_line_candidate_count"),
     ("Step line candidates", "step_line_candidate_count"),
     ("One-way arrow candidates", "oneway_arrow_candidate_count"),
+    ("Road number shield candidates", "road_number_shield_candidate_count"),
 )
 _SUMMARY_COUNT_MAP_FIELDS = (
     ("Pedestrian polygon type counts", "pedestrian_polygon_type_counts"),
@@ -357,6 +416,11 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("One-way arrow class counts", "oneway_arrow_class_counts"),
     ("One-way arrow structure counts", "oneway_arrow_structure_counts"),
     ("One-way arrow layer counts", "oneway_arrow_layer_counts"),
+    ("Road number shield class counts", "road_number_shield_class_counts"),
+    ("Road number shield reflen counts", "road_number_shield_reflen_counts"),
+    ("Road number shield structure counts", "road_number_shield_structure_counts"),
+    ("Road number shield layer counts", "road_number_shield_layer_counts"),
+    ("Road number shield signatures", "road_number_shield_signature_counts"),
 )
 _ROAD_FEATURE_TABLE_FIELDS = (
     ("Road", "road_feature_count", "---:"),
@@ -365,6 +429,7 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Path lines", "path_line_candidate_count", "---:"),
     ("Step lines", "step_line_candidate_count", "---:"),
     ("One-way arrows", "oneway_arrow_candidate_count", "---:"),
+    ("Road number shields", "road_number_shield_candidate_count", "---:"),
     ("Polygon types", "pedestrian_polygon_type_counts", "---"),
     ("Polygon structures", "pedestrian_polygon_structure_counts", "---"),
     ("Polygon layers", "pedestrian_polygon_layer_counts", "---"),
@@ -387,6 +452,11 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("One-way arrow classes", "oneway_arrow_class_counts", "---"),
     ("One-way arrow structures", "oneway_arrow_structure_counts", "---"),
     ("One-way arrow layers", "oneway_arrow_layer_counts", "---"),
+    ("Shield classes", "road_number_shield_class_counts", "---"),
+    ("Shield reflens", "road_number_shield_reflen_counts", "---"),
+    ("Shield structures", "road_number_shield_structure_counts", "---"),
+    ("Shield layers", "road_number_shield_layer_counts", "---"),
+    ("Shield signatures", "road_number_shield_signature_counts", "---"),
 )
 
 
@@ -514,6 +584,9 @@ def collect_road_feature_report(
         "oneway_arrow_candidate_count": sum(
             int(tile.get("oneway_arrow_candidate_count") or 0) for tile in tile_records
         ),
+        "road_number_shield_candidate_count": sum(
+            int(tile.get("road_number_shield_candidate_count") or 0) for tile in tile_records
+        ),
         "road_geometry_type_counts": _combined_record_counts(tile_records, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(
             tile_records,
@@ -562,11 +635,26 @@ def collect_road_feature_report(
         "oneway_arrow_class_counts": _combined_record_counts(tile_records, "oneway_arrow_class_counts"),
         "oneway_arrow_structure_counts": _combined_record_counts(tile_records, "oneway_arrow_structure_counts"),
         "oneway_arrow_layer_counts": _combined_record_counts(tile_records, "oneway_arrow_layer_counts"),
+        "road_number_shield_class_counts": _combined_record_counts(tile_records, "road_number_shield_class_counts"),
+        "road_number_shield_reflen_counts": _combined_record_counts(
+            tile_records,
+            "road_number_shield_reflen_counts",
+        ),
+        "road_number_shield_structure_counts": _combined_record_counts(
+            tile_records,
+            "road_number_shield_structure_counts",
+        ),
+        "road_number_shield_layer_counts": _combined_record_counts(tile_records, "road_number_shield_layer_counts"),
+        "road_number_shield_signature_counts": _combined_record_counts(
+            tile_records,
+            "road_number_shield_signature_counts",
+        ),
         "sample_pedestrian_polygons": _combined_samples(tile_records, "sample_pedestrian_polygons"),
         "sample_pedestrian_lines": _combined_samples(tile_records, "sample_pedestrian_lines"),
         "sample_path_lines": _combined_samples(tile_records, "sample_path_lines"),
         "sample_step_lines": _combined_samples(tile_records, "sample_step_lines"),
         "sample_oneway_arrow_lines": _combined_samples(tile_records, "sample_oneway_arrow_lines"),
+        "sample_road_number_shields": _combined_samples(tile_records, "sample_road_number_shields"),
         "tiles": tile_records,
     }
 
@@ -622,6 +710,7 @@ def collect_all_camera_road_feature_report(
         "path_line_candidate_count": _sum_reports(camera_reports, "path_line_candidate_count"),
         "step_line_candidate_count": _sum_reports(camera_reports, "step_line_candidate_count"),
         "oneway_arrow_candidate_count": _sum_reports(camera_reports, "oneway_arrow_candidate_count"),
+        "road_number_shield_candidate_count": _sum_reports(camera_reports, "road_number_shield_candidate_count"),
         "road_geometry_type_counts": _combined_record_counts(camera_reports, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(
             camera_reports,
@@ -679,6 +768,26 @@ def collect_all_camera_road_feature_report(
         "oneway_arrow_class_counts": _combined_record_counts(camera_reports, "oneway_arrow_class_counts"),
         "oneway_arrow_structure_counts": _combined_record_counts(camera_reports, "oneway_arrow_structure_counts"),
         "oneway_arrow_layer_counts": _combined_record_counts(camera_reports, "oneway_arrow_layer_counts"),
+        "road_number_shield_class_counts": _combined_record_counts(
+            camera_reports,
+            "road_number_shield_class_counts",
+        ),
+        "road_number_shield_reflen_counts": _combined_record_counts(
+            camera_reports,
+            "road_number_shield_reflen_counts",
+        ),
+        "road_number_shield_structure_counts": _combined_record_counts(
+            camera_reports,
+            "road_number_shield_structure_counts",
+        ),
+        "road_number_shield_layer_counts": _combined_record_counts(
+            camera_reports,
+            "road_number_shield_layer_counts",
+        ),
+        "road_number_shield_signature_counts": _combined_record_counts(
+            camera_reports,
+            "road_number_shield_signature_counts",
+        ),
         "cameras": camera_reports,
     }
 
@@ -708,6 +817,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         ("Sample path line candidates", "sample_path_lines"),
         ("Sample step line candidates", "sample_step_lines"),
         ("Sample one-way arrow candidates", "sample_oneway_arrow_lines"),
+        ("Sample road number shield candidates", "sample_road_number_shields"),
     )
     for heading, key in sample_sections:
         samples = report.get(key)
