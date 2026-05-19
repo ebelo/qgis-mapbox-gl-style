@@ -57,6 +57,8 @@ LOW_ZOOM_PATH_EXCLUDED_TYPES = {"crossing", "sidewalk", "steps"}
 HIGH_ZOOM_PATH_EXCLUDED_TYPES = {"steps"}
 STEP_STRUCTURES = {"none", "ford", "bridge", "tunnel"}
 ONEWAY_ARROW_MIN_ZOOM = 16
+ROAD_INTERSECTION_MIN_ZOOM = 15
+LEVEL_CROSSING_MIN_ZOOM = 16
 ROAD_NUMBER_SHIELD_MIN_ZOOM = 6
 ROAD_NUMBER_SHIELD_MAX_REFLEN = 6
 ROAD_NUMBER_SHIELD_EXCLUDED_CLASSES = {"pedestrian", "service"}
@@ -92,6 +94,8 @@ SAMPLE_PROPERTY_KEYS = (
     "surface",
 )
 ROAD_FEATURE_SIGNATURE_KEYS = ("class", "type", "surface", "structure", "layer")
+ROAD_INTERSECTION_SIGNATURE_KEYS = ("class", "name")
+LEVEL_CROSSING_SIGNATURE_KEYS = ("class", "structure", "layer")
 ROAD_NUMBER_SHIELD_SIGNATURE_KEYS = ("class", "reflen", "shield", "shield_beta", "structure", "layer")
 ROAD_EXIT_SHIELD_SIGNATURE_KEYS = ("ref", "reflen")
 
@@ -196,6 +200,27 @@ def is_oneway_arrow_candidate(feature: dict[str, object], *, tile_zoom: int | No
         and properties.get("class") in ONEWAY_ARROW_CLASSES
         and properties.get("structure") in ONEWAY_ARROW_STRUCTURES
         and _geometry_type(feature) in LINE_GEOMETRY_TYPES
+    )
+
+
+def is_road_intersection_candidate(feature: dict[str, object], *, tile_zoom: int | None = None) -> bool:
+    properties = _feature_properties(feature)
+    return (
+        tile_zoom is not None
+        and tile_zoom >= ROAD_INTERSECTION_MIN_ZOOM
+        and properties.get("class") == "intersection"
+        and "name" in properties
+        and _geometry_type(feature) == "Point"
+    )
+
+
+def is_level_crossing_candidate(feature: dict[str, object], *, tile_zoom: int | None = None) -> bool:
+    properties = _feature_properties(feature)
+    return (
+        tile_zoom is not None
+        and tile_zoom >= LEVEL_CROSSING_MIN_ZOOM
+        and properties.get("class") == "level_crossing"
+        and _geometry_type(feature) == "Point"
     )
 
 
@@ -321,6 +346,12 @@ def road_tile_record(
     oneway_arrow_lines = [
         feature for feature in road_features if is_oneway_arrow_candidate(feature, tile_zoom=tile.get("z"))
     ]
+    road_intersections = [
+        feature for feature in road_features if is_road_intersection_candidate(feature, tile_zoom=tile.get("z"))
+    ]
+    level_crossings = [
+        feature for feature in road_features if is_level_crossing_candidate(feature, tile_zoom=tile.get("z"))
+    ]
     road_number_shields = [
         feature for feature in road_features if is_road_number_shield_candidate(feature, tile_zoom=tile.get("z"))
     ]
@@ -340,6 +371,8 @@ def road_tile_record(
         "path_line_candidate_count": len(path_lines),
         "step_line_candidate_count": len(step_lines),
         "oneway_arrow_candidate_count": len(oneway_arrow_lines),
+        "road_intersection_candidate_count": len(road_intersections),
+        "level_crossing_candidate_count": len(level_crossings),
         "road_number_shield_candidate_count": len(road_number_shields),
         "road_exit_shield_candidate_count": len(road_exit_shields),
         "road_geometry_type_counts": _count_geometry_types(road_features),
@@ -372,6 +405,17 @@ def road_tile_record(
         "oneway_arrow_class_counts": _count_by_property(oneway_arrow_lines, "class"),
         "oneway_arrow_structure_counts": _count_by_property(oneway_arrow_lines, "structure"),
         "oneway_arrow_layer_counts": _count_by_property(oneway_arrow_lines, "layer"),
+        "road_intersection_name_counts": _count_by_property(road_intersections, "name"),
+        "road_intersection_signature_counts": _count_property_signatures(
+            road_intersections,
+            ROAD_INTERSECTION_SIGNATURE_KEYS,
+        ),
+        "level_crossing_structure_counts": _count_by_property(level_crossings, "structure"),
+        "level_crossing_layer_counts": _count_by_property(level_crossings, "layer"),
+        "level_crossing_signature_counts": _count_property_signatures(
+            level_crossings,
+            LEVEL_CROSSING_SIGNATURE_KEYS,
+        ),
         "road_number_shield_class_counts": _count_by_property(road_number_shields, "class"),
         "road_number_shield_reflen_counts": _count_by_property(road_number_shields, "reflen"),
         "road_number_shield_structure_counts": _count_by_property(road_number_shields, "structure"),
@@ -395,6 +439,12 @@ def road_tile_record(
         "sample_step_lines": [_feature_sample(tile, feature) for feature in step_lines[:MAX_SAMPLE_FEATURES]],
         "sample_oneway_arrow_lines": [
             _feature_sample(tile, feature) for feature in oneway_arrow_lines[:MAX_SAMPLE_FEATURES]
+        ],
+        "sample_road_intersections": [
+            _feature_sample(tile, feature) for feature in road_intersections[:MAX_SAMPLE_FEATURES]
+        ],
+        "sample_level_crossings": [
+            _feature_sample(tile, feature) for feature in level_crossings[:MAX_SAMPLE_FEATURES]
         ],
         "sample_road_number_shields": [
             _feature_sample(tile, feature) for feature in road_number_shields[:MAX_SAMPLE_FEATURES]
@@ -424,6 +474,8 @@ _SUMMARY_COUNT_FIELDS = (
     ("Path line candidates", "path_line_candidate_count"),
     ("Step line candidates", "step_line_candidate_count"),
     ("One-way arrow candidates", "oneway_arrow_candidate_count"),
+    ("Road intersection candidates", "road_intersection_candidate_count"),
+    ("Level crossing candidates", "level_crossing_candidate_count"),
     ("Road number shield candidates", "road_number_shield_candidate_count"),
     ("Road exit shield candidates", "road_exit_shield_candidate_count"),
 )
@@ -450,6 +502,11 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("One-way arrow class counts", "oneway_arrow_class_counts"),
     ("One-way arrow structure counts", "oneway_arrow_structure_counts"),
     ("One-way arrow layer counts", "oneway_arrow_layer_counts"),
+    ("Road intersection name counts", "road_intersection_name_counts"),
+    ("Road intersection signatures", "road_intersection_signature_counts"),
+    ("Level crossing structure counts", "level_crossing_structure_counts"),
+    ("Level crossing layer counts", "level_crossing_layer_counts"),
+    ("Level crossing signatures", "level_crossing_signature_counts"),
     ("Road number shield class counts", "road_number_shield_class_counts"),
     ("Road number shield reflen counts", "road_number_shield_reflen_counts"),
     ("Road number shield structure counts", "road_number_shield_structure_counts"),
@@ -466,6 +523,8 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Path lines", "path_line_candidate_count", "---:"),
     ("Step lines", "step_line_candidate_count", "---:"),
     ("One-way arrows", "oneway_arrow_candidate_count", "---:"),
+    ("Road intersections", "road_intersection_candidate_count", "---:"),
+    ("Level crossings", "level_crossing_candidate_count", "---:"),
     ("Road number shields", "road_number_shield_candidate_count", "---:"),
     ("Road exit shields", "road_exit_shield_candidate_count", "---:"),
     ("Polygon types", "pedestrian_polygon_type_counts", "---"),
@@ -490,6 +549,11 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("One-way arrow classes", "oneway_arrow_class_counts", "---"),
     ("One-way arrow structures", "oneway_arrow_structure_counts", "---"),
     ("One-way arrow layers", "oneway_arrow_layer_counts", "---"),
+    ("Road intersection names", "road_intersection_name_counts", "---"),
+    ("Road intersection signatures", "road_intersection_signature_counts", "---"),
+    ("Level crossing structures", "level_crossing_structure_counts", "---"),
+    ("Level crossing layers", "level_crossing_layer_counts", "---"),
+    ("Level crossing signatures", "level_crossing_signature_counts", "---"),
     ("Shield classes", "road_number_shield_class_counts", "---"),
     ("Shield reflens", "road_number_shield_reflen_counts", "---"),
     ("Shield structures", "road_number_shield_structure_counts", "---"),
@@ -627,6 +691,12 @@ def collect_road_feature_report(
         "oneway_arrow_candidate_count": sum(
             int(tile.get("oneway_arrow_candidate_count") or 0) for tile in tile_records
         ),
+        "road_intersection_candidate_count": sum(
+            int(tile.get("road_intersection_candidate_count") or 0) for tile in tile_records
+        ),
+        "level_crossing_candidate_count": sum(
+            int(tile.get("level_crossing_candidate_count") or 0) for tile in tile_records
+        ),
         "road_number_shield_candidate_count": sum(
             int(tile.get("road_number_shield_candidate_count") or 0) for tile in tile_records
         ),
@@ -681,6 +751,17 @@ def collect_road_feature_report(
         "oneway_arrow_class_counts": _combined_record_counts(tile_records, "oneway_arrow_class_counts"),
         "oneway_arrow_structure_counts": _combined_record_counts(tile_records, "oneway_arrow_structure_counts"),
         "oneway_arrow_layer_counts": _combined_record_counts(tile_records, "oneway_arrow_layer_counts"),
+        "road_intersection_name_counts": _combined_record_counts(tile_records, "road_intersection_name_counts"),
+        "road_intersection_signature_counts": _combined_record_counts(
+            tile_records,
+            "road_intersection_signature_counts",
+        ),
+        "level_crossing_structure_counts": _combined_record_counts(tile_records, "level_crossing_structure_counts"),
+        "level_crossing_layer_counts": _combined_record_counts(tile_records, "level_crossing_layer_counts"),
+        "level_crossing_signature_counts": _combined_record_counts(
+            tile_records,
+            "level_crossing_signature_counts",
+        ),
         "road_number_shield_class_counts": _combined_record_counts(tile_records, "road_number_shield_class_counts"),
         "road_number_shield_reflen_counts": _combined_record_counts(
             tile_records,
@@ -708,6 +789,8 @@ def collect_road_feature_report(
         "sample_path_lines": _combined_samples(tile_records, "sample_path_lines"),
         "sample_step_lines": _combined_samples(tile_records, "sample_step_lines"),
         "sample_oneway_arrow_lines": _combined_samples(tile_records, "sample_oneway_arrow_lines"),
+        "sample_road_intersections": _combined_samples(tile_records, "sample_road_intersections"),
+        "sample_level_crossings": _combined_samples(tile_records, "sample_level_crossings"),
         "sample_road_number_shields": _combined_samples(tile_records, "sample_road_number_shields"),
         "sample_road_exit_shields": _combined_samples(tile_records, "sample_road_exit_shields"),
         "tiles": tile_records,
@@ -766,6 +849,8 @@ def collect_all_camera_road_feature_report(
         "path_line_candidate_count": _sum_reports(camera_reports, "path_line_candidate_count"),
         "step_line_candidate_count": _sum_reports(camera_reports, "step_line_candidate_count"),
         "oneway_arrow_candidate_count": _sum_reports(camera_reports, "oneway_arrow_candidate_count"),
+        "road_intersection_candidate_count": _sum_reports(camera_reports, "road_intersection_candidate_count"),
+        "level_crossing_candidate_count": _sum_reports(camera_reports, "level_crossing_candidate_count"),
         "road_number_shield_candidate_count": _sum_reports(camera_reports, "road_number_shield_candidate_count"),
         "road_exit_shield_candidate_count": _sum_reports(camera_reports, "road_exit_shield_candidate_count"),
         "road_geometry_type_counts": _combined_record_counts(camera_reports, "road_geometry_type_counts"),
@@ -825,6 +910,17 @@ def collect_all_camera_road_feature_report(
         "oneway_arrow_class_counts": _combined_record_counts(camera_reports, "oneway_arrow_class_counts"),
         "oneway_arrow_structure_counts": _combined_record_counts(camera_reports, "oneway_arrow_structure_counts"),
         "oneway_arrow_layer_counts": _combined_record_counts(camera_reports, "oneway_arrow_layer_counts"),
+        "road_intersection_name_counts": _combined_record_counts(camera_reports, "road_intersection_name_counts"),
+        "road_intersection_signature_counts": _combined_record_counts(
+            camera_reports,
+            "road_intersection_signature_counts",
+        ),
+        "level_crossing_structure_counts": _combined_record_counts(camera_reports, "level_crossing_structure_counts"),
+        "level_crossing_layer_counts": _combined_record_counts(camera_reports, "level_crossing_layer_counts"),
+        "level_crossing_signature_counts": _combined_record_counts(
+            camera_reports,
+            "level_crossing_signature_counts",
+        ),
         "road_number_shield_class_counts": _combined_record_counts(
             camera_reports,
             "road_number_shield_class_counts",
@@ -882,6 +978,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         ("Sample path line candidates", "sample_path_lines"),
         ("Sample step line candidates", "sample_step_lines"),
         ("Sample one-way arrow candidates", "sample_oneway_arrow_lines"),
+        ("Sample road intersection candidates", "sample_road_intersections"),
+        ("Sample level crossing candidates", "sample_level_crossings"),
         ("Sample road number shield candidates", "sample_road_number_shields"),
         ("Sample road exit shield candidates", "sample_road_exit_shields"),
     )
