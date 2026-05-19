@@ -18,6 +18,7 @@ A complete run writes:
 - `qgis-vector-render.png` — qfit/QGIS native vector-tile render for the same camera
 - `mapbox-gl-vs-qgis-diff.png` — pixel diff for quick drift inspection
 - `metrics.json` — simple image-diff metrics such as changed-pixel ratio when diff generation runs
+- `qgis-label-styles.json` — token-free QGIS vector-tile label rule and label-setting snapshot when QGIS capture runs
 - `manifest.json` — camera, output paths, capture status, and metrics without any token values
 - `contact-sheet.jpg` — all-camera side-by-side thumbnail sheet when running the matrix mode
 
@@ -204,6 +205,17 @@ python3 validation/mapbox_outdoors_comparison.py \
 ```
 
 This renders a diagnostic rule named `contour-label-bbox-edge-difference-probe` using `line_merge(difference(boundary($geometry), boundary(bounds($geometry))))` as the label geometry generator. It is intended to compare whether filtering rectangular/tile-edge-like boundary pieces before QGIS line labeling reduces the over-labeling seen in the broader contour probes.
+
+When QGIS capture runs, inspect `qgis-label-styles.json` beside the screenshots to confirm the converted label settings and any probe geometry-generator settings that were active for the render. Use that snapshot with the preprocessed style JSON before deciding whether a diagnostic probe is safe to promote into production styling.
+
+For a table-oriented label-settings report with the same diagnostic rule appended, run:
+
+```bash
+python3 validation/mapbox_outdoors_label_settings.py \
+  --qgis-contour-bbox-edge-difference-label-probe
+```
+
+The report keeps the probe separate from source Mapbox layers, so the summary can distinguish converted production labels from diagnostic-only QGIS rules.
 
 ## Road feature diagnostic
 

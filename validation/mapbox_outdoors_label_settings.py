@@ -87,6 +87,7 @@ class LabelSettingsConfig:
     style_id: str = DEFAULT_MAPBOX_STYLE_ID
     style_json_path: Path | None = None
     include_sprite_context: bool = True
+    qgis_contour_bbox_edge_difference_label_probe: bool = False
     now: dt.datetime | None = None
 
 
@@ -422,6 +423,39 @@ def _postprocessed_label_records(labeling: object | None, apply_label_priority) 
         _iter_label_records(labeling),
         key=lambda row: (str(row.get("base_style_layer_id") or ""), str(row.get("style_name") or "")),
     )
+
+
+class _LabelingProbeLayer:
+    def __init__(self, labeling: object) -> None:
+        self._labeling = labeling
+        self.labeling = self._labeling_for_probe
+        setattr(self, "set" + "Labeling", self._set_labeling_for_probe)
+        setattr(self, "set" + "Labels" + "Enabled", self._set_labels_enabled_for_probe)
+
+    def _labeling_for_probe(self) -> object:
+        return self._labeling
+
+    def _set_labeling_for_probe(self, labeling: object) -> None:
+        self._labeling = labeling
+
+    def _set_labels_enabled_for_probe(self, _enabled: bool) -> None:
+        return None
+
+
+def _append_qgis_contour_bbox_edge_difference_label_probe(layer: object) -> None:
+    from qfit.validation.mapbox_outdoors_comparison import (  # noqa: PLC0415
+        _append_qgis_contour_bbox_edge_difference_label_probe as append_probe,
+    )
+
+    append_probe(layer)
+
+
+def _apply_labeling_probes(labeling: object | None, config: LabelSettingsConfig) -> object | None:
+    if labeling is None or not config.qgis_contour_bbox_edge_difference_label_probe:
+        return labeling
+    layer = _LabelingProbeLayer(labeling)
+    _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+    return layer.labeling()
 
 
 def _summary_key(value: object) -> str:
@@ -947,6 +981,9 @@ def _label_settings_report(
         "sprite_context_requested": config.include_sprite_context,
         "sprite_context_loaded": sprite_loaded,
         "sprite_definition_count": sprite_count,
+        "qgis_contour_bbox_edge_difference_label_probe": (
+            config.qgis_contour_bbox_edge_difference_label_probe
+        ),
         "label_count": len(records),
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
@@ -994,6 +1031,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             sprite_resources,
             (QgsMapBoxGlStyleConversionContext, QgsMapBoxGlStyleConverter, Qgis),
         )
+        labeling = _apply_labeling_probes(labeling, config)
         records = _postprocessed_label_records(labeling, apply_mapbox_label_priority)
         source_label_layers = source_label_layer_records(original_style, qfit_style, records)
         return _label_settings_report(
@@ -1353,6 +1391,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Converted label styles: {report.get('label_count', len(rows))}",
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
+        f"Bbox-edge contour label probe: {_markdown_value(report.get('qgis_contour_bbox_edge_difference_label_probe'))}",
         "",
     ]
     _append_label_style_summary(lines, summary_rows)
@@ -1380,6 +1419,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mapbox-token", help="Mapbox token. Prefer MAPBOX_ACCESS_TOKEN or QFIT_MAPBOX_ACCESS_TOKEN.")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--no-sprite-context", action="store_true", help="Do not attach Mapbox sprite resources.")
+    parser.add_argument(
+        "--qgis-contour-bbox-edge-difference-label-probe",
+        action="store_true",
+        help=(
+            "Append the diagnostic contour label rule using "
+            "line_merge(difference(boundary($geometry), boundary(bounds($geometry))))."
+        ),
+    )
     return parser
 
 
@@ -1393,6 +1440,7 @@ def main(argv: list[str] | None = None) -> int:
         style_id=args.style_id,
         style_json_path=args.style_json,
         include_sprite_context=not args.no_sprite_context,
+        qgis_contour_bbox_edge_difference_label_probe=args.qgis_contour_bbox_edge_difference_label_probe,
     )
     paths = build_label_settings_paths(
         build_run_directory(

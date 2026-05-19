@@ -183,6 +183,7 @@ class ComparisonPaths:
     diff_png: Path
     metrics_json: Path
     qgis_preprocessed_style_json: Path
+    qgis_label_styles_json: Path
     manifest_json: Path
 
 
@@ -209,6 +210,7 @@ class ComparisonResult:
     qgis_captured: bool
     diff_captured: bool
     qgis_preprocessed_style_captured: bool = False
+    qgis_label_styles_captured: bool = False
     qgis_contour_polygon_label_probe: bool = False
     qgis_contour_boundary_generator_label_probe: bool = False
     qgis_contour_bbox_edge_difference_label_probe: bool = False
@@ -237,6 +239,7 @@ def build_comparison_paths(*, run_dir: Path) -> ComparisonPaths:
         diff_png=run_dir / "mapbox-gl-vs-qgis-diff.png",
         metrics_json=run_dir / "metrics.json",
         qgis_preprocessed_style_json=run_dir / "qgis-preprocessed-style.json",
+        qgis_label_styles_json=run_dir / "qgis-label-styles.json",
         manifest_json=run_dir / "manifest.json",
     )
 
@@ -312,6 +315,7 @@ def _redacted_manifest(
             "diff": str(result.paths.diff_png),
             "metrics": str(result.paths.metrics_json),
             "qgis_preprocessed_style": str(result.paths.qgis_preprocessed_style_json),
+            "qgis_label_styles": str(result.paths.qgis_label_styles_json),
         },
         "style_json_path": result.style_json_path,
         "qgis_contour_polygon_label_probe": result.qgis_contour_polygon_label_probe,
@@ -326,6 +330,7 @@ def _redacted_manifest(
             "qgis_vector_render": result.qgis_captured,
             "diff": result.diff_captured,
             "qgis_preprocessed_style": result.qgis_preprocessed_style_captured,
+            "qgis_label_styles": result.qgis_label_styles_captured,
         },
         "metrics": result.image_metrics,
         "notes": [
@@ -563,6 +568,61 @@ def _settings_priority(settings: object | None) -> int:
     return 0
 
 
+def _label_value(value: object) -> object:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_label_value(item) for item in value]
+    name = getattr(value, "name", None)
+    if isinstance(name, str):
+        return name
+    return str(value)
+
+
+def _label_setting_value(settings: object | None, name: str) -> object:
+    if settings is None:
+        return None
+    try:
+        return _label_value(getattr(settings, name))
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def qgis_label_styles_snapshot(layer: object) -> list[dict[str, object]]:
+    """Return a token-free diagnostic snapshot of QGIS vector-tile label rules."""
+
+    labeling = _method_value(layer, "labeling")
+    styles = list(_method_value(labeling, "styles") or [])
+    snapshots: list[dict[str, object]] = []
+    for style in styles:
+        settings = _method_value(style, "labelSettings")
+        snapshots.append({
+            "style_name": _method_text(style, "styleName"),
+            "layer_name": _method_text(style, "layerName"),
+            "geometry_type": _label_value(_method_value(style, "geometryType")),
+            "filter_expression": _method_text(style, "filterExpression"),
+            "min_zoom_level": _label_value(_method_value(style, "minZoomLevel")),
+            "max_zoom_level": _label_value(_method_value(style, "maxZoomLevel")),
+            "label_settings": {
+                "field_name": _label_setting_value(settings, "fieldName"),
+                "is_expression": _label_setting_value(settings, "isExpression"),
+                "placement": _label_setting_value(settings, "placement"),
+                "priority": _label_setting_value(settings, "priority"),
+                "repeat_distance": _label_setting_value(settings, "repeatDistance"),
+                "repeat_distance_unit": _label_setting_value(settings, "repeatDistanceUnit"),
+                "geometry_generator": _label_setting_value(settings, "geometryGenerator"),
+                "geometry_generator_enabled": _label_setting_value(settings, "geometryGeneratorEnabled"),
+                "geometry_generator_type": _label_setting_value(settings, "geometryGeneratorType"),
+            },
+        })
+    return snapshots
+
+
+def write_qgis_label_styles_snapshot(*, layer: object, output_path: Path, token: str) -> None:
+    snapshot_text = json.dumps(qgis_label_styles_snapshot(layer), indent=2, default=str)
+    output_path.write_text(redact_sensitive_text(snapshot_text, token) + "\n", encoding="utf-8")
+
+
 def _append_qgis_contour_polygon_label_probe(layer: object) -> None:
     from qgis.core import (  # type: ignore[import-not-found] # noqa: PLC0415
         QgsPalLayerSettings,
@@ -681,6 +741,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     output_path: Path,
     style_definition: dict[str, object] | None = None,
     qgis_preprocessed_style_path: Path | None = None,
+    qgis_label_styles_path: Path | None = None,
     qgis_contour_polygon_label_probe: bool = False,
     qgis_contour_boundary_generator_label_probe: bool = False,
     qgis_contour_bbox_edge_difference_label_probe: bool = False,
@@ -760,6 +821,8 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
             _append_qgis_contour_boundary_generator_label_probe(layer)
         if qgis_contour_bbox_edge_difference_label_probe:
             _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+        if qgis_label_styles_path is not None:
+            write_qgis_label_styles_snapshot(layer=layer, output_path=qgis_label_styles_path, token=token)
 
         destination_crs = QgsCoordinateReferenceSystem("EPSG:3857")
         settings = QgsMapSettings()
@@ -855,6 +918,7 @@ def run_comparison(
     qgis_captured = False
     diff_captured = False
     qgis_preprocessed_style_captured = False
+    qgis_label_styles_captured = False
     image_metrics: ImageMetrics = {}
     style_definition = (
         load_style_definition(config.style_json_path)
@@ -879,6 +943,7 @@ def run_comparison(
             output_path=paths.qgis_png,
             style_definition=style_definition,
             qgis_preprocessed_style_path=paths.qgis_preprocessed_style_json,
+            qgis_label_styles_path=paths.qgis_label_styles_json,
             qgis_contour_polygon_label_probe=config.qgis_contour_polygon_label_probe,
             qgis_contour_boundary_generator_label_probe=(
                 config.qgis_contour_boundary_generator_label_probe
@@ -889,6 +954,7 @@ def run_comparison(
         )
         qgis_captured = True
         qgis_preprocessed_style_captured = paths.qgis_preprocessed_style_json.exists()
+        qgis_label_styles_captured = paths.qgis_label_styles_json.exists()
 
     if config.diff and browser_captured and qgis_captured:
         image_metrics = diff_builder(
@@ -905,6 +971,7 @@ def run_comparison(
         qgis_captured=qgis_captured,
         diff_captured=diff_captured,
         qgis_preprocessed_style_captured=qgis_preprocessed_style_captured,
+        qgis_label_styles_captured=qgis_label_styles_captured,
         qgis_contour_polygon_label_probe=config.qgis_contour_polygon_label_probe,
         qgis_contour_boundary_generator_label_probe=(
             config.qgis_contour_boundary_generator_label_probe

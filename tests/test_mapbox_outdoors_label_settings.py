@@ -12,6 +12,8 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_label_settings import (
     LabelSettingsConfig,
+    _append_qgis_contour_bbox_edge_difference_label_probe,
+    _apply_labeling_probes,
     _convert_style_to_labeling,
     _ensure_qgis_application,
     _fetch_sprite_resources,
@@ -439,6 +441,70 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIsInstance(FakeBackgroundMapService.labeling, FakeLabeling)
         self.assertEqual([record["base_style_layer_id"] for record in records], ["road-label", "waterway-label"])
         self.assertEqual(_postprocessed_label_records(None, fake_apply_label_priority), [])
+
+    def test_apply_labeling_probes_appends_bbox_edge_probe_when_requested(self):
+        original_labeling = FakeLabeling([])
+        updated_labeling = FakeLabeling([])
+        seen = {}
+
+        def fake_append_probe(layer):
+            seen["before"] = layer.labeling()
+            layer.setLabeling(updated_labeling)
+            layer.setLabelsEnabled(True)
+            seen["labels_enabled_called"] = True
+
+        with mock.patch(
+            "qfit.validation.mapbox_outdoors_label_settings._append_qgis_contour_bbox_edge_difference_label_probe",
+            side_effect=fake_append_probe,
+        ) as append_probe:
+            result = _apply_labeling_probes(
+                original_labeling,
+                LabelSettingsConfig(
+                    token="token",
+                    output_root=Path("/tmp"),
+                    qgis_contour_bbox_edge_difference_label_probe=True,
+                ),
+            )
+
+        append_probe.assert_called_once()
+        self.assertIs(seen["before"], original_labeling)
+        self.assertTrue(seen["labels_enabled_called"])
+        self.assertIs(result, updated_labeling)
+
+    def test_apply_labeling_probes_skips_when_disabled_or_missing_labeling(self):
+        labeling = FakeLabeling([])
+        with mock.patch(
+            "qfit.validation.mapbox_outdoors_label_settings._append_qgis_contour_bbox_edge_difference_label_probe"
+        ) as append_probe:
+            self.assertIs(
+                _apply_labeling_probes(
+                    labeling,
+                    LabelSettingsConfig(token="token", output_root=Path("/tmp")),
+                ),
+                labeling,
+            )
+            self.assertIs(
+                _apply_labeling_probes(
+                    None,
+                    LabelSettingsConfig(
+                        token="token",
+                        output_root=Path("/tmp"),
+                        qgis_contour_bbox_edge_difference_label_probe=True,
+                    ),
+                ),
+                None,
+            )
+
+        append_probe.assert_not_called()
+
+    def test_append_qgis_contour_bbox_edge_difference_label_probe_delegates_to_comparison_helper(self):
+        layer = object()
+        with mock.patch(
+            "qfit.validation.mapbox_outdoors_comparison._append_qgis_contour_bbox_edge_difference_label_probe"
+        ) as append_probe:
+            _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+
+        append_probe.assert_called_once_with(layer)
 
     def test_source_label_layer_records_align_original_and_qfit_controls(self):
         original_style = {
@@ -1006,6 +1072,30 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(rows[1]["unresolved_controls"], {"paint.text-halo-color": 1})
 
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
+        bbox_expression = "line_merge(difference(boundary($geometry), boundary(bounds($geometry))))"
+
+        def fake_append_probe(layer):
+            class FakeProbeSettings(FakeSettings):
+                geometryGenerator = bbox_expression
+                geometryGeneratorEnabled = True
+                geometryGeneratorType = SimpleNamespace(name="Line")
+
+            styles = list(layer.labeling().styles())
+            layer.setLabeling(
+                FakeLabeling(
+                    [
+                        *styles,
+                        FakeLabelStyle(
+                            style_name="contour-label-bbox-edge-difference-probe",
+                            layer_name="contour",
+                            settings=FakeProbeSettings(),
+                            geometry_type=SimpleNamespace(name="Polygon"),
+                        ),
+                    ]
+                )
+            )
+            layer.setLabelsEnabled(True)
+
         modules = {
             **_fake_qgis_modules(),
             "qfit.visualization.infrastructure.background_map_service": _fake_background_map_service_module(),
@@ -1046,15 +1136,36 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                             ],
                         },
                     ):
-                        report = collect_label_settings(LabelSettingsConfig(token="token", output_root=Path("/tmp")))
+                        with mock.patch(
+                            "qfit.validation.mapbox_outdoors_label_settings._append_qgis_contour_bbox_edge_difference_label_probe",
+                            side_effect=fake_append_probe,
+                        ) as append_probe:
+                            report = collect_label_settings(
+                                LabelSettingsConfig(
+                                    token="token",
+                                    output_root=Path("/tmp"),
+                                    qgis_contour_bbox_edge_difference_label_probe=True,
+                                )
+                            )
 
         fetch_style.assert_called_once_with("token", "mapbox", "outdoors-v12")
         fetch_sprites.assert_called_once()
+        append_probe.assert_called_once()
         self.assertEqual(report["qgis_converter_result"], "success")
         self.assertEqual(report["sprite_definition_count"], 1)
         self.assertFalse(report["sprite_context_loaded"])
-        self.assertEqual(report["label_count"], 1)
-        self.assertEqual(report["labels"][0]["base_style_layer_id"], "road-label")
+        self.assertTrue(report["qgis_contour_bbox_edge_difference_label_probe"])
+        self.assertEqual(report["label_count"], 2)
+        labels_by_style = {row["style_name"]: row for row in report["labels"]}
+        self.assertEqual(labels_by_style["road-label-z15-plus"]["base_style_layer_id"], "road-label")
+        self.assertEqual(
+            labels_by_style["contour-label-bbox-edge-difference-probe"]["geometry_generator"],
+            bbox_expression,
+        )
+        self.assertEqual(
+            labels_by_style["contour-label-bbox-edge-difference-probe"]["geometry_type"],
+            "Polygon",
+        )
         self.assertEqual(report["source_label_layer_count"], 1)
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["base_style_layer_id"], "road-label")
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["qfit_layer_count"], 1)
@@ -1068,6 +1179,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "generated": "2026-05-18T08:22:00+00:00",
             "sprite_context_loaded": True,
             "sprite_definition_count": 440,
+            "qgis_contour_bbox_edge_difference_label_probe": True,
             "label_count": 1,
             "label_style_summary_by_base_layer": [
                 {
@@ -1205,6 +1317,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("# Mapbox Outdoors QGIS label settings — mapbox/outdoors-v12", markdown)
         self.assertIn("Converted label styles: 1", markdown)
         self.assertIn("Sprite context loaded: yes", markdown)
+        self.assertIn("Bbox-edge contour label probe: yes", markdown)
         self.assertIn("## Label style summary by base layer", markdown)
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
         self.assertIn("## Line label repeat spacing by base layer", markdown)
@@ -1365,6 +1478,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                         "--output-root",
                         str(output_root),
                         "--no-sprite-context",
+                        "--qgis-contour-bbox-edge-difference-label-probe",
                     ]
                 )
 
@@ -1372,6 +1486,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             collect.assert_called_once()
             self.assertEqual(collect.call_args.args[0].style_json_path, style_path)
             self.assertFalse(collect.call_args.args[0].include_sprite_context)
+            self.assertTrue(collect.call_args.args[0].qgis_contour_bbox_edge_difference_label_probe)
             self.assertEqual(len(list(output_root.glob("mapbox-outdoors-v12/*/summary.md"))), 1)
 
 
