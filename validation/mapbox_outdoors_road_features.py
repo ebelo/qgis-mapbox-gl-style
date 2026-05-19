@@ -632,6 +632,42 @@ def _sum_reports(reports: Iterable[dict[str, object]], key: str) -> int:
     return total
 
 
+def _all_camera_status_counts(rows: Iterable[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        status = row.get("status")
+        if isinstance(status, str) and status:
+            counts[status] = counts.get(status, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _all_camera_row(report: dict[str, object]) -> dict[str, object]:
+    camera = report.get("camera") if isinstance(report.get("camera"), dict) else {}
+    row = {
+        "status": "decoded",
+        "camera": camera.get("name"),
+        "camera_zoom": camera.get("zoom"),
+        "tile_zoom": report.get("tile_zoom"),
+        "tile_count": report.get("tile_count"),
+        "decoded_tile_count": report.get("decoded_tile_count"),
+        "failed_tile_count": report.get("failed_tile_count"),
+        "road_geometry_type_counts": report.get("road_geometry_type_counts"),
+        "pedestrian_polygon_class_counts": report.get("pedestrian_polygon_class_counts"),
+    }
+    for _label, key, _alignment in _ROAD_FEATURE_TABLE_FIELDS:
+        row[key] = report.get(key)
+    return row
+
+
+def _all_camera_error_row(camera_name: str, exc: BaseException) -> dict[str, object]:
+    return {
+        "status": "error",
+        "camera": camera_name,
+        "error": type(exc).__name__,
+        "message": str(exc),
+    }
+
+
 def collect_road_feature_report(
     config: RoadFeatureConfig,
     *,
@@ -809,30 +845,37 @@ def collect_all_camera_road_feature_report(
     names = list(camera_names) if camera_names is not None else _all_camera_names()
     fetch_style = style_fetcher if style_fetcher is not None else mapbox_config.fetch_mapbox_style_definition
     style_definition = _load_original_style(config, fetch_style)
-    camera_reports = [
-        collect_road_feature_report(
-            RoadFeatureConfig(
-                token=config.token,
-                output_root=config.output_root,
-                camera_name=camera_name,
-                style_owner=config.style_owner,
-                style_id=config.style_id,
-                style_json_path=config.style_json_path,
-                tile_zoom=config.tile_zoom,
-                now=generated,
-            ),
-            style_fetcher=style_fetcher,
-            style_definition=style_definition,
-            tile_fetcher=tile_fetcher,
-            tile_decoder=tile_decoder,
-        )
-        for camera_name in names
-    ]
+    camera_reports: list[dict[str, object]] = []
+    for camera_name in names:
+        try:
+            report = collect_road_feature_report(
+                RoadFeatureConfig(
+                    token=config.token,
+                    output_root=config.output_root,
+                    camera_name=camera_name,
+                    style_owner=config.style_owner,
+                    style_id=config.style_id,
+                    style_json_path=config.style_json_path,
+                    tile_zoom=config.tile_zoom,
+                    now=generated,
+                ),
+                style_fetcher=style_fetcher,
+                style_definition=style_definition,
+                tile_fetcher=tile_fetcher,
+                tile_decoder=tile_decoder,
+            )
+        except _TILE_ERROR_TYPES as exc:
+            camera_reports.append(_all_camera_error_row(camera_name, exc))
+            continue
+        camera_reports.append(_all_camera_row(report))
+    status_counts = _all_camera_status_counts(camera_reports)
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
         "generated": generated.isoformat(),
         "camera_count": len(camera_reports),
+        "successful_camera_count": status_counts.get("decoded", 0),
+        "failed_camera_count": status_counts.get("error", 0),
         "tile_count": _sum_reports(camera_reports, "tile_count"),
         "decoded_tile_count": _sum_reports(camera_reports, "decoded_tile_count"),
         "failed_tile_count": _sum_reports(camera_reports, "failed_tile_count"),
@@ -994,25 +1037,32 @@ def build_summary_markdown(report: dict[str, object]) -> str:
 
 
 def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
+    camera_reports = report.get("cameras")
+    rows = camera_reports if isinstance(camera_reports, list) else []
     lines = [
         "# Mapbox Outdoors road feature diagnostic - all cameras",
         "",
         f"Generated: {report.get('generated')}",
         f"Style: {report.get('style_owner')}/{report.get('style_id')}",
         f"Cameras: {report.get('camera_count')}",
+        f"Camera statuses: {_markdown_value(_all_camera_status_counts(rows))}",
         f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
         *_feature_summary_lines(report),
         "",
         *_markdown_table_header(
-            (("Camera", "---"), ("Camera zoom", "---:"), ("Tile zoom", "---:"), ("Tiles", "---:"))
+            (
+                ("Camera", "---"),
+                ("Status", "---"),
+                ("Camera zoom", "---:"),
+                ("Tile zoom", "---:"),
+                ("Tiles", "---:"),
+                ("Error", "---"),
+            )
         ),
     ]
-    camera_reports = report.get("cameras")
-    rows = camera_reports if isinstance(camera_reports, list) else []
     for camera_report in rows:
         if not isinstance(camera_report, dict):
             continue
-        camera = camera_report.get("camera") if isinstance(camera_report.get("camera"), dict) else {}
         tiles = (
             f"{_markdown_value(camera_report.get('decoded_tile_count'))}/"
             f"{_markdown_value(camera_report.get('tile_count'))}"
@@ -1020,10 +1070,12 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
         lines.append(
             _markdown_table_row(
                 [
-                    camera.get("name"),
-                    camera.get("zoom"),
+                    camera_report.get("camera"),
+                    camera_report.get("status"),
+                    camera_report.get("camera_zoom"),
                     camera_report.get("tile_zoom"),
                     tiles,
+                    camera_report.get("error"),
                     *_road_feature_table_cells(camera_report),
                 ]
             )

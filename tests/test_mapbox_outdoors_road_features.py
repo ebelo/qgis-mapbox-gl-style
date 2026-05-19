@@ -629,6 +629,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertEqual(report["generated"], "2026-05-18T15:40:00+00:00")
         self.assertEqual(report["camera_count"], 2)
+        self.assertEqual(report["successful_camera_count"], 2)
+        self.assertEqual(report["failed_camera_count"], 0)
         self.assertEqual(report["tile_count"], 2)
         self.assertEqual(report["decoded_tile_count"], 2)
         self.assertEqual(report["road_feature_count"], 10)
@@ -642,6 +644,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["level_crossing_candidate_count"], 0)
         self.assertEqual(report["road_number_shield_candidate_count"], 0)
         self.assertEqual(report["road_exit_shield_candidate_count"], 0)
+        self.assertEqual(report["road_geometry_type_counts"], {"LineString": 8, "Polygon": 2})
+        self.assertEqual(report["pedestrian_polygon_class_counts"], {"pedestrian": 2})
         self.assertEqual(report["pedestrian_polygon_type_counts"], {"pedestrian": 2})
         self.assertEqual(report["pedestrian_polygon_structure_counts"], {"none": 2})
         self.assertEqual(report["pedestrian_polygon_layer_counts"], {"0": 2})
@@ -688,9 +692,32 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["road_exit_shield_reflen_counts"], {})
         self.assertEqual(style_calls, [("token", "mapbox", "outdoors-v12")])
         self.assertEqual(
-            [camera_report["camera"]["name"] for camera_report in report["cameras"]],
+            [camera_report["camera"] for camera_report in report["cameras"]],
             ["zermatt-trails-z18-outdoors", "chamonix-trails-z14-outdoors"],
         )
+        self.assertEqual([camera_report["status"] for camera_report in report["cameras"]], ["decoded", "decoded"])
+        self.assertNotIn("tiles", report["cameras"][0])
+
+    def test_collect_all_camera_road_feature_report_keeps_camera_errors(self):
+        generated = dt.datetime(2026, 5, 18, 15, 40, tzinfo=dt.timezone.utc)
+        report = collect_all_camera_road_feature_report(
+            RoadFeatureConfig(token="token", output_root=Path("/tmp"), tile_zoom=0, now=generated),
+            camera_names=("zermatt-trails-z18-outdoors", "missing-camera"),
+            style_fetcher=lambda _token, _owner, _style_id: {
+                "sources": {"composite": {"type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8"}}
+            },
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=lambda _payload: {"road": [], "motorway_junction": []},
+        )
+
+        self.assertEqual(report["camera_count"], 2)
+        self.assertEqual(report["successful_camera_count"], 1)
+        self.assertEqual(report["failed_camera_count"], 1)
+        self.assertEqual(report["tile_count"], 1)
+        self.assertEqual(report["decoded_tile_count"], 1)
+        self.assertEqual(report["cameras"][1]["camera"], "missing-camera")
+        self.assertEqual(report["cameras"][1]["status"], "error")
+        self.assertEqual(report["cameras"][1]["error"], "ValueError")
 
     def test_build_summary_markdown_includes_counts_and_samples(self):
         pedestrian_signature = "class=pedestrian; type=pedestrian; surface=paved; structure=none; layer=0"
@@ -883,6 +910,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "style_owner": "mapbox",
             "style_id": "outdoors-v12",
             "camera_count": 1,
+            "successful_camera_count": 1,
+            "failed_camera_count": 0,
             "decoded_tile_count": 1,
             "tile_count": 1,
             "road_feature_count": 4,
@@ -932,9 +961,12 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "road_exit_shield_signature_counts": {exit_shield_signature: 1},
             "cameras": [
                 {
-                    "camera": {"name": "zermatt-trails-z18-outdoors", "zoom": 18.0},
+                    "status": "decoded",
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "camera_zoom": 18.0,
                     "tile_zoom": 18,
                     "decoded_tile_count": 1,
+                    "failed_tile_count": 0,
                     "tile_count": 1,
                     "road_feature_count": 4,
                     "motorway_junction_feature_count": 1,
@@ -989,7 +1021,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertIn("# Mapbox Outdoors road feature diagnostic - all cameras", markdown)
         self.assertIn("Cameras: 1", markdown)
-        self.assertIn("| zermatt-trails-z18-outdoors | 18.0 | 18 | 1/1 | 4 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |", markdown)
+        self.assertIn('Camera statuses: {"decoded":1}', markdown)
+        self.assertIn("| zermatt-trails-z18-outdoors | decoded | 18.0 | 18 | 1/1 | - | 4 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |", markdown)
         self.assertIn(f'Path line signatures: {{"{path_signature}":1}}', markdown)
         self.assertIn(f'Road exit shield signatures: {{"{exit_shield_signature}":1}}', markdown)
 
