@@ -45,6 +45,13 @@ class ContourFeaturePaths:
 
 
 @dataclass(frozen=True)
+class AllCameraContourFeaturePaths:
+    run_dir: Path
+    json_path: Path
+    summary_path: Path
+
+
+@dataclass(frozen=True)
 class ContourFeatureConfig:
     token: str | None
     output_root: Path
@@ -91,6 +98,22 @@ def build_contour_feature_paths(run_dir: Path) -> ContourFeaturePaths:
     return ContourFeaturePaths(
         run_dir=run_dir,
         json_path=run_dir / "contour-features.json",
+        summary_path=run_dir / "summary.md",
+    )
+
+
+def build_all_camera_run_directory(
+    *,
+    output_root: Path,
+    now: dt.datetime | None = None,
+) -> Path:
+    return output_root / "all-cameras" / _utc_timestamp(now)
+
+
+def build_all_camera_contour_feature_paths(run_dir: Path) -> AllCameraContourFeaturePaths:
+    return AllCameraContourFeaturePaths(
+        run_dir=run_dir,
+        json_path=run_dir / "summary.json",
         summary_path=run_dir / "summary.md",
     )
 
@@ -412,6 +435,13 @@ def _camera_by_name(camera_name: str):
         raise ValueError(f"Unknown comparison camera: {camera_name}") from exc
 
 
+def _comparison_camera_names() -> list[str]:
+    _ensure_package_parent_on_path()
+    from qfit.validation.mapbox_outdoors_comparison import CAMERAS
+
+    return list(CAMERAS.keys())
+
+
 def _camera_extent(camera) -> tuple[float, float, float, float]:
     _ensure_package_parent_on_path()
     from qfit.validation.mapbox_outdoors_comparison import camera_extent_web_mercator
@@ -498,6 +528,112 @@ def collect_contour_feature_report(
     }
 
 
+def _all_camera_summary_counts(rows: list[dict[str, object]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _all_camera_row(report: dict[str, object]) -> dict[str, object]:
+    camera = report.get("camera") if isinstance(report.get("camera"), dict) else {}
+    candidate_geometry = (
+        report.get("candidate_label_geometry")
+        if isinstance(report.get("candidate_label_geometry"), dict)
+        else {}
+    )
+    return {
+        "status": "decoded",
+        "camera": camera.get("name"),
+        "camera_zoom": camera.get("zoom"),
+        "tile_zoom": report.get("tile_zoom"),
+        "tile_count": report.get("tile_count"),
+        "decoded_tile_count": report.get("decoded_tile_count"),
+        "failed_tile_count": report.get("failed_tile_count"),
+        "contour_feature_count": report.get("contour_feature_count"),
+        "contour_label_candidate_count": report.get("contour_label_candidate_count"),
+        "candidate_label_geometry_status": candidate_geometry.get("status"),
+        "candidate_geometry_type_counts": report.get("candidate_geometry_type_counts"),
+    }
+
+
+def _all_camera_error_row(camera_name: str, exc: BaseException) -> dict[str, object]:
+    return {
+        "status": "error",
+        "camera": camera_name,
+        "error": type(exc).__name__,
+        "message": str(exc),
+    }
+
+
+def _all_camera_sum(rows: list[dict[str, object]], key: str) -> int:
+    return sum(int(row.get(key) or 0) for row in rows)
+
+
+def _config_for_camera(config: ContourFeatureConfig, camera_name: str) -> ContourFeatureConfig:
+    return ContourFeatureConfig(
+        token=config.token,
+        output_root=config.output_root,
+        camera_name=camera_name,
+        style_owner=config.style_owner,
+        style_id=config.style_id,
+        style_json_path=config.style_json_path,
+        tile_zoom=config.tile_zoom,
+        now=config.now,
+    )
+
+
+def collect_all_camera_contour_feature_report(
+    config: ContourFeatureConfig,
+    *,
+    style_fetcher: Callable[[str, str, str], dict[str, object]] | None = None,
+    tile_fetcher: TileFetcher | None = None,
+    tile_decoder: TileDecoder | None = None,
+) -> dict[str, object]:
+    _ensure_package_parent_on_path()
+    from qfit.mapbox_config import fetch_mapbox_style_definition
+
+    shared_style = _load_original_style(config, style_fetcher or fetch_mapbox_style_definition)
+    if not config.token:
+        raise ValueError("A Mapbox token is required to fetch vector tiles.")
+
+    rows: list[dict[str, object]] = []
+    for camera_name in _comparison_camera_names():
+        try:
+            report = collect_contour_feature_report(
+                _config_for_camera(config, camera_name),
+                style_fetcher=lambda _token, _owner, _style_id: shared_style,
+                tile_fetcher=tile_fetcher,
+                tile_decoder=tile_decoder,
+            )
+        except _TILE_ERROR_TYPES as exc:
+            rows.append(_all_camera_error_row(camera_name, exc))
+            continue
+        rows.append(_all_camera_row(report))
+    generated = config.now or dt.datetime.now(dt.timezone.utc)
+    status_counts = _all_camera_summary_counts(rows, "status")
+    return {
+        "style_owner": config.style_owner,
+        "style_id": config.style_id,
+        "generated": generated.isoformat(),
+        "camera_count": len(rows),
+        "successful_camera_count": status_counts.get("decoded", 0),
+        "failed_camera_count": status_counts.get("error", 0),
+        "tile_count": _all_camera_sum(rows, "tile_count"),
+        "decoded_tile_count": _all_camera_sum(rows, "decoded_tile_count"),
+        "failed_tile_count": _all_camera_sum(rows, "failed_tile_count"),
+        "contour_feature_count": _all_camera_sum(rows, "contour_feature_count"),
+        "contour_label_candidate_count": _all_camera_sum(rows, "contour_label_candidate_count"),
+        "candidate_label_geometry_statuses": _all_camera_summary_counts(
+            rows,
+            "candidate_label_geometry_status",
+        ),
+        "cameras": rows,
+    }
+
+
 def _markdown_value(value: object) -> str:
     if value is None:
         return "-"
@@ -558,9 +694,59 @@ def write_report(report: dict[str, object], paths: ContourFeaturePaths) -> None:
     paths.summary_path.write_text(build_summary_markdown(report), encoding="utf-8")
 
 
+def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
+    cameras = report.get("cameras")
+    camera_rows = cameras if isinstance(cameras, list) else []
+    lines = [
+        "# Mapbox Outdoors contour feature diagnostic - all cameras",
+        "",
+        f"Generated: {report.get('generated')}",
+        f"Style: {report.get('style_owner')}/{report.get('style_id')}",
+        f"Cameras: {report.get('camera_count')}",
+        f"Camera statuses: {_markdown_value(_all_camera_summary_counts(camera_rows, 'status'))}",
+        f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
+        f"Contour features: {report.get('contour_feature_count')}",
+        f"Contour-label candidates (index 5/10): {report.get('contour_label_candidate_count')}",
+        f"Candidate label geometry statuses: {_markdown_value(report.get('candidate_label_geometry_statuses'))}",
+        "",
+        "| Camera | Status | Camera zoom | Tile zoom | Tiles decoded | Contour features | Label candidates | Candidate label geometry | Candidate geometry types | Error |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |",
+    ]
+    for camera in camera_rows:
+        if not isinstance(camera, dict):
+            continue
+        lines.append(
+            "| {camera} | {status} | {camera_zoom} | {tile_zoom} | {decoded}/{tile_count} | {feature_count} | {candidate_count} | {candidate_geometry} | {candidate_geometry_types} | {error} |".format(
+                camera=_markdown_value(camera.get("camera")),
+                status=_markdown_value(camera.get("status")),
+                camera_zoom=_markdown_value(camera.get("camera_zoom")),
+                tile_zoom=_markdown_value(camera.get("tile_zoom")),
+                decoded=_markdown_value(camera.get("decoded_tile_count")),
+                tile_count=_markdown_value(camera.get("tile_count")),
+                feature_count=_markdown_value(camera.get("contour_feature_count")),
+                candidate_count=_markdown_value(camera.get("contour_label_candidate_count")),
+                candidate_geometry=_markdown_value(camera.get("candidate_label_geometry_status")),
+                candidate_geometry_types=_markdown_value(camera.get("candidate_geometry_type_counts")),
+                error=_markdown_value(camera.get("error")),
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_all_camera_report(report: dict[str, object], paths: AllCameraContourFeaturePaths) -> None:
+    paths.run_dir.mkdir(parents=True, exist_ok=True)
+    paths.json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    paths.summary_path.write_text(build_all_camera_summary_markdown(report), encoding="utf-8")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate Mapbox Outdoors contour vector-tile feature diagnostics.")
-    parser.add_argument("camera", nargs="?", default=DEFAULT_CAMERA_NAME)
+    parser.add_argument("camera", nargs="?")
+    parser.add_argument(
+        "--all-cameras",
+        action="store_true",
+        help="Run the diagnostic across the full Mapbox Outdoors comparison camera matrix.",
+    )
     parser.add_argument("--style-json", type=Path, help="Read an already downloaded Mapbox style JSON file.")
     parser.add_argument("--style-owner", default=DEFAULT_MAPBOX_STYLE_OWNER)
     parser.add_argument("--style-id", default=DEFAULT_MAPBOX_STYLE_ID)
@@ -570,27 +756,38 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def main(argv: list[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.all_cameras and args.camera:
+        parser.error("Do not pass a camera name with --all-cameras.")
     now = dt.datetime.now(dt.timezone.utc)
     config = ContourFeatureConfig(
         token=resolve_mapbox_token(provided_token=args.mapbox_token),
         output_root=args.output_root,
-        camera_name=args.camera,
+        camera_name=args.camera or DEFAULT_CAMERA_NAME,
         style_owner=args.style_owner,
         style_id=args.style_id,
         style_json_path=args.style_json,
         tile_zoom=args.tile_zoom,
         now=now,
     )
+    if args.all_cameras:
+        report = collect_all_camera_contour_feature_report(config)
+        paths = build_all_camera_contour_feature_paths(
+            build_all_camera_run_directory(output_root=config.output_root, now=config.now)
+        )
+        write_all_camera_report(report, paths)
+        print(paths.summary_path)
+        return
+
     report = collect_contour_feature_report(config)
     paths = build_contour_feature_paths(
         build_run_directory(output_root=config.output_root, camera_name=config.camera_name, now=config.now)
     )
     write_report(report, paths)
     print(paths.summary_path)
-    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    main()
