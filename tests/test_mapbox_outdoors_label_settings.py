@@ -20,6 +20,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _label_style_summary_rows,
     _load_original_style,
     _postprocessed_label_records,
+    _source_label_fanout_summary_rows,
     build_label_settings_paths,
     build_run_directory,
     build_summary_markdown,
@@ -556,6 +557,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["label_count"], 1)
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["count"], 1)
+        self.assertEqual(report["source_label_fanout_by_base_layer"][0]["base_style_layer_id"], "contour-label")
+        self.assertEqual(report["source_label_fanout_by_base_layer"][0]["converted_label_styles"], 1)
         self.assertEqual(report["source_label_layer_count"], 1)
 
     def test_label_style_summary_groups_density_relevant_settings(self):
@@ -608,6 +611,64 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(road_row["repeat_distances"], {"39.6875": 1, "66.1458": 1})
         self.assertEqual(road_row["display_all"], {"false": 2})
 
+    def test_source_label_fanout_summary_groups_qfit_style_expansion(self):
+        rows = _source_label_fanout_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "style_name": "settlement-major-label-z7-name",
+                    "qfit_style_layer_id": "settlement-major-label-z7-name",
+                    "source_layer": "place_label",
+                    "minzoom": 2,
+                    "maxzoom": 13,
+                    "qfit_minzoom": 7,
+                    "qfit_maxzoom": 8,
+                },
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "style_name": "settlement-major-label-z7-name-en",
+                    "qfit_style_layer_id": "settlement-major-label-z7-name-en",
+                    "source_layer": "place_label",
+                    "minzoom": 2,
+                    "maxzoom": 13,
+                    "qfit_minzoom": 7,
+                    "qfit_maxzoom": 8,
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "style_name": "poi-label",
+                    "qfit_style_layer_id": None,
+                    "source_layer": "poi_label",
+                    "minzoom": 15,
+                    "maxzoom": None,
+                },
+            ],
+            [
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "style_name": "settlement-major-label-z7-name",
+                    "field_name": '"name"',
+                },
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "style_name": "settlement-major-label-z7-name-en",
+                    "field_name": '"name_en"',
+                },
+                {"base_style_layer_id": "poi-label", "style_name": "poi-label", "field_name": '"name"'},
+            ],
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["settlement-major-label", "poi-label"])
+        settlement_row = rows[0]
+        self.assertEqual(settlement_row["source_label_rows"], 2)
+        self.assertEqual(settlement_row["converted_label_styles"], 2)
+        self.assertEqual(settlement_row["qfit_layer_count"], 2)
+        self.assertEqual(settlement_row["source_layers"], {"place_label": 2})
+        self.assertEqual(settlement_row["source_zooms"], {"2 to 13": 2})
+        self.assertEqual(settlement_row["qfit_zooms"], {"7 to 8": 2})
+        self.assertEqual(settlement_row["field_names"], {'"name"': 1, '"name_en"': 1})
+        self.assertEqual(rows[1]["qfit_zooms"], {"(missing)": 1})
+
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
         modules = {
             **_fake_qgis_modules(),
@@ -659,6 +720,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["label_count"], 1)
         self.assertEqual(report["labels"][0]["base_style_layer_id"], "road-label")
         self.assertEqual(report["source_label_layer_count"], 1)
+        self.assertEqual(report["source_label_fanout_by_base_layer"][0]["base_style_layer_id"], "road-label")
+        self.assertEqual(report["source_label_fanout_by_base_layer"][0]["qfit_layer_count"], 1)
         self.assertEqual(report["source_label_layers"][0]["qfit_style_layer_id"], "road-label-z15-plus")
         self.assertIsNone(FakeQgsApplication.instance())
 
@@ -683,6 +746,18 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "obstacle": {"true": 1},
                     "label_per_part": {"false": 1},
                     "merge_lines": {"false": 1},
+                }
+            ],
+            "source_label_fanout_by_base_layer": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "source_label_rows": 1,
+                    "converted_label_styles": 1,
+                    "qfit_layer_count": 1,
+                    "source_layers": {"contour": 1},
+                    "source_zooms": {"12+": 1},
+                    "qfit_zooms": {"12+": 1},
+                    "field_names": {'"name"': 1},
                 }
             ],
             "source_label_layer_count": 1,
@@ -749,6 +824,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("Sprite context loaded: yes", markdown)
         self.assertIn("## Label style summary by base layer", markdown)
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
+        self.assertIn("## Source label fan-out by base layer", markdown)
+        self.assertIn('| contour-label | 1 | 1 | 1 | contour=1 | 12+=1 | 12+=1 | "name"=1 |', markdown)
         self.assertIn("## Converted QGIS label styles", markdown)
         self.assertIn("contour-label", markdown)
         self.assertIn("| contour-label | contour-label | contour | Line |", markdown)

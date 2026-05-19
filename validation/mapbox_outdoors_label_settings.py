@@ -8,7 +8,7 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = REPO_ROOT.parent
@@ -441,6 +441,20 @@ def _sorted_count_map(values: Iterable[object]) -> dict[str, int]:
     return {key: counts[key] for key in sorted(counts, key=lambda item: (-counts[item], item))}
 
 
+def _zoom_range_value(minzoom: object, maxzoom: object, formatter: Callable[[object], str]) -> str:
+    if minzoom is None and maxzoom is None:
+        return "all"
+    if maxzoom is None:
+        return f"{formatter(minzoom)}+"
+    if minzoom is None:
+        return f"<{formatter(maxzoom)}"
+    return f"{formatter(minzoom)} to {formatter(maxzoom)}"
+
+
+def _zoom_range_key(minzoom: object, maxzoom: object) -> str:
+    return _zoom_range_value(minzoom, maxzoom, _summary_key)
+
+
 def _label_style_summary_rows(records: list[dict[str, object]]) -> list[dict[str, object]]:
     grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
     for record in records:
@@ -470,6 +484,65 @@ def _label_style_summary_rows(records: list[dict[str, object]]) -> list[dict[str
     return sorted(rows, key=lambda row: (-int(row["count"]), str(row["base_style_layer_id"])))
 
 
+def _source_label_fanout_summary_rows(
+    source_label_layers: list[dict[str, object]],
+    label_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    source_by_base: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in source_label_layers:
+        if not isinstance(row, dict):
+            continue
+        base_layer = str(row.get("base_style_layer_id") or row.get("style_name") or "")
+        if base_layer:
+            source_by_base[base_layer].append(row)
+
+    labels_by_base: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in label_records:
+        if not isinstance(record, dict):
+            continue
+        base_layer = str(record.get("base_style_layer_id") or record.get("style_name") or "")
+        if base_layer:
+            labels_by_base[base_layer].append(record)
+
+    rows: list[dict[str, object]] = []
+    for base_layer in source_by_base.keys() | labels_by_base.keys():
+        source_rows = source_by_base.get(base_layer, [])
+        label_rows = labels_by_base.get(base_layer, [])
+        qfit_layer_ids = {
+            str(row.get("qfit_style_layer_id"))
+            for row in source_rows
+            if row.get("qfit_style_layer_id") is not None
+        }
+        rows.append(
+            {
+                "base_style_layer_id": base_layer,
+                "source_label_rows": len(source_rows),
+                "converted_label_styles": len(label_rows),
+                "qfit_layer_count": len(qfit_layer_ids),
+                "source_layers": _sorted_count_map(row.get("source_layer") for row in source_rows),
+                "source_zooms": _sorted_count_map(
+                    _zoom_range_key(row.get("minzoom"), row.get("maxzoom"))
+                    for row in source_rows
+                ),
+                "qfit_zooms": _sorted_count_map(
+                    _zoom_range_key(row.get("qfit_minzoom"), row.get("qfit_maxzoom"))
+                    if row.get("qfit_style_layer_id") is not None
+                    else "(missing)"
+                    for row in source_rows
+                ),
+                "field_names": _sorted_count_map(row.get("field_name") for row in label_rows),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -int(row["converted_label_styles"]),
+            -int(row["source_label_rows"]),
+            str(row["base_style_layer_id"]),
+        ),
+    )
+
+
 def _label_settings_report(
     *,
     config: LabelSettingsConfig,
@@ -491,6 +564,7 @@ def _label_settings_report(
         "label_count": len(records),
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
+        "source_label_fanout_by_base_layer": _source_label_fanout_summary_rows(source_label_layer_rows, records),
         "source_label_layer_count": len(source_label_layer_rows),
         "source_label_layers": source_label_layer_rows,
     }
@@ -599,13 +673,7 @@ def _count_map_markdown_value(value: object) -> str:
 
 
 def _zoom_range_markdown_value(minzoom: object, maxzoom: object) -> str:
-    if minzoom is None and maxzoom is None:
-        return "all"
-    if maxzoom is None:
-        return f"{_markdown_value(minzoom)}+"
-    if minzoom is None:
-        return f"<{_markdown_value(maxzoom)}"
-    return _compound_markdown_value(minzoom, maxzoom, separator=" to ")
+    return _zoom_range_value(minzoom, maxzoom, _markdown_value)
 
 
 def _append_label_style_summary(lines: list[str], summary_rows: list[object]) -> None:
@@ -634,6 +702,34 @@ def _append_label_style_summary(lines: list[str], summary_rows: list[object]) ->
                     obstacle=_count_map_markdown_value(row.get("obstacle")),
                     label_per_part=_count_map_markdown_value(row.get("label_per_part")),
                     merge_lines=_count_map_markdown_value(row.get("merge_lines")),
+                )
+            )
+        lines.append("")
+
+
+def _append_source_label_fanout_summary(lines: list[str], summary_rows: list[object]) -> None:
+    if summary_rows:
+        lines.extend(
+            [
+                "## Source label fan-out by base layer",
+                "",
+                "| Base layer | Source rows | Converted styles | QGIS layers | Source layers | Source zooms | QGIS zooms | Fields |",
+                "| --- | ---: | ---: | ---: | --- | --- | --- | --- |",
+            ]
+        )
+        for row in summary_rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| {base} | {source_rows} | {converted} | {qfit_layers} | {source_layers} | {source_zooms} | {qfit_zooms} | {fields} |".format(
+                    base=_markdown_value(row.get("base_style_layer_id")),
+                    source_rows=_markdown_value(row.get("source_label_rows")),
+                    converted=_markdown_value(row.get("converted_label_styles")),
+                    qfit_layers=_markdown_value(row.get("qfit_layer_count")),
+                    source_layers=_count_map_markdown_value(row.get("source_layers")),
+                    source_zooms=_count_map_markdown_value(row.get("source_zooms")),
+                    qfit_zooms=_count_map_markdown_value(row.get("qfit_zooms")),
+                    fields=_count_map_markdown_value(row.get("field_names")),
                 )
             )
         lines.append("")
@@ -733,6 +829,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     rows = labels if isinstance(labels, list) else []
     label_summary = report.get("label_style_summary_by_base_layer")
     summary_rows = label_summary if isinstance(label_summary, list) else []
+    source_fanout_summary = report.get("source_label_fanout_by_base_layer")
+    source_fanout_rows = source_fanout_summary if isinstance(source_fanout_summary, list) else []
     source_labels = report.get("source_label_layers")
     source_rows = source_labels if isinstance(source_labels, list) else []
     lines = [
@@ -745,6 +843,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         "",
     ]
     _append_label_style_summary(lines, summary_rows)
+    _append_source_label_fanout_summary(lines, source_fanout_rows)
     _append_converted_label_rows(lines, rows)
     _append_source_label_rows(lines, report, source_rows)
     return "\n".join(lines) + "\n"
