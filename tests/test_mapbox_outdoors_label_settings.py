@@ -18,6 +18,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _geometry_generator_markdown_value,
     _label_settings_report,
     _label_style_summary_rows,
+    _line_label_repeat_spacing_rows,
     _load_original_style,
     _postprocessed_label_records,
     _source_label_control_omission_summary_rows,
@@ -560,6 +561,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["label_count"], 1)
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["count"], 1)
+        self.assertEqual(report["line_label_repeat_spacing_by_base_layer"], [])
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["converted_label_styles"], 1)
         self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
@@ -617,6 +619,107 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(road_row["priorities"], {"4": 2})
         self.assertEqual(road_row["repeat_distances"], {"39.6875": 1, "66.1458": 1})
         self.assertEqual(road_row["display_all"], {"false": 2})
+
+    def test_line_label_repeat_spacing_summary_highlights_missing_spacing_and_zero_repeat(self):
+        rows = _line_label_repeat_spacing_rows(
+            [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "style_name": "contour-label",
+                    "qfit_style_layer_id": "contour-label",
+                    "layout": {"symbol-placement": "line"},
+                    "qfit_layout": {"symbol-placement": "line"},
+                },
+                {
+                    "base_style_layer_id": "waterway-label",
+                    "style_name": "waterway-label-z17-plus",
+                    "qfit_style_layer_id": "waterway-label-z17-plus",
+                    "layout": {"symbol-placement": "line", "symbol-spacing": ["interpolate"]},
+                    "qfit_layout": {"symbol-placement": "line", "symbol-spacing": 400.0},
+                },
+                {
+                    "base_style_layer_id": "water-line-label",
+                    "style_name": "water-line-label",
+                    "qfit_style_layer_id": "water-line-label",
+                    "layout": {"symbol-placement": "line-center"},
+                    "qfit_layout": {"symbol-placement": "line-center"},
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-z11-plus",
+                    "qfit_style_layer_id": "road-number-shield-z11-plus",
+                    "layout": {"symbol-placement": "line", "icon-image": ["get", "shield"]},
+                    "qfit_layout": {"symbol-placement": "line", "icon-image": "default-2"},
+                },
+            ],
+            [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "style_name": "contour-label",
+                    "geometry_type": "Line",
+                    "placement": "Curved",
+                    "repeat_distance": 0.0,
+                },
+                {
+                    "base_style_layer_id": "waterway-label",
+                    "style_name": "waterway-label-z17-plus",
+                    "geometry_type": "Line",
+                    "placement": "Curved",
+                    "repeat_distance": 66.1458333333,
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-z11-plus",
+                    "geometry_type": "Line",
+                    "placement": "Horizontal",
+                    "repeat_distance": 0.0,
+                },
+            ],
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["contour-label", "waterway-label"])
+        contour_row = rows[0]
+        self.assertEqual(contour_row["missing_qfit_symbol_spacing"], 1)
+        self.assertEqual(contour_row["zero_repeat_distance_count"], 1)
+        self.assertEqual(contour_row["qfit_symbol_spacings"], {"(missing)": 1})
+        self.assertEqual(contour_row["repeat_distances"], {"0": 1})
+        waterway_row = rows[1]
+        self.assertEqual(waterway_row["missing_qfit_symbol_spacing"], 0)
+        self.assertEqual(waterway_row["zero_repeat_distance_count"], 0)
+        self.assertEqual(waterway_row["qfit_symbol_spacings"], {"400": 1})
+        self.assertEqual(waterway_row["repeat_distances"], {"66.1458": 1})
+
+    def test_line_label_repeat_spacing_summary_deduplicates_shared_label_records(self):
+        rows = _line_label_repeat_spacing_rows(
+            [
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label-alias",
+                    "qfit_style_layer_id": "road-label-z15-plus",
+                    "qfit_layout": {"symbol-placement": "line"},
+                },
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label-z15-plus",
+                    "qfit_style_layer_id": "road-label-z15-plus",
+                    "qfit_layout": {"symbol-placement": "line"},
+                },
+            ],
+            [
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label-z15-plus",
+                    "geometry_type": "Line",
+                    "placement": "Curved",
+                    "repeat_distance": 66.1458333333,
+                },
+            ],
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_label_rows"], 2)
+        self.assertEqual(rows[0]["converted_line_label_styles"], 1)
+        self.assertEqual(rows[0]["repeat_distances"], {"66.1458": 1})
 
     def test_source_label_fanout_summary_groups_qfit_style_expansion(self):
         rows = _source_label_fanout_summary_rows(
@@ -981,6 +1084,20 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "merge_lines": {"false": 1},
                 }
             ],
+            "line_label_repeat_spacing_by_base_layer": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "source_label_rows": 1,
+                    "converted_line_label_styles": 1,
+                    "missing_qfit_symbol_spacing": 1,
+                    "source_symbol_spacings": {"(missing)": 1},
+                    "qfit_symbol_spacings": {"(missing)": 1},
+                    "repeat_distances": {"0": 1},
+                    "placements": {"Curved": 1},
+                    "style_names": {"contour-label": 1},
+                    "zero_repeat_distance_count": 1,
+                }
+            ],
             "source_label_fanout_by_base_layer": [
                 {
                     "base_style_layer_id": "contour-label",
@@ -1090,6 +1207,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("Sprite context loaded: yes", markdown)
         self.assertIn("## Label style summary by base layer", markdown)
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
+        self.assertIn("## Line label repeat spacing by base layer", markdown)
+        self.assertIn(
+            "| contour-label | 1 | 1 | 1 | (missing)=1 | (missing)=1 | 0=1 | Curved=1 | contour-label=1 |",
+            markdown,
+        )
         self.assertIn("## Source label fan-out by base layer", markdown)
         self.assertIn('| contour-label | 1 | 1 | 1 | contour=1 | 12+=1 | 12+=1 | "name"=1 |', markdown)
         self.assertIn("## Source label control coverage by base layer", markdown)
