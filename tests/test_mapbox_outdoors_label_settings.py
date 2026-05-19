@@ -23,6 +23,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _source_label_control_omission_summary_rows,
     _source_label_control_summary_rows,
     _source_label_fanout_summary_rows,
+    _source_label_unresolved_control_summary_rows,
     build_label_settings_paths,
     build_run_directory,
     build_summary_markdown,
@@ -564,6 +565,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["source_label_rows"], 1)
         self.assertEqual(report["source_label_control_omission_summary_by_base_layer"], [])
+        self.assertEqual(report["source_label_unresolved_control_summary_by_base_layer"], [])
         self.assertEqual(report["source_label_layer_count"], 1)
 
     def test_label_style_summary_groups_density_relevant_settings(self):
@@ -768,6 +770,49 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         )
         self.assertEqual(rows[2]["omission_reasons"], {"settlement symbol-sort-key encoded by qfit split": 1})
 
+    def test_source_label_unresolved_control_summary_ignores_known_qfit_omissions(self):
+        rows = _source_label_unresolved_control_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "style_name": "settlement-major-label-z4-to-z6-dot-11-left",
+                    "qfit_style_layer_id": "settlement-major-label-z4-to-z6-dot-11-left",
+                    "layout": {
+                        "symbol-sort-key": ["get", "symbolrank"],
+                        "text-anchor": ["get", "text_anchor"],
+                        "text-field": ["get", "name"],
+                    },
+                    "paint": {"text-color": "#111111", "text-halo-color": "#ffffff"},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {"text-color": "#111111"},
+                },
+                {
+                    "base_style_layer_id": "country-label",
+                    "style_name": "country-label",
+                    "qfit_style_layer_id": "country-label",
+                    "layout": {"icon-image": "", "text-field": ["get", "name"]},
+                    "paint": {"icon-opacity": 0.6, "text-color": "#111111"},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {"text-color": "#111111"},
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "style_name": "poi-label-z16-plus-text",
+                    "qfit_style_layer_id": "poi-label-z16-plus-text",
+                    "layout": {"text-field": ["get", "name"]},
+                    "paint": {"text-color": "#69575d", "text-halo-color": "#ffffff"},
+                    "qfit_layout": {"text-field": ["get", "name"]},
+                    "qfit_paint": {"text-color": "#69575d"},
+                },
+            ]
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["settlement-major-label", "poi-label"])
+        self.assertEqual(rows[0]["unresolved_control_count"], 2)
+        self.assertEqual(rows[0]["unresolved_controls"], {"layout.text-anchor": 1, "paint.text-halo-color": 1})
+        self.assertEqual(rows[1]["unresolved_control_count"], 1)
+        self.assertEqual(rows[1]["unresolved_controls"], {"paint.text-halo-color": 1})
+
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
         modules = {
             **_fake_qgis_modules(),
@@ -884,6 +929,14 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     },
                 }
             ],
+            "source_label_unresolved_control_summary_by_base_layer": [
+                {
+                    "base_style_layer_id": "settlement-major-label",
+                    "source_label_rows": 4,
+                    "unresolved_control_count": 6,
+                    "unresolved_controls": {"layout.text-anchor": 4, "paint.text-halo-color": 2},
+                }
+            ],
             "source_label_layer_count": 1,
             "labels": [
                 {
@@ -958,6 +1011,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("## Known qfit label control omissions by base layer", markdown)
         self.assertIn(
             "| country-label | 10 | 20 | layout.icon-image=10, paint.icon-opacity=10 | empty icon-image removed=10, icon-opacity removed with no QGIS icon=10 |",
+            markdown,
+        )
+        self.assertIn("## Unresolved label control gaps by base layer", markdown)
+        self.assertIn(
+            "| settlement-major-label | 4 | 6 | layout.text-anchor=4, paint.text-halo-color=2 |",
             markdown,
         )
         self.assertIn("## Converted QGIS label styles", markdown)

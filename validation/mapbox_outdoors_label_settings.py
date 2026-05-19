@@ -646,6 +646,17 @@ def _known_missing_control_reason_values(
                 yield reason
 
 
+def _unresolved_missing_control_values(
+    rows: list[dict[str, object]],
+    source_section: str,
+    qfit_section: str,
+) -> Iterable[str]:
+    for row in rows:
+        for key in _missing_section_keys(row, source_section, qfit_section):
+            if _known_missing_control_reason(row, source_section, key) is None:
+                yield f"{source_section}.{key}"
+
+
 def _source_label_control_summary_rows(source_label_layers: list[dict[str, object]]) -> list[dict[str, object]]:
     grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
     for row in source_label_layers:
@@ -676,6 +687,41 @@ def _source_label_control_summary_rows(source_label_layers: list[dict[str, objec
         rows,
         key=lambda row: (
             -int(row["missing_control_count"]),
+            -int(row["source_label_rows"]),
+            str(row["base_style_layer_id"]),
+        ),
+    )
+
+
+def _source_label_unresolved_control_summary_rows(source_label_layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in source_label_layers:
+        if not isinstance(row, dict):
+            continue
+        base_layer = str(row.get("base_style_layer_id") or row.get("style_name") or "")
+        if base_layer:
+            grouped[base_layer].append(row)
+
+    rows: list[dict[str, object]] = []
+    for base_layer, source_rows in grouped.items():
+        unresolved_controls = Counter(
+            _unresolved_missing_control_values(source_rows, "layout", "qfit_layout")
+        )
+        unresolved_controls.update(_unresolved_missing_control_values(source_rows, "paint", "qfit_paint"))
+        if not unresolved_controls:
+            continue
+        rows.append(
+            {
+                "base_style_layer_id": base_layer,
+                "source_label_rows": len(source_rows),
+                "unresolved_control_count": sum(unresolved_controls.values()),
+                "unresolved_controls": dict(sorted(unresolved_controls.items(), key=lambda item: (-item[1], item[0]))),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -int(row["unresolved_control_count"]),
             -int(row["source_label_rows"]),
             str(row["base_style_layer_id"]),
         ),
@@ -745,6 +791,9 @@ def _label_settings_report(
         "source_label_fanout_by_base_layer": _source_label_fanout_summary_rows(source_label_layer_rows, records),
         "source_label_control_summary_by_base_layer": _source_label_control_summary_rows(source_label_layer_rows),
         "source_label_control_omission_summary_by_base_layer": _source_label_control_omission_summary_rows(
+            source_label_layer_rows
+        ),
+        "source_label_unresolved_control_summary_by_base_layer": _source_label_unresolved_control_summary_rows(
             source_label_layer_rows
         ),
         "source_label_layer_count": len(source_label_layer_rows),
@@ -971,6 +1020,30 @@ def _append_source_label_control_omission_summary(lines: list[str], summary_rows
         lines.append("")
 
 
+def _append_source_label_unresolved_control_summary(lines: list[str], summary_rows: list[object]) -> None:
+    if summary_rows:
+        lines.extend(
+            [
+                "## Unresolved label control gaps by base layer",
+                "",
+                "| Base layer | Source rows | Unresolved controls | Controls |",
+                "| --- | ---: | ---: | --- |",
+            ]
+        )
+        for row in summary_rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| {base} | {source_rows} | {unresolved_count} | {unresolved_controls} |".format(
+                    base=_markdown_value(row.get("base_style_layer_id")),
+                    source_rows=_markdown_value(row.get("source_label_rows")),
+                    unresolved_count=_markdown_value(row.get("unresolved_control_count")),
+                    unresolved_controls=_count_map_markdown_value(row.get("unresolved_controls")),
+                )
+            )
+        lines.append("")
+
+
 def _append_converted_label_rows(lines: list[str], rows: list[object]) -> None:
     lines.extend(
         [
@@ -1073,6 +1146,10 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     source_control_omission_rows = (
         source_control_omission_summary if isinstance(source_control_omission_summary, list) else []
     )
+    source_unresolved_control_summary = report.get("source_label_unresolved_control_summary_by_base_layer")
+    source_unresolved_control_rows = (
+        source_unresolved_control_summary if isinstance(source_unresolved_control_summary, list) else []
+    )
     source_labels = report.get("source_label_layers")
     source_rows = source_labels if isinstance(source_labels, list) else []
     lines = [
@@ -1088,6 +1165,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     _append_source_label_fanout_summary(lines, source_fanout_rows)
     _append_source_label_control_summary(lines, source_control_rows)
     _append_source_label_control_omission_summary(lines, source_control_omission_rows)
+    _append_source_label_unresolved_control_summary(lines, source_unresolved_control_rows)
     _append_converted_label_rows(lines, rows)
     _append_source_label_rows(lines, report, source_rows)
     return "\n".join(lines) + "\n"
