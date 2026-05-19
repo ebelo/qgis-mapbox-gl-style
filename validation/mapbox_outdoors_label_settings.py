@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 import sys
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -15,6 +16,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-label-settings"
 DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 DEFAULT_QT_QPA_PLATFORM = "offscreen"
+_BOOL_COUNT_KEY_MARKDOWN_VALUES = {"false": "no", "true": "yes"}
 _SOURCE_LABEL_LAYOUT_PROPERTIES = (
     "symbol-placement",
     "symbol-spacing",
@@ -422,6 +424,52 @@ def _postprocessed_label_records(labeling: object | None, apply_label_priority) 
     )
 
 
+def _summary_key(value: object) -> str:
+    if value is None:
+        return "(missing)"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    if isinstance(value, list):
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def _sorted_count_map(values: Iterable[object]) -> dict[str, int]:
+    counts = Counter(_summary_key(value) for value in values)
+    return {key: counts[key] for key in sorted(counts, key=lambda item: (-counts[item], item))}
+
+
+def _label_style_summary_rows(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        base_layer = str(record.get("base_style_layer_id") or record.get("style_name") or "")
+        if base_layer:
+            grouped[base_layer].append(record)
+
+    rows: list[dict[str, object]] = []
+    for base_layer, layer_records in grouped.items():
+        rows.append(
+            {
+                "base_style_layer_id": base_layer,
+                "count": len(layer_records),
+                "source_layers": _sorted_count_map(row.get("source_layer") for row in layer_records),
+                "geometry_types": _sorted_count_map(row.get("geometry_type") for row in layer_records),
+                "priorities": _sorted_count_map(row.get("priority") for row in layer_records),
+                "placements": _sorted_count_map(row.get("placement") for row in layer_records),
+                "repeat_distances": _sorted_count_map(row.get("repeat_distance") for row in layer_records),
+                "display_all": _sorted_count_map(row.get("display_all") for row in layer_records),
+                "obstacle": _sorted_count_map(row.get("obstacle") for row in layer_records),
+                "label_per_part": _sorted_count_map(row.get("label_per_part") for row in layer_records),
+                "merge_lines": _sorted_count_map(row.get("merge_lines") for row in layer_records),
+            }
+        )
+    return sorted(rows, key=lambda row: (-int(row["count"]), str(row["base_style_layer_id"])))
+
+
 def _label_settings_report(
     *,
     config: LabelSettingsConfig,
@@ -442,6 +490,7 @@ def _label_settings_report(
         "sprite_definition_count": sprite_count,
         "label_count": len(records),
         "labels": records,
+        "label_style_summary_by_base_layer": _label_style_summary_rows(records),
         "source_label_layer_count": len(source_label_layer_rows),
         "source_label_layers": source_label_layer_rows,
     }
@@ -536,6 +585,19 @@ def _json_markdown_value(value: object) -> str:
     return _markdown_value(value)
 
 
+def _count_map_key_markdown_value(value: object) -> str:
+    return _BOOL_COUNT_KEY_MARKDOWN_VALUES.get(str(value), _markdown_value(value))
+
+
+def _count_map_markdown_value(value: object) -> str:
+    if not isinstance(value, dict) or not value:
+        return "—"
+    return ", ".join(
+        f"{_count_map_key_markdown_value(key)}={_markdown_value(count)}"
+        for key, count in value.items()
+    )
+
+
 def _zoom_range_markdown_value(minzoom: object, maxzoom: object) -> str:
     if minzoom is None and maxzoom is None:
         return "all"
@@ -546,22 +608,46 @@ def _zoom_range_markdown_value(minzoom: object, maxzoom: object) -> str:
     return _compound_markdown_value(minzoom, maxzoom, separator=" to ")
 
 
-def build_summary_markdown(report: dict[str, object]) -> str:
-    labels = report.get("labels")
-    rows = labels if isinstance(labels, list) else []
-    source_labels = report.get("source_label_layers")
-    source_rows = source_labels if isinstance(source_labels, list) else []
-    lines = [
-        f"# Mapbox Outdoors QGIS label settings — {report.get('style_owner')}/{report.get('style_id')}",
-        "",
-        f"Generated: {report.get('generated')}",
-        f"Converted label styles: {report.get('label_count', len(rows))}",
-        f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
-        f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
-        "",
-        "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Geometry generator | Curve angles | Overrun | Data-defined keys |",
-        "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | --- |",
-    ]
+def _append_label_style_summary(lines: list[str], summary_rows: list[object]) -> None:
+    if summary_rows:
+        lines.extend(
+            [
+                "## Label style summary by base layer",
+                "",
+                "| Base layer | Count | Source layers | Geometry | Priorities | Placements | Repeat distances | Display all | Obstacle | Label/part | Merge lines |",
+                "| --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in summary_rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| {base} | {count} | {source_layers} | {geometry} | {priorities} | {placements} | {repeat} | {display_all} | {obstacle} | {label_per_part} | {merge_lines} |".format(
+                    base=_markdown_value(row.get("base_style_layer_id")),
+                    count=_markdown_value(row.get("count")),
+                    source_layers=_count_map_markdown_value(row.get("source_layers")),
+                    geometry=_count_map_markdown_value(row.get("geometry_types")),
+                    priorities=_count_map_markdown_value(row.get("priorities")),
+                    placements=_count_map_markdown_value(row.get("placements")),
+                    repeat=_count_map_markdown_value(row.get("repeat_distances")),
+                    display_all=_count_map_markdown_value(row.get("display_all")),
+                    obstacle=_count_map_markdown_value(row.get("obstacle")),
+                    label_per_part=_count_map_markdown_value(row.get("label_per_part")),
+                    merge_lines=_count_map_markdown_value(row.get("merge_lines")),
+                )
+            )
+        lines.append("")
+
+
+def _append_converted_label_rows(lines: list[str], rows: list[object]) -> None:
+    lines.extend(
+        [
+            "## Converted QGIS label styles",
+            "",
+            "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Geometry generator | Curve angles | Overrun | Data-defined keys |",
+            "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | --- |",
+        ]
+    )
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -602,6 +688,9 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 keys=_markdown_value(row.get("data_defined_property_keys")),
             )
         )
+
+
+def _append_source_label_rows(lines: list[str], report: dict[str, object], source_rows: list[object]) -> None:
     if source_rows:
         lines.extend(
             [
@@ -637,6 +726,27 @@ def build_summary_markdown(report: dict[str, object]) -> str:
                 qfit_paint=_json_markdown_value(row.get("qfit_paint")),
             )
         )
+
+
+def build_summary_markdown(report: dict[str, object]) -> str:
+    labels = report.get("labels")
+    rows = labels if isinstance(labels, list) else []
+    label_summary = report.get("label_style_summary_by_base_layer")
+    summary_rows = label_summary if isinstance(label_summary, list) else []
+    source_labels = report.get("source_label_layers")
+    source_rows = source_labels if isinstance(source_labels, list) else []
+    lines = [
+        f"# Mapbox Outdoors QGIS label settings — {report.get('style_owner')}/{report.get('style_id')}",
+        "",
+        f"Generated: {report.get('generated')}",
+        f"Converted label styles: {report.get('label_count', len(rows))}",
+        f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
+        f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
+        "",
+    ]
+    _append_label_style_summary(lines, summary_rows)
+    _append_converted_label_rows(lines, rows)
+    _append_source_label_rows(lines, report, source_rows)
     return "\n".join(lines) + "\n"
 
 

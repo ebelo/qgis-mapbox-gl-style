@@ -17,6 +17,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _fetch_sprite_resources,
     _geometry_generator_markdown_value,
     _label_settings_report,
+    _label_style_summary_rows,
     _load_original_style,
     _postprocessed_label_records,
     build_label_settings_paths,
@@ -553,7 +554,59 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertTrue(report["sprite_context_loaded"])
         self.assertEqual(report["sprite_definition_count"], 440)
         self.assertEqual(report["label_count"], 1)
+        self.assertEqual(report["label_style_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
+        self.assertEqual(report["label_style_summary_by_base_layer"][0]["count"], 1)
         self.assertEqual(report["source_label_layer_count"], 1)
+
+    def test_label_style_summary_groups_density_relevant_settings(self):
+        rows = _label_style_summary_rows(
+            [
+                {
+                    "base_style_layer_id": "road-label",
+                    "source_layer": "road",
+                    "geometry_type": "Line",
+                    "priority": 4,
+                    "placement": "Curved",
+                    "repeat_distance": 39.6875,
+                    "display_all": False,
+                    "obstacle": True,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "road-label",
+                    "source_layer": "road",
+                    "geometry_type": "Line",
+                    "priority": 4,
+                    "placement": "Curved",
+                    "repeat_distance": 66.1458333333,
+                    "display_all": False,
+                    "obstacle": True,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "source_layer": "poi_label",
+                    "geometry_type": "Point",
+                    "priority": 5,
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "display_all": False,
+                    "obstacle": True,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+            ]
+        )
+
+        self.assertEqual([row["base_style_layer_id"] for row in rows], ["road-label", "poi-label"])
+        road_row = rows[0]
+        self.assertEqual(road_row["count"], 2)
+        self.assertEqual(road_row["geometry_types"], {"Line": 2})
+        self.assertEqual(road_row["priorities"], {"4": 2})
+        self.assertEqual(road_row["repeat_distances"], {"39.6875": 1, "66.1458": 1})
+        self.assertEqual(road_row["display_all"], {"false": 2})
 
     def test_collect_label_settings_runs_with_fake_qgis_runtime(self):
         modules = {
@@ -617,6 +670,21 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "sprite_context_loaded": True,
             "sprite_definition_count": 440,
             "label_count": 1,
+            "label_style_summary_by_base_layer": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "count": 1,
+                    "source_layers": {"contour": 1},
+                    "geometry_types": {"Line": 1},
+                    "priorities": {"3": 1},
+                    "placements": {"Line": 1},
+                    "repeat_distances": {"0": 1},
+                    "display_all": {"false": 1},
+                    "obstacle": {"true": 1},
+                    "label_per_part": {"false": 1},
+                    "merge_lines": {"false": 1},
+                }
+            ],
             "source_label_layer_count": 1,
             "labels": [
                 {
@@ -679,6 +747,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("# Mapbox Outdoors QGIS label settings — mapbox/outdoors-v12", markdown)
         self.assertIn("Converted label styles: 1", markdown)
         self.assertIn("Sprite context loaded: yes", markdown)
+        self.assertIn("## Label style summary by base layer", markdown)
+        self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
+        self.assertIn("## Converted QGIS label styles", markdown)
         self.assertIn("contour-label", markdown)
         self.assertIn("| contour-label | contour-label | contour | Line |", markdown)
         self.assertIn("yes Line boundary($geometry)", markdown)
@@ -693,6 +764,30 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("| contour-label | contour-label | contour-label | contour | 12+", markdown)
         self.assertIn("\"symbol-placement\":\"line\"", markdown)
         self.assertIn("\"text-halo-color\":\"#dcdcd4\"", markdown)
+
+    def test_build_summary_markdown_keeps_converted_heading_for_legacy_reports(self):
+        report = {
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "generated": "2026-05-19T00:00:00Z",
+            "label_count": 1,
+            "sprite_context_loaded": False,
+            "sprite_definition_count": 0,
+            "labels": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "style_name": "contour-label",
+                    "source_layer": "contour",
+                    "geometry_type": "Line",
+                }
+            ],
+        }
+
+        markdown = build_summary_markdown(report)
+
+        self.assertNotIn("## Label style summary by base layer", markdown)
+        self.assertIn("## Converted QGIS label styles", markdown)
+        self.assertIn("| contour-label | contour-label | contour | Line |", markdown)
 
     def test_geometry_generator_markdown_handles_missing_disabled_and_enabled_values(self):
         self.assertEqual(_geometry_generator_markdown_value({}), "—")
