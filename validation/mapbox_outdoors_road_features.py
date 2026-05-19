@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import math
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -80,6 +80,7 @@ SAMPLE_PROPERTY_KEYS = (
     "oneway",
     "surface",
 )
+ROAD_FEATURE_SIGNATURE_KEYS = ("class", "type", "surface", "structure", "layer")
 
 
 @dataclass(frozen=True)
@@ -185,14 +186,36 @@ def is_oneway_arrow_candidate(feature: dict[str, object], *, tile_zoom: int | No
     )
 
 
+def _property_count_label(value: object) -> str:
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return str(value)
+
+
+def _feature_signature(feature: dict[str, object], keys: Sequence[str]) -> str:
+    properties = _feature_properties(feature)
+    return "; ".join(
+        f"{key}={_property_count_label(properties.get(key, MISSING_VALUE))}"
+        for key in keys
+    )
+
+
 def _count_by_property(features: Iterable[dict[str, object]], key: str) -> dict[str, int]:
     counts: dict[str, int] = {}
     for feature in features:
-        value = _feature_properties(feature).get(key, MISSING_VALUE)
-        if isinstance(value, (dict, list)):
-            value = json.dumps(value, sort_keys=True, separators=(",", ":"))
-        normalized = str(value)
+        normalized = _property_count_label(_feature_properties(feature).get(key, MISSING_VALUE))
         counts[normalized] = counts.get(normalized, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _count_property_signatures(
+    features: Iterable[dict[str, object]],
+    keys: Sequence[str],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for feature in features:
+        signature = _feature_signature(feature, keys)
+        counts[signature] = counts.get(signature, 0) + 1
     return dict(sorted(counts.items()))
 
 
@@ -254,17 +277,27 @@ def road_tile_record(
         "pedestrian_polygon_structure_counts": _count_by_property(pedestrian_polygons, "structure"),
         "pedestrian_polygon_layer_counts": _count_by_property(pedestrian_polygons, "layer"),
         "pedestrian_polygon_surface_counts": _count_by_property(pedestrian_polygons, "surface"),
+        "pedestrian_polygon_signature_counts": _count_property_signatures(
+            pedestrian_polygons,
+            ROAD_FEATURE_SIGNATURE_KEYS,
+        ),
         "pedestrian_line_type_counts": _count_by_property(pedestrian_lines, "type"),
         "pedestrian_line_structure_counts": _count_by_property(pedestrian_lines, "structure"),
         "pedestrian_line_layer_counts": _count_by_property(pedestrian_lines, "layer"),
         "pedestrian_line_surface_counts": _count_by_property(pedestrian_lines, "surface"),
+        "pedestrian_line_signature_counts": _count_property_signatures(
+            pedestrian_lines,
+            ROAD_FEATURE_SIGNATURE_KEYS,
+        ),
         "path_line_type_counts": _count_by_property(path_lines, "type"),
         "path_line_structure_counts": _count_by_property(path_lines, "structure"),
         "path_line_layer_counts": _count_by_property(path_lines, "layer"),
         "path_line_surface_counts": _count_by_property(path_lines, "surface"),
+        "path_line_signature_counts": _count_property_signatures(path_lines, ROAD_FEATURE_SIGNATURE_KEYS),
         "step_line_structure_counts": _count_by_property(step_lines, "structure"),
         "step_line_layer_counts": _count_by_property(step_lines, "layer"),
         "step_line_surface_counts": _count_by_property(step_lines, "surface"),
+        "step_line_signature_counts": _count_property_signatures(step_lines, ROAD_FEATURE_SIGNATURE_KEYS),
         "oneway_arrow_class_counts": _count_by_property(oneway_arrow_lines, "class"),
         "oneway_arrow_structure_counts": _count_by_property(oneway_arrow_lines, "structure"),
         "oneway_arrow_layer_counts": _count_by_property(oneway_arrow_lines, "layer"),
@@ -306,17 +339,21 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("Pedestrian polygon structure counts", "pedestrian_polygon_structure_counts"),
     ("Pedestrian polygon layer counts", "pedestrian_polygon_layer_counts"),
     ("Pedestrian polygon surface counts", "pedestrian_polygon_surface_counts"),
+    ("Pedestrian polygon signatures", "pedestrian_polygon_signature_counts"),
     ("Pedestrian line type counts", "pedestrian_line_type_counts"),
     ("Pedestrian line structure counts", "pedestrian_line_structure_counts"),
     ("Pedestrian line layer counts", "pedestrian_line_layer_counts"),
     ("Pedestrian line surface counts", "pedestrian_line_surface_counts"),
+    ("Pedestrian line signatures", "pedestrian_line_signature_counts"),
     ("Path line type counts", "path_line_type_counts"),
     ("Path line structure counts", "path_line_structure_counts"),
     ("Path line layer counts", "path_line_layer_counts"),
     ("Path line surface counts", "path_line_surface_counts"),
+    ("Path line signatures", "path_line_signature_counts"),
     ("Step line structure counts", "step_line_structure_counts"),
     ("Step line layer counts", "step_line_layer_counts"),
     ("Step line surface counts", "step_line_surface_counts"),
+    ("Step line signatures", "step_line_signature_counts"),
     ("One-way arrow class counts", "oneway_arrow_class_counts"),
     ("One-way arrow structure counts", "oneway_arrow_structure_counts"),
     ("One-way arrow layer counts", "oneway_arrow_layer_counts"),
@@ -332,17 +369,21 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Polygon structures", "pedestrian_polygon_structure_counts", "---"),
     ("Polygon layers", "pedestrian_polygon_layer_counts", "---"),
     ("Polygon surfaces", "pedestrian_polygon_surface_counts", "---"),
+    ("Polygon signatures", "pedestrian_polygon_signature_counts", "---"),
     ("Pedestrian line types", "pedestrian_line_type_counts", "---"),
     ("Pedestrian line structures", "pedestrian_line_structure_counts", "---"),
     ("Pedestrian line layers", "pedestrian_line_layer_counts", "---"),
     ("Pedestrian line surfaces", "pedestrian_line_surface_counts", "---"),
+    ("Pedestrian line signatures", "pedestrian_line_signature_counts", "---"),
     ("Path line types", "path_line_type_counts", "---"),
     ("Path line structures", "path_line_structure_counts", "---"),
     ("Path line layers", "path_line_layer_counts", "---"),
     ("Path line surfaces", "path_line_surface_counts", "---"),
+    ("Path line signatures", "path_line_signature_counts", "---"),
     ("Step structures", "step_line_structure_counts", "---"),
     ("Step layers", "step_line_layer_counts", "---"),
     ("Step surfaces", "step_line_surface_counts", "---"),
+    ("Step signatures", "step_line_signature_counts", "---"),
     ("One-way arrow classes", "oneway_arrow_class_counts", "---"),
     ("One-way arrow structures", "oneway_arrow_structure_counts", "---"),
     ("One-way arrow layers", "oneway_arrow_layer_counts", "---"),
@@ -494,6 +535,10 @@ def collect_road_feature_report(
             tile_records,
             "pedestrian_polygon_surface_counts",
         ),
+        "pedestrian_polygon_signature_counts": _combined_record_counts(
+            tile_records,
+            "pedestrian_polygon_signature_counts",
+        ),
         "pedestrian_line_type_counts": _combined_record_counts(tile_records, "pedestrian_line_type_counts"),
         "pedestrian_line_structure_counts": _combined_record_counts(
             tile_records,
@@ -501,13 +546,19 @@ def collect_road_feature_report(
         ),
         "pedestrian_line_layer_counts": _combined_record_counts(tile_records, "pedestrian_line_layer_counts"),
         "pedestrian_line_surface_counts": _combined_record_counts(tile_records, "pedestrian_line_surface_counts"),
+        "pedestrian_line_signature_counts": _combined_record_counts(
+            tile_records,
+            "pedestrian_line_signature_counts",
+        ),
         "path_line_type_counts": _combined_record_counts(tile_records, "path_line_type_counts"),
         "path_line_structure_counts": _combined_record_counts(tile_records, "path_line_structure_counts"),
         "path_line_layer_counts": _combined_record_counts(tile_records, "path_line_layer_counts"),
         "path_line_surface_counts": _combined_record_counts(tile_records, "path_line_surface_counts"),
+        "path_line_signature_counts": _combined_record_counts(tile_records, "path_line_signature_counts"),
         "step_line_structure_counts": _combined_record_counts(tile_records, "step_line_structure_counts"),
         "step_line_layer_counts": _combined_record_counts(tile_records, "step_line_layer_counts"),
         "step_line_surface_counts": _combined_record_counts(tile_records, "step_line_surface_counts"),
+        "step_line_signature_counts": _combined_record_counts(tile_records, "step_line_signature_counts"),
         "oneway_arrow_class_counts": _combined_record_counts(tile_records, "oneway_arrow_class_counts"),
         "oneway_arrow_structure_counts": _combined_record_counts(tile_records, "oneway_arrow_structure_counts"),
         "oneway_arrow_layer_counts": _combined_record_counts(tile_records, "oneway_arrow_layer_counts"),
@@ -592,6 +643,10 @@ def collect_all_camera_road_feature_report(
             camera_reports,
             "pedestrian_polygon_surface_counts",
         ),
+        "pedestrian_polygon_signature_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_polygon_signature_counts",
+        ),
         "pedestrian_line_type_counts": _combined_record_counts(
             camera_reports,
             "pedestrian_line_type_counts",
@@ -608,13 +663,19 @@ def collect_all_camera_road_feature_report(
             camera_reports,
             "pedestrian_line_surface_counts",
         ),
+        "pedestrian_line_signature_counts": _combined_record_counts(
+            camera_reports,
+            "pedestrian_line_signature_counts",
+        ),
         "path_line_type_counts": _combined_record_counts(camera_reports, "path_line_type_counts"),
         "path_line_structure_counts": _combined_record_counts(camera_reports, "path_line_structure_counts"),
         "path_line_layer_counts": _combined_record_counts(camera_reports, "path_line_layer_counts"),
         "path_line_surface_counts": _combined_record_counts(camera_reports, "path_line_surface_counts"),
+        "path_line_signature_counts": _combined_record_counts(camera_reports, "path_line_signature_counts"),
         "step_line_structure_counts": _combined_record_counts(camera_reports, "step_line_structure_counts"),
         "step_line_layer_counts": _combined_record_counts(camera_reports, "step_line_layer_counts"),
         "step_line_surface_counts": _combined_record_counts(camera_reports, "step_line_surface_counts"),
+        "step_line_signature_counts": _combined_record_counts(camera_reports, "step_line_signature_counts"),
         "oneway_arrow_class_counts": _combined_record_counts(camera_reports, "oneway_arrow_class_counts"),
         "oneway_arrow_structure_counts": _combined_record_counts(camera_reports, "oneway_arrow_structure_counts"),
         "oneway_arrow_layer_counts": _combined_record_counts(camera_reports, "oneway_arrow_layer_counts"),
