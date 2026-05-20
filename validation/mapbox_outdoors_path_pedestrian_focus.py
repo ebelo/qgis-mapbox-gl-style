@@ -277,10 +277,8 @@ def qgis_path_pedestrian_style_summary(
             visible_line_layers,
             "line-opacity",
         ),
-        "qgis_path_pedestrian_layer_ids": [str(layer.get("id") or "") for layer in layers[:SAMPLE_LAYER_LIMIT]],
-        "qgis_path_pedestrian_visible_layer_ids": [
-            str(layer.get("id") or "") for layer in visible_layers[:SAMPLE_LAYER_LIMIT]
-        ],
+        "qgis_path_pedestrian_layer_ids": [str(layer.get("id") or "") for layer in layers],
+        "qgis_path_pedestrian_visible_layer_ids": [str(layer.get("id") or "") for layer in visible_layers],
         "qgis_path_pedestrian_line_width_samples": _layer_control_sample(line_layers, "line-width"),
         "qgis_path_pedestrian_line_color_samples": _layer_control_sample(line_layers, "line-color"),
         "qgis_path_pedestrian_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),

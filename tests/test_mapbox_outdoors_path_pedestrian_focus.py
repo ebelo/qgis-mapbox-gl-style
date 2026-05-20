@@ -292,6 +292,25 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             summary["qgis_path_pedestrian_line_dasharray_layer_count"],
         )
 
+    def test_qgis_style_summary_keeps_full_layer_id_lists(self):
+        style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": f"road-path-test-{index}",
+                    "type": "line",
+                    "paint": {"line-width": index + 1},
+                }
+                for index in range(10)
+            ],
+        }
+
+        summary = qgis_path_pedestrian_style_summary(style)
+
+        expected_ids = [f"road-path-test-{index}" for index in range(10)]
+        self.assertEqual(summary["qgis_path_pedestrian_layer_ids"], expected_ids)
+        self.assertEqual(summary["qgis_path_pedestrian_visible_layer_ids"], expected_ids)
+
     def test_build_path_pedestrian_focus_report_cross_links_feature_counts_and_qgis_style(self):
         report = build_path_pedestrian_focus_report(
             _road_feature_report(),
