@@ -50,12 +50,12 @@ _MAPBOX_DEFAULT_SYMBOL_SPACING_PX = 250.0
 _ROAD_LABEL_LOW_ZOOM_SYMBOL_SPACING_PX = 150.0
 _ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING_PX = 400.0
 _ROAD_NUMBER_SHIELD_Z11_PLUS_SYMBOL_SPACING_PX = 1400.0 / 3.0
+_PATH_PEDESTRIAN_LABEL_SYMBOL_SPACING_PX = 400.0
 _REPEAT_DISTANCE_EPSILON_MM = 0.001
 _LINE_CENTER_ANCHOR_PERCENT = 0.5
 _LINE_CENTER_ANCHOR_PERCENT_EPSILON = 0.000001
 _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
     "ferry-aerialway-label",
-    "path-pedestrian-label",
 }
 _LINE_LABEL_MERGE_LAYERS = {
     "contour-label",
@@ -129,6 +129,8 @@ def _label_repeat_distance(layer_name: str, style) -> float | None:
         if style_name == "road-label-z15-plus":
             return _symbol_spacing_mm(_ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING_PX)
         return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
+    if layer_name == "path-pedestrian-label":
+        return _symbol_spacing_mm(_PATH_PEDESTRIAN_LABEL_SYMBOL_SPACING_PX)
     if layer_name in _LINE_LABEL_REPEAT_DISTANCE_LAYERS:
         return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
     if layer_name != "waterway-label":
