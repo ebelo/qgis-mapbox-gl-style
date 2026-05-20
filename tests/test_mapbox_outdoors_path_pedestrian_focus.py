@@ -16,6 +16,7 @@ from qfit.validation.mapbox_outdoors_path_pedestrian_focus import (
     build_summary_markdown,
     load_json_object,
     main,
+    qgis_style_paths_from_comparison_summary,
     qgis_path_pedestrian_style_summary,
     write_report,
 )
@@ -66,17 +67,21 @@ def _qgis_preprocessed_style():
                 "id": "road-path",
                 "type": "line",
                 "filter": ["==", ["get", "class"], "path"],
-                "paint": {"line-width": 1.5, "line-dasharray": [1, 1]},
+                "paint": {"line-color": "#d8c6a3", "line-width": 1.5, "line-dasharray": [1, 1]},
             },
             {
                 "id": "road-pedestrian",
                 "type": "line",
-                "paint": {"line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5], "line-opacity": 0.65},
+                "paint": {
+                    "line-color": "#f6f2e8",
+                    "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5],
+                    "line-opacity": 0.65,
+                },
             },
             {
                 "id": "road-steps",
                 "type": "line",
-                "paint": {"line-dasharray": [0.2, 1]},
+                "paint": {"line-color": "#8f7054", "line-dasharray": [0.2, 1]},
             },
             {
                 "id": "road-pedestrian-polygon",
@@ -115,6 +120,105 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_json_object(json_path)
 
+    def test_qgis_style_paths_from_comparison_summary_reads_manifest_outputs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_root = root / "comparison"
+            run_dir = comparison_root / "camera" / "20260520T003504Z"
+            run_dir.mkdir(parents=True)
+            style_path = run_dir / "qgis-preprocessed-style.json"
+            manifest_path = run_dir / "manifest.json"
+            style_path.write_text(json.dumps(_qgis_preprocessed_style()), encoding="utf-8")
+            manifest_path.write_text(
+                json.dumps({"outputs": {"qgis_preprocessed_style": str(style_path)}}),
+                encoding="utf-8",
+            )
+            comparison_summary = {
+                "cameras": [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "manifest": str(manifest_path),
+                    }
+                ]
+            }
+
+            paths = qgis_style_paths_from_comparison_summary(
+                comparison_summary,
+                summary_path=comparison_root / "all-cameras" / "summary.json",
+            )
+
+            self.assertEqual(paths, {"chamonix-trails-z14-outdoors": style_path.resolve()})
+
+    def test_qgis_style_paths_from_comparison_summary_rejects_untrusted_manifest_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            comparison_root = Path(tmpdir) / "comparison"
+            comparison_summary = {
+                "cameras": [
+                    {
+                        "camera": "bad-camera",
+                        "manifest": "/tmp/outside-manifest.json",
+                    }
+                ]
+            }
+
+            with self.assertRaises(ValueError):
+                qgis_style_paths_from_comparison_summary(
+                    comparison_summary,
+                    summary_path=comparison_root / "all-cameras" / "summary.json",
+                )
+
+    def test_qgis_style_paths_from_comparison_summary_rejects_untrusted_style_paths_with_explicit_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            comparison_root = Path(tmpdir) / "comparison"
+            run_dir = comparison_root / "camera" / "20260520T003504Z"
+            run_dir.mkdir(parents=True)
+            manifest_path = run_dir / "manifest.json"
+            manifest_path.write_text(
+                json.dumps({"outputs": {"qgis_preprocessed_style": "/tmp/outside-style.json"}}),
+                encoding="utf-8",
+            )
+            comparison_summary = {
+                "cameras": [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "manifest": str(manifest_path),
+                    }
+                ]
+            }
+
+            with self.assertRaises(ValueError) as raised:
+                qgis_style_paths_from_comparison_summary(
+                    comparison_summary,
+                    summary_path=comparison_root / "all-cameras" / "summary.json",
+                )
+
+            self.assertIn("/tmp/outside-style.json", str(raised.exception))
+
+    def test_qgis_style_paths_from_comparison_summary_rejects_untrusted_style_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            manifest_path = root / "camera" / "manifest.json"
+            manifest_path.parent.mkdir(parents=True)
+            manifest_path.write_text(
+                json.dumps({"outputs": {"qgis_preprocessed_style": "/tmp/outside-style.json"}}),
+                encoding="utf-8",
+            )
+            comparison_summary = {
+                "cameras": [
+                    {
+                        "camera": "bad-camera",
+                        "manifest": str(manifest_path),
+                    }
+                ]
+            }
+
+            with self.assertRaisesRegex(ValueError, "/tmp/outside-style.json"):
+                qgis_style_paths_from_comparison_summary(
+                    comparison_summary,
+                    summary_path=root / "summary.json",
+                    trusted_root=root,
+                )
+
     def test_qgis_path_pedestrian_style_summary_counts_current_style_controls(self):
         summary = qgis_path_pedestrian_style_summary(_qgis_preprocessed_style())
 
@@ -124,6 +228,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(summary["qgis_path_pedestrian_fill_layer_count"], 1)
         self.assertEqual(summary["qgis_path_pedestrian_filter_layer_count"], 2)
         self.assertEqual(summary["qgis_path_pedestrian_line_width_layer_count"], 2)
+        self.assertEqual(summary["qgis_path_pedestrian_line_color_layer_count"], 3)
+        self.assertEqual(summary["qgis_path_pedestrian_fill_color_layer_count"], 1)
         self.assertEqual(summary["qgis_path_pedestrian_line_dasharray_layer_count"], 2)
         self.assertEqual(summary["qgis_path_pedestrian_line_opacity_layer_count"], 1)
         self.assertEqual(
@@ -131,6 +237,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             ["road-path", "road-pedestrian", "road-steps", "road-pedestrian-polygon"],
         )
         self.assertIn("road-path=1.5", summary["qgis_path_pedestrian_line_width_samples"])
+        self.assertIn('road-path="#d8c6a3"', summary["qgis_path_pedestrian_line_color_samples"])
+        self.assertIn('road-pedestrian-polygon="#f6f2e8"', summary["qgis_path_pedestrian_fill_color_samples"])
 
     def test_build_path_pedestrian_focus_report_cross_links_feature_counts_and_qgis_style(self):
         report = build_path_pedestrian_focus_report(
@@ -199,6 +307,9 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn('"trail=69"', markdown)
         self.assertIn('"status=available"', markdown)
         self.assertIn('"total=4"', markdown)
+        self.assertIn('"line_colors=3"', markdown)
+        self.assertIn('"fill_colors=1"', markdown)
+        self.assertIn('"road-pedestrian-polygon=\\"#f6f2e8\\""', markdown)
         self.assertIn('"road-pedestrian-polygon"', markdown)
 
     def test_build_summary_markdown_handles_no_focus_rows(self):
@@ -263,6 +374,57 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             self.assertEqual(summary_path.parent.parent, output_root)
             report_path = summary_path.parent / "path-pedestrian-focus.json"
             self.assertEqual(json.loads(report_path.read_text(encoding="utf-8"))["camera_count"], 1)
+
+    def test_main_loads_qgis_styles_from_comparison_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            road_features_path = root / "road-features.json"
+            run_dir = root / "comparison" / "chamonix-trails-z14-outdoors" / "20260520T003504Z"
+            run_dir.mkdir(parents=True)
+            style_path = run_dir / "qgis-preprocessed-style.json"
+            manifest_path = run_dir / "manifest.json"
+            comparison_summary_path = root / "comparison" / "all-cameras" / "summary.json"
+            comparison_summary_path.parent.mkdir(parents=True)
+            road_features_path.write_text(json.dumps(_road_feature_report()), encoding="utf-8")
+            style_path.write_text(json.dumps(_qgis_preprocessed_style()), encoding="utf-8")
+            manifest_path.write_text(
+                json.dumps({"outputs": {"qgis_preprocessed_style": str(style_path)}}),
+                encoding="utf-8",
+            )
+            comparison_summary_path.write_text(
+                json.dumps(
+                    {
+                        "cameras": [
+                            {
+                                "camera": "chamonix-trails-z14-outdoors",
+                                "manifest": str(manifest_path),
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output_root = root / "out"
+
+            stdout = io.StringIO()
+            with patch(
+                "qfit.validation.mapbox_outdoors_path_pedestrian_focus.DEFAULT_OUTPUT_ROOT",
+                output_root,
+            ), redirect_stdout(stdout):
+                result = main(
+                    [
+                        "--road-features-json",
+                        str(road_features_path),
+                        "--comparison-summary-json",
+                        str(comparison_summary_path),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            report_path = Path(stdout.getvalue().strip()).parent / "path-pedestrian-focus.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["qgis_style_camera_count"], 1)
+            self.assertEqual(report["qgis_style_input_count"], 1)
 
     def test_main_reports_missing_input_without_traceback(self):
         stderr = io.StringIO()

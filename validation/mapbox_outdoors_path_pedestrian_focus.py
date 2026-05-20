@@ -15,6 +15,7 @@ if package_parent not in sys.path:
     sys.path.insert(0, package_parent)
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-path-pedestrian-focus"
+DEFAULT_COMPARISON_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-comparison"
 DEFAULT_ROAD_FEATURES_PATH = (
     REPO_ROOT
     / "debug"
@@ -68,6 +69,66 @@ def load_json_object(path: Path) -> dict[str, object]:
     if not isinstance(loaded, dict):
         raise ValueError(f"Expected JSON object in {path}")
     return loaded
+
+
+def _resolve_trusted_debug_path(raw_path: str, *, base_dir: Path, trusted_root: Path) -> Path:
+    path = Path(raw_path)
+    candidate = path if path.is_absolute() else base_dir / path
+    resolved = candidate.resolve()
+    if not resolved.is_relative_to(trusted_root.resolve()):
+        raise ValueError(f"Comparison artifact path must stay under {trusted_root}: {resolved}")
+    return resolved
+
+
+def _trusted_root_for_comparison_summary(summary_path: Path) -> Path:
+    resolved = summary_path.resolve()
+    for parent in resolved.parents:
+        if parent.name == "all-cameras":
+            return parent.parent
+    return DEFAULT_COMPARISON_OUTPUT_ROOT
+
+
+def qgis_style_paths_from_comparison_summary(
+    comparison_summary: Mapping[str, object],
+    *,
+    summary_path: Path | None = None,
+    trusted_root: Path | None = None,
+) -> dict[str, Path]:
+    if trusted_root is not None:
+        root = trusted_root
+    elif summary_path is not None:
+        root = _trusted_root_for_comparison_summary(summary_path)
+    else:
+        root = DEFAULT_COMPARISON_OUTPUT_ROOT
+    base_dir = Path.cwd() if summary_path is None else summary_path.parent
+    cameras = comparison_summary.get("cameras")
+    rows = cameras if isinstance(cameras, list) else []
+    paths: dict[str, Path] = {}
+    for camera_report in rows:
+        if not isinstance(camera_report, Mapping):
+            continue
+        camera_name = camera_report.get("camera")
+        manifest_value = camera_report.get("manifest")
+        if not isinstance(camera_name, str) or not isinstance(manifest_value, str):
+            continue
+        manifest_path = _resolve_trusted_debug_path(
+            manifest_value,
+            base_dir=base_dir,
+            trusted_root=root,
+        )
+        manifest = load_json_object(manifest_path)  # NOSONAR - checked against the comparison debug root above.
+        outputs = manifest.get("outputs")
+        if not isinstance(outputs, Mapping):
+            continue
+        style_value = outputs.get("qgis_preprocessed_style")
+        if not isinstance(style_value, str):
+            continue
+        paths[camera_name] = _resolve_trusted_debug_path(
+            style_value,
+            base_dir=manifest_path.parent,
+            trusted_root=root,
+        )
+    return paths
 
 
 def _compact_json(value: object, *, max_length: int = 110) -> str:
@@ -159,6 +220,12 @@ def qgis_path_pedestrian_style_summary(style: Mapping[str, object]) -> dict[str,
         "qgis_path_pedestrian_line_width_layer_count": sum(
             1 for layer in line_layers if "line-width" in _layer_paint(layer)
         ),
+        "qgis_path_pedestrian_line_color_layer_count": sum(
+            1 for layer in line_layers if "line-color" in _layer_paint(layer)
+        ),
+        "qgis_path_pedestrian_fill_color_layer_count": sum(
+            1 for layer in fill_layers if "fill-color" in _layer_paint(layer)
+        ),
         "qgis_path_pedestrian_line_dasharray_layer_count": sum(
             1 for layer in line_layers if "line-dasharray" in _layer_paint(layer)
         ),
@@ -167,6 +234,8 @@ def qgis_path_pedestrian_style_summary(style: Mapping[str, object]) -> dict[str,
         ),
         "qgis_path_pedestrian_layer_ids": [str(layer.get("id") or "") for layer in layers[:SAMPLE_LAYER_LIMIT]],
         "qgis_path_pedestrian_line_width_samples": _layer_control_sample(line_layers, "line-width"),
+        "qgis_path_pedestrian_line_color_samples": _layer_control_sample(line_layers, "line-color"),
+        "qgis_path_pedestrian_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),
         "qgis_path_pedestrian_line_dasharray_samples": _layer_control_sample(line_layers, "line-dasharray"),
     }
 
@@ -179,10 +248,14 @@ def _missing_qgis_style_summary() -> dict[str, object]:
         "qgis_path_pedestrian_fill_layer_count": 0,
         "qgis_path_pedestrian_filter_layer_count": 0,
         "qgis_path_pedestrian_line_width_layer_count": 0,
+        "qgis_path_pedestrian_line_color_layer_count": 0,
+        "qgis_path_pedestrian_fill_color_layer_count": 0,
         "qgis_path_pedestrian_line_dasharray_layer_count": 0,
         "qgis_path_pedestrian_line_opacity_layer_count": 0,
         "qgis_path_pedestrian_layer_ids": [],
         "qgis_path_pedestrian_line_width_samples": [],
+        "qgis_path_pedestrian_line_color_samples": [],
+        "qgis_path_pedestrian_fill_color_samples": [],
         "qgis_path_pedestrian_line_dasharray_samples": [],
     }
 
@@ -265,9 +338,22 @@ def _qgis_control_summary(camera: Mapping[str, object]) -> list[str]:
     return [
         f"filters={camera.get('qgis_path_pedestrian_filter_layer_count', 0)}",
         f"widths={camera.get('qgis_path_pedestrian_line_width_layer_count', 0)}",
+        f"line_colors={camera.get('qgis_path_pedestrian_line_color_layer_count', 0)}",
+        f"fill_colors={camera.get('qgis_path_pedestrian_fill_color_layer_count', 0)}",
         f"dashes={camera.get('qgis_path_pedestrian_line_dasharray_layer_count', 0)}",
         f"opacities={camera.get('qgis_path_pedestrian_line_opacity_layer_count', 0)}",
     ]
+
+
+def _qgis_color_samples(camera: Mapping[str, object]) -> list[str]:
+    line_samples = camera.get("qgis_path_pedestrian_line_color_samples")
+    fill_samples = camera.get("qgis_path_pedestrian_fill_color_samples")
+    samples = []
+    if isinstance(line_samples, list):
+        samples.extend(str(sample) for sample in line_samples[:1])
+    if isinstance(fill_samples, list):
+        samples.extend(str(sample) for sample in fill_samples[:1])
+    return samples
 
 
 def build_summary_markdown(report: Mapping[str, object]) -> str:
@@ -296,8 +382,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         return "\n".join(lines) + "\n"
     lines.extend(
         [
-            "| Camera | Camera zoom | Tile zoom | Feature counts | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample QGIS layer ids |",
-            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
+            "| Camera | Camera zoom | Tile zoom | Feature counts | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample QGIS colors | Sample QGIS layer ids |",
+            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for camera in rows:
@@ -327,6 +413,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     camera.get("top_step_signatures"),
                     qgis_layers,
                     _qgis_control_summary(camera),
+                    _qgis_color_samples(camera),
                     camera.get("qgis_path_pedestrian_layer_ids"),
                 ]
             )
@@ -386,6 +473,16 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CAMERA=PATH",
         help="Camera-specific qgis-preprocessed-style.json. May be repeated.",
     )
+    parser.add_argument(
+        "--comparison-summary-json",
+        action="append",
+        default=[],
+        type=Path,
+        help=(
+            "All-camera comparison summary.json whose manifests identify camera-specific "
+            "qgis-preprocessed-style.json artifacts. May be repeated."
+        ),
+    )
     return parser
 
 
@@ -401,6 +498,22 @@ def _load_cli_json_object(parser: argparse.ArgumentParser, path: Path, *, label:
     raise AssertionError("argparse error should exit")
 
 
+def _qgis_style_paths_from_cli_comparison_summary(
+    parser: argparse.ArgumentParser,
+    path: Path,
+) -> dict[str, Path]:
+    comparison_summary = _load_cli_json_object(parser, path, label="Comparison summary JSON")
+    try:
+        return qgis_style_paths_from_comparison_summary(comparison_summary, summary_path=path)
+    except FileNotFoundError as error:
+        parser.error(f"Comparison manifest not found: {error.filename}")
+    except json.JSONDecodeError as error:
+        parser.error(f"Comparison manifest is not valid JSON: {error.msg}")
+    except ValueError as error:
+        parser.error(str(error))
+    raise AssertionError("argparse error should exit")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -409,9 +522,15 @@ def main(argv: list[str] | None = None) -> int:
         args.road_features_json,
         label="Road features JSON",
     )
+    qgis_style_paths_by_camera: dict[str, Path] = {}
+    for comparison_summary_path in args.comparison_summary_json:
+        qgis_style_paths_by_camera.update(
+            _qgis_style_paths_from_cli_comparison_summary(parser, comparison_summary_path)
+        )
+    qgis_style_paths_by_camera.update(dict(args.qgis_style_json))
     qgis_styles_by_camera = {
         camera: _load_cli_json_object(parser, path, label=f"QGIS style JSON for {camera}")
-        for camera, path in args.qgis_style_json
+        for camera, path in qgis_style_paths_by_camera.items()
     }
     report = build_path_pedestrian_focus_report(
         road_feature_report,
