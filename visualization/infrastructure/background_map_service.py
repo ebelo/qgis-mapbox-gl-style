@@ -85,6 +85,9 @@ _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_EXPRESSION = (
 )
 _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_FILTER = '("index" = 5 OR "index" = 10)'
 _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_MIN_ZOOM = 17
+_CONTOUR_LABEL_MAX_ZOOM_BEFORE_BBOX_EDGE_DIFFERENCE = (
+    _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_MIN_ZOOM - 1
+)
 
 
 def _label_style_mapbox_layer_id(style) -> str:
@@ -394,20 +397,24 @@ def _append_high_zoom_contour_bbox_edge_label_style(
     qgs_vector_tile_labeling_style,
     qgis,
 ) -> bool:
-    if any(
+    has_bbox_edge_style = any(
         _label_style_name(style) == _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_STYLE_NAME
         for style in styles
-    ):
-        return False
+    )
 
+    source_style = None
     source_settings = None
     for style in styles:
         if _label_style_mapbox_layer_id(style) != _CONTOUR_LABEL_LAYER_ID:
             continue
+        source_style = style
         source_settings = style.labelSettings()
         break
     if source_settings is None or not _is_contour_elevation_label(source_settings):
         return False
+
+    if has_bbox_edge_style:
+        return _cap_source_contour_label_before_bbox_edge(source_style)
 
     try:
         settings = qgs_pal_layer_settings(source_settings)
@@ -432,7 +439,28 @@ def _append_high_zoom_contour_bbox_edge_label_style(
     style.setFilterExpression(_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_FILTER)
     style.setMinZoomLevel(_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_MIN_ZOOM)
     style.setLabelSettings(settings)
+    _cap_source_contour_label_before_bbox_edge(source_style)
     styles.append(style)
+    return True
+
+
+def _cap_source_contour_label_before_bbox_edge(style) -> bool:
+    if style is None:
+        return False
+    target_max_zoom = _CONTOUR_LABEL_MAX_ZOOM_BEFORE_BBOX_EDGE_DIFFERENCE
+    try:
+        current_max_zoom = style.maxZoomLevel()
+    except (AttributeError, RuntimeError, TypeError):
+        current_max_zoom = None
+    if isinstance(current_max_zoom, int) and 0 <= current_max_zoom <= target_max_zoom:
+        return False
+    set_max_zoom_level = getattr(style, "setMaxZoomLevel", None)
+    if not callable(set_max_zoom_level):
+        return False
+    try:
+        set_max_zoom_level(target_max_zoom)
+    except (RuntimeError, TypeError):
+        return False
     return True
 
 
