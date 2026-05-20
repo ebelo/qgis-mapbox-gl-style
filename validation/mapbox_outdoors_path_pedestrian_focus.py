@@ -194,6 +194,24 @@ def _layer_paint(layer: Mapping[str, object]) -> Mapping[str, object]:
     return paint if isinstance(paint, Mapping) else {}
 
 
+def _numeric_zoom(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _layer_is_visible_at_zoom(layer: Mapping[str, object], camera_zoom: float | None) -> bool:
+    if camera_zoom is None:
+        return True
+    minzoom = _numeric_zoom(layer.get("minzoom"))
+    maxzoom = _numeric_zoom(layer.get("maxzoom"))
+    if minzoom is not None and camera_zoom < minzoom:
+        return False
+    return not (maxzoom is not None and camera_zoom >= maxzoom)
+
+
 def _layer_control_sample(layers: Iterable[Mapping[str, object]], property_name: str) -> list[str]:
     samples: list[str] = []
     for layer in layers:
@@ -207,36 +225,82 @@ def _layer_control_sample(layers: Iterable[Mapping[str, object]], property_name:
     return samples
 
 
-def qgis_path_pedestrian_style_summary(style: Mapping[str, object]) -> dict[str, object]:
+def _style_control_count(layers: Iterable[Mapping[str, object]], property_name: str) -> int:
+    return sum(1 for layer in layers if property_name in _layer_paint(layer))
+
+
+def qgis_path_pedestrian_style_summary(
+    style: Mapping[str, object],
+    *,
+    camera_zoom: float | None = None,
+) -> dict[str, object]:
     layers = [layer for layer in _style_layers(style) if _is_path_pedestrian_style_layer(layer)]
     line_layers = [layer for layer in layers if layer.get("type") == "line"]
     fill_layers = [layer for layer in layers if layer.get("type") == "fill"]
+    visible_layers = [layer for layer in layers if _layer_is_visible_at_zoom(layer, camera_zoom)]
+    visible_line_layers = [layer for layer in visible_layers if layer.get("type") == "line"]
+    visible_fill_layers = [layer for layer in visible_layers if layer.get("type") == "fill"]
     return {
         "qgis_style_status": "available",
         "qgis_path_pedestrian_layer_count": len(layers),
         "qgis_path_pedestrian_line_layer_count": len(line_layers),
         "qgis_path_pedestrian_fill_layer_count": len(fill_layers),
         "qgis_path_pedestrian_filter_layer_count": sum(1 for layer in layers if layer.get("filter") is not None),
-        "qgis_path_pedestrian_line_width_layer_count": sum(
-            1 for layer in line_layers if "line-width" in _layer_paint(layer)
+        "qgis_path_pedestrian_line_width_layer_count": _style_control_count(line_layers, "line-width"),
+        "qgis_path_pedestrian_line_color_layer_count": _style_control_count(line_layers, "line-color"),
+        "qgis_path_pedestrian_fill_color_layer_count": _style_control_count(fill_layers, "fill-color"),
+        "qgis_path_pedestrian_line_dasharray_layer_count": _style_control_count(line_layers, "line-dasharray"),
+        "qgis_path_pedestrian_line_opacity_layer_count": _style_control_count(line_layers, "line-opacity"),
+        "qgis_path_pedestrian_visible_layer_count": len(visible_layers),
+        "qgis_path_pedestrian_visible_line_layer_count": len(visible_line_layers),
+        "qgis_path_pedestrian_visible_fill_layer_count": len(visible_fill_layers),
+        "qgis_path_pedestrian_visible_filter_layer_count": sum(
+            1 for layer in visible_layers if layer.get("filter") is not None
         ),
-        "qgis_path_pedestrian_line_color_layer_count": sum(
-            1 for layer in line_layers if "line-color" in _layer_paint(layer)
+        "qgis_path_pedestrian_visible_line_width_layer_count": _style_control_count(
+            visible_line_layers,
+            "line-width",
         ),
-        "qgis_path_pedestrian_fill_color_layer_count": sum(
-            1 for layer in fill_layers if "fill-color" in _layer_paint(layer)
+        "qgis_path_pedestrian_visible_line_color_layer_count": _style_control_count(
+            visible_line_layers,
+            "line-color",
         ),
-        "qgis_path_pedestrian_line_dasharray_layer_count": sum(
-            1 for layer in line_layers if "line-dasharray" in _layer_paint(layer)
+        "qgis_path_pedestrian_visible_fill_color_layer_count": _style_control_count(
+            visible_fill_layers,
+            "fill-color",
         ),
-        "qgis_path_pedestrian_line_opacity_layer_count": sum(
-            1 for layer in line_layers if "line-opacity" in _layer_paint(layer)
+        "qgis_path_pedestrian_visible_line_dasharray_layer_count": _style_control_count(
+            visible_line_layers,
+            "line-dasharray",
+        ),
+        "qgis_path_pedestrian_visible_line_opacity_layer_count": _style_control_count(
+            visible_line_layers,
+            "line-opacity",
         ),
         "qgis_path_pedestrian_layer_ids": [str(layer.get("id") or "") for layer in layers[:SAMPLE_LAYER_LIMIT]],
+        "qgis_path_pedestrian_visible_layer_ids": [
+            str(layer.get("id") or "") for layer in visible_layers[:SAMPLE_LAYER_LIMIT]
+        ],
         "qgis_path_pedestrian_line_width_samples": _layer_control_sample(line_layers, "line-width"),
         "qgis_path_pedestrian_line_color_samples": _layer_control_sample(line_layers, "line-color"),
         "qgis_path_pedestrian_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),
         "qgis_path_pedestrian_line_dasharray_samples": _layer_control_sample(line_layers, "line-dasharray"),
+        "qgis_path_pedestrian_visible_line_width_samples": _layer_control_sample(
+            visible_line_layers,
+            "line-width",
+        ),
+        "qgis_path_pedestrian_visible_line_color_samples": _layer_control_sample(
+            visible_line_layers,
+            "line-color",
+        ),
+        "qgis_path_pedestrian_visible_fill_color_samples": _layer_control_sample(
+            visible_fill_layers,
+            "fill-color",
+        ),
+        "qgis_path_pedestrian_visible_line_dasharray_samples": _layer_control_sample(
+            visible_line_layers,
+            "line-dasharray",
+        ),
     }
 
 
@@ -252,11 +316,25 @@ def _missing_qgis_style_summary() -> dict[str, object]:
         "qgis_path_pedestrian_fill_color_layer_count": 0,
         "qgis_path_pedestrian_line_dasharray_layer_count": 0,
         "qgis_path_pedestrian_line_opacity_layer_count": 0,
+        "qgis_path_pedestrian_visible_layer_count": 0,
+        "qgis_path_pedestrian_visible_line_layer_count": 0,
+        "qgis_path_pedestrian_visible_fill_layer_count": 0,
+        "qgis_path_pedestrian_visible_filter_layer_count": 0,
+        "qgis_path_pedestrian_visible_line_width_layer_count": 0,
+        "qgis_path_pedestrian_visible_line_color_layer_count": 0,
+        "qgis_path_pedestrian_visible_fill_color_layer_count": 0,
+        "qgis_path_pedestrian_visible_line_dasharray_layer_count": 0,
+        "qgis_path_pedestrian_visible_line_opacity_layer_count": 0,
         "qgis_path_pedestrian_layer_ids": [],
+        "qgis_path_pedestrian_visible_layer_ids": [],
         "qgis_path_pedestrian_line_width_samples": [],
         "qgis_path_pedestrian_line_color_samples": [],
         "qgis_path_pedestrian_fill_color_samples": [],
         "qgis_path_pedestrian_line_dasharray_samples": [],
+        "qgis_path_pedestrian_visible_line_width_samples": [],
+        "qgis_path_pedestrian_visible_line_color_samples": [],
+        "qgis_path_pedestrian_visible_fill_color_samples": [],
+        "qgis_path_pedestrian_visible_line_dasharray_samples": [],
     }
 
 
@@ -280,7 +358,12 @@ def _camera_focus_row(
         "top_path_signatures": _top_count_labels(camera_report.get("path_line_signature_counts")),
         "top_step_signatures": _top_count_labels(camera_report.get("step_line_signature_counts")),
     }
-    row.update(qgis_path_pedestrian_style_summary(qgis_style) if qgis_style is not None else _missing_qgis_style_summary())
+    camera_zoom = _numeric_zoom(camera_report.get("camera_zoom"))
+    row.update(
+        qgis_path_pedestrian_style_summary(qgis_style, camera_zoom=camera_zoom)
+        if qgis_style is not None
+        else _missing_qgis_style_summary()
+    )
     return row
 
 
@@ -324,7 +407,7 @@ def _markdown_cell(value: object) -> str:
     if value is None or value == "":
         text = "-"
     elif isinstance(value, list):
-        text = _compact_json(value)
+        text = _compact_json(value, max_length=160)
     else:
         text = str(value)
     return text.replace("\n", " ").replace("|", "\\|")
@@ -337,17 +420,20 @@ def _markdown_table_row(cells: Iterable[object]) -> str:
 def _qgis_control_summary(camera: Mapping[str, object]) -> list[str]:
     return [
         f"filters={camera.get('qgis_path_pedestrian_filter_layer_count', 0)}",
+        f"visible_filters={camera.get('qgis_path_pedestrian_visible_filter_layer_count', 0)}",
         f"widths={camera.get('qgis_path_pedestrian_line_width_layer_count', 0)}",
+        f"visible_widths={camera.get('qgis_path_pedestrian_visible_line_width_layer_count', 0)}",
+        f"dashes={camera.get('qgis_path_pedestrian_line_dasharray_layer_count', 0)}",
+        f"visible_dashes={camera.get('qgis_path_pedestrian_visible_line_dasharray_layer_count', 0)}",
         f"line_colors={camera.get('qgis_path_pedestrian_line_color_layer_count', 0)}",
         f"fill_colors={camera.get('qgis_path_pedestrian_fill_color_layer_count', 0)}",
-        f"dashes={camera.get('qgis_path_pedestrian_line_dasharray_layer_count', 0)}",
         f"opacities={camera.get('qgis_path_pedestrian_line_opacity_layer_count', 0)}",
     ]
 
 
 def _qgis_color_samples(camera: Mapping[str, object]) -> list[str]:
-    line_samples = camera.get("qgis_path_pedestrian_line_color_samples")
-    fill_samples = camera.get("qgis_path_pedestrian_fill_color_samples")
+    line_samples = camera.get("qgis_path_pedestrian_visible_line_color_samples")
+    fill_samples = camera.get("qgis_path_pedestrian_visible_fill_color_samples")
     samples = []
     if isinstance(line_samples, list):
         samples.extend(str(sample) for sample in line_samples[:1])
@@ -375,6 +461,10 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "Cross-links decoded road-feature counts with the camera-specific QGIS-preprocessed "
             "style layers that can render path, pedestrian, trail, piste, or step features."
         ),
+        (
+            "Visible QGIS counts apply the camera zoom to style-layer minzoom/maxzoom, "
+            "so zoom-banded preprocessing can be reviewed against the layers active in each camera."
+        ),
         "",
     ]
     if not rows:
@@ -382,7 +472,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         return "\n".join(lines) + "\n"
     lines.extend(
         [
-            "| Camera | Camera zoom | Tile zoom | Feature counts | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample QGIS colors | Sample QGIS layer ids |",
+            "| Camera | Camera zoom | Tile zoom | Feature counts | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample visible QGIS colors | Sample visible QGIS layer ids |",
             "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
@@ -398,6 +488,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         qgis_layers = [
             f"status={camera.get('qgis_style_status')}",
             f"total={camera.get('qgis_path_pedestrian_layer_count', 0)}",
+            f"visible={camera.get('qgis_path_pedestrian_visible_layer_count', 0)}",
             f"line={camera.get('qgis_path_pedestrian_line_layer_count', 0)}",
             f"fill={camera.get('qgis_path_pedestrian_fill_layer_count', 0)}",
         ]
@@ -414,7 +505,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     qgis_layers,
                     _qgis_control_summary(camera),
                     _qgis_color_samples(camera),
-                    camera.get("qgis_path_pedestrian_layer_ids"),
+                    camera.get("qgis_path_pedestrian_visible_layer_ids"),
                 ]
             )
         )
