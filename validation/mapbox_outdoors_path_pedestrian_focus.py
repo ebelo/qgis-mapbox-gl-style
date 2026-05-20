@@ -30,6 +30,14 @@ PATH_PEDESTRIAN_LAYER_ID_MARKERS = (
     "road-steps",
 )
 PATH_PEDESTRIAN_STYLE_TYPES = {"fill", "line"}
+PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
+    "line-width",
+    "line-color",
+    "line-dasharray",
+    "line-opacity",
+    "fill-color",
+    "fill-opacity",
+)
 TOP_COUNT_LIMIT = 3
 SAMPLE_LAYER_LIMIT = 8
 
@@ -229,6 +237,22 @@ def _style_control_count(layers: Iterable[Mapping[str, object]], property_name: 
     return sum(1 for layer in layers if property_name in _layer_paint(layer))
 
 
+def _layer_detail(layer: Mapping[str, object]) -> dict[str, object]:
+    detail = {
+        "id": str(layer.get("id") or ""),
+        "type": layer.get("type"),
+    }
+    for key in ("minzoom", "maxzoom", "filter"):
+        value = layer.get(key)
+        if value is not None:
+            detail[key] = value
+    paint = _layer_paint(layer)
+    for key in PATH_PEDESTRIAN_DETAIL_PAINT_KEYS:
+        if key in paint:
+            detail[key] = paint[key]
+    return detail
+
+
 def qgis_path_pedestrian_style_summary(
     style: Mapping[str, object],
     *,
@@ -279,6 +303,8 @@ def qgis_path_pedestrian_style_summary(
         ),
         "qgis_path_pedestrian_layer_ids": [str(layer.get("id") or "") for layer in layers],
         "qgis_path_pedestrian_visible_layer_ids": [str(layer.get("id") or "") for layer in visible_layers],
+        "qgis_path_pedestrian_layer_details": [_layer_detail(layer) for layer in layers],
+        "qgis_path_pedestrian_visible_layer_details": [_layer_detail(layer) for layer in visible_layers],
         "qgis_path_pedestrian_line_width_samples": _layer_control_sample(line_layers, "line-width"),
         "qgis_path_pedestrian_line_color_samples": _layer_control_sample(line_layers, "line-color"),
         "qgis_path_pedestrian_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),
@@ -325,6 +351,8 @@ def _missing_qgis_style_summary() -> dict[str, object]:
         "qgis_path_pedestrian_visible_line_opacity_layer_count": 0,
         "qgis_path_pedestrian_layer_ids": [],
         "qgis_path_pedestrian_visible_layer_ids": [],
+        "qgis_path_pedestrian_layer_details": [],
+        "qgis_path_pedestrian_visible_layer_details": [],
         "qgis_path_pedestrian_line_width_samples": [],
         "qgis_path_pedestrian_line_color_samples": [],
         "qgis_path_pedestrian_fill_color_samples": [],

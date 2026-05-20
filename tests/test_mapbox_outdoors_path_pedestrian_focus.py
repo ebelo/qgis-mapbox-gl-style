@@ -93,7 +93,7 @@ def _qgis_preprocessed_style():
                 "type": "fill",
                 "minzoom": 14,
                 "filter": ["==", ["get", "class"], "pedestrian"],
-                "paint": {"fill-color": "#f6f2e8"},
+                "paint": {"fill-color": "#f6f2e8", "fill-opacity": 0.4},
             },
             {
                 "id": "road-label",
@@ -255,6 +255,27 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             summary["qgis_path_pedestrian_visible_layer_ids"],
             ["road-path", "road-steps", "road-pedestrian-polygon"],
         )
+        details_by_id = {detail["id"]: detail for detail in summary["qgis_path_pedestrian_layer_details"]}
+        self.assertEqual(details_by_id["road-path"]["type"], "line")
+        self.assertEqual(details_by_id["road-path"]["minzoom"], 12)
+        self.assertEqual(details_by_id["road-path"]["maxzoom"], 16)
+        self.assertEqual(details_by_id["road-path"]["filter"], ["==", ["get", "class"], "path"])
+        self.assertEqual(details_by_id["road-path"]["line-width"], 1.5)
+        self.assertEqual(details_by_id["road-path"]["line-color"], "#d8c6a3")
+        self.assertEqual(details_by_id["road-path"]["line-dasharray"], [1, 1])
+        self.assertEqual(details_by_id["road-pedestrian-polygon"]["fill-color"], "#f6f2e8")
+        self.assertEqual(details_by_id["road-pedestrian-polygon"]["fill-opacity"], 0.4)
+        visible_detail_ids = [
+            detail["id"] for detail in summary["qgis_path_pedestrian_visible_layer_details"]
+        ]
+        self.assertEqual(visible_detail_ids, ["road-path", "road-steps", "road-pedestrian-polygon"])
+        visible_details_by_id = {
+            detail["id"]: detail for detail in summary["qgis_path_pedestrian_visible_layer_details"]
+        }
+        self.assertEqual(visible_details_by_id["road-path"]["type"], "line")
+        self.assertEqual(visible_details_by_id["road-path"]["line-width"], 1.5)
+        self.assertEqual(visible_details_by_id["road-pedestrian-polygon"]["type"], "fill")
+        self.assertEqual(visible_details_by_id["road-pedestrian-polygon"]["fill-opacity"], 0.4)
         self.assertIn("road-path=1.5", summary["qgis_path_pedestrian_line_width_samples"])
         self.assertIn('road-path="#d8c6a3"', summary["qgis_path_pedestrian_line_color_samples"])
         self.assertIn('road-pedestrian-polygon="#f6f2e8"', summary["qgis_path_pedestrian_fill_color_samples"])
@@ -310,6 +331,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         expected_ids = [f"road-path-test-{index}" for index in range(10)]
         self.assertEqual(summary["qgis_path_pedestrian_layer_ids"], expected_ids)
         self.assertEqual(summary["qgis_path_pedestrian_visible_layer_ids"], expected_ids)
+        self.assertEqual(
+            [detail["id"] for detail in summary["qgis_path_pedestrian_layer_details"]],
+            expected_ids,
+        )
+        self.assertEqual(
+            [detail["line-width"] for detail in summary["qgis_path_pedestrian_layer_details"]],
+            list(range(1, 11)),
+        )
 
     def test_build_path_pedestrian_focus_report_cross_links_feature_counts_and_qgis_style(self):
         report = build_path_pedestrian_focus_report(
@@ -344,6 +373,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(camera["qgis_path_pedestrian_layer_count"], 0)
         self.assertEqual(camera["qgis_path_pedestrian_visible_layer_count"], 0)
         self.assertEqual(camera["qgis_path_pedestrian_visible_filter_layer_count"], 0)
+        self.assertEqual(camera["qgis_path_pedestrian_layer_details"], [])
+        self.assertEqual(camera["qgis_path_pedestrian_visible_layer_details"], [])
 
     def test_build_path_pedestrian_focus_report_ignores_boolean_counts(self):
         road_report = {
