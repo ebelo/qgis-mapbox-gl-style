@@ -393,11 +393,28 @@ def _camera_focus_row(
     return row
 
 
+def _json_safe_artifact_value(value: object) -> object:
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe_artifact_value(child) for key, child in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe_artifact_value(child) for child in value]
+    if isinstance(value, str | int | float | bool) or value is None:
+        return value
+    return str(value)
+
+
+def _json_safe_artifacts(input_artifacts: Mapping[str, object]) -> dict[str, object]:
+    return {str(key): _json_safe_artifact_value(value) for key, value in input_artifacts.items()}
+
+
 def build_path_pedestrian_focus_report(
     road_feature_report: Mapping[str, object],
     *,
     qgis_styles_by_camera: Mapping[str, Mapping[str, object]] | None = None,
     generated_at: dt.datetime | None = None,
+    input_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     qgis_styles = qgis_styles_by_camera or {}
     camera_reports = road_feature_report.get("cameras")
@@ -417,7 +434,7 @@ def build_path_pedestrian_focus_report(
         )
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
     qgis_matched_camera_count = sum(1 for row in rows if row.get("qgis_style_status") == "available")
-    return {
+    report = {
         "generated": generated.astimezone(dt.timezone.utc).isoformat(),
         "road_feature_generated": road_feature_report.get("generated"),
         "style_owner": road_feature_report.get("style_owner"),
@@ -427,6 +444,9 @@ def build_path_pedestrian_focus_report(
         "qgis_style_input_count": len(qgis_styles),
         "cameras": rows,
     }
+    if input_artifacts is not None:
+        report["input_artifacts"] = _json_safe_artifacts(input_artifacts)
+    return report
 
 
 def _markdown_cell(value: object) -> str:
@@ -477,6 +497,29 @@ def _qgis_stroke_samples(camera: Mapping[str, object]) -> list[str]:
     if isinstance(dash_samples, list):
         samples.extend(str(sample) for sample in dash_samples[:2])
     return samples
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
+
+
+def _input_artifact_markdown_lines(report: Mapping[str, object]) -> list[str]:
+    input_artifacts = report.get("input_artifacts")
+    if not isinstance(input_artifacts, Mapping):
+        return []
+    lines: list[str] = []
+    road_features_json = input_artifacts.get("road_features_json")
+    if isinstance(road_features_json, str) and road_features_json:
+        lines.append(f"Road features input: `{road_features_json}`")
+    comparison_summary_jsons = _string_list(input_artifacts.get("comparison_summary_jsons"))
+    if comparison_summary_jsons:
+        lines.append(f"Comparison summary inputs: `{', '.join(comparison_summary_jsons)}`")
+    qgis_style_cameras = _string_list(input_artifacts.get("qgis_style_cameras"))
+    if qgis_style_cameras:
+        lines.append(f"QGIS style input cameras: `{', '.join(qgis_style_cameras)}`")
+    return lines
 
 
 def _detail_zoom_band(detail: Mapping[str, object]) -> str:
@@ -550,16 +593,24 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             f"{report.get('qgis_style_camera_count')}/{report.get('qgis_style_input_count', 0)} matched"
         ),
         "",
-        (
-            "Cross-links decoded road-feature counts with the camera-specific QGIS-preprocessed "
-            "style layers that can render path, pedestrian, trail, piste, or step features."
-        ),
-        (
-            "Visible QGIS counts apply the camera zoom to style-layer minzoom/maxzoom, "
-            "so zoom-banded preprocessing can be reviewed against the layers active in each camera."
-        ),
-        "",
     ]
+    input_lines = _input_artifact_markdown_lines(report)
+    if input_lines:
+        lines.extend(input_lines)
+        lines.append("")
+    lines.extend(
+        [
+            (
+                "Cross-links decoded road-feature counts with the camera-specific QGIS-preprocessed "
+                "style layers that can render path, pedestrian, trail, piste, or step features."
+            ),
+            (
+                "Visible QGIS counts apply the camera zoom to style-layer minzoom/maxzoom, "
+                "so zoom-banded preprocessing can be reviewed against the layers active in each camera."
+            ),
+            "",
+        ]
+    )
     if not rows:
         lines.append("No decoded cameras include path/pedestrian focus features.")
         return "\n".join(lines) + "\n"
@@ -701,6 +752,14 @@ def _qgis_style_paths_from_cli_comparison_summary(
     raise AssertionError("argparse error should exit")
 
 
+def _display_input_path(path: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(resolved)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -722,6 +781,11 @@ def main(argv: list[str] | None = None) -> int:
     report = build_path_pedestrian_focus_report(
         road_feature_report,
         qgis_styles_by_camera=qgis_styles_by_camera,
+        input_artifacts={
+            "road_features_json": _display_input_path(args.road_features_json),
+            "comparison_summary_jsons": [_display_input_path(path) for path in args.comparison_summary_json],
+            "qgis_style_cameras": sorted(qgis_style_paths_by_camera),
+        },
     )
     paths = build_path_pedestrian_focus_paths(build_run_directory())
     write_report(report, paths)
