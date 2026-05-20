@@ -5628,6 +5628,154 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             pedestrian_low_mm,
         )
 
+    def test_road_steps_line_styles_split_high_zoom_widths_and_dashes(self):
+        steps_width = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            15,
+            1,
+            16,
+            1.6,
+            18,
+            6,
+        ]
+        steps_bg_width = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            15,
+            2,
+            17,
+            4.6,
+            18,
+            7,
+        ]
+        steps_dasharray = [
+            "step",
+            ["zoom"],
+            ["literal", [1, 0]],
+            15,
+            ["literal", [1.75, 1]],
+            16,
+            ["literal", [1, 0.75]],
+            17,
+            ["literal", [0.3, 0.3]],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "road-steps",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": copy.deepcopy(steps_width),
+                        "line-dasharray": copy.deepcopy(steps_dasharray),
+                    },
+                },
+                {
+                    "id": "road-steps-bg",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {
+                        "line-color": "hsl(35, 80%, 48%)",
+                        "line-width": copy.deepcopy(steps_bg_width),
+                    },
+                },
+                {
+                    "id": "road-path",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": copy.deepcopy(steps_width)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-steps-below-z15",
+                "road-steps-z15-to-z16",
+                "road-steps-z16-to-z17",
+                "road-steps-z17-plus",
+                "road-steps-bg-below-z15",
+                "road-steps-bg-z15-to-z16",
+                "road-steps-bg-z16-to-z17",
+                "road-steps-bg-z17-plus",
+                "road-path",
+            ],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+
+        self.assertEqual(by_id["road-steps-below-z15"]["paint"]["line-dasharray"], [1, 0])
+        self.assertEqual(by_id["road-steps-z15-to-z16"]["paint"]["line-dasharray"], [1.75, 1])
+        self.assertEqual(by_id["road-steps-z16-to-z17"]["paint"]["line-dasharray"], [1, 0.75])
+        self.assertEqual(by_id["road-steps-z17-plus"]["paint"]["line-dasharray"], [0.3, 0.3])
+        self.assertAlmostEqual(
+            by_id["road-steps-z17-plus"]["paint"]["line-width"],
+            (
+                mapbox_config._extract_zoom_scalar_size_at_zoom(steps_width, 17.0)
+                * mapbox_config._MAPBOX_PIXEL_TO_MM
+            ),
+        )
+        self.assertAlmostEqual(
+            by_id["road-steps-bg-z17-plus"]["paint"]["line-width"],
+            4.6 * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertEqual(by_id["road-steps-below-z15"]["minzoom"], 14)
+        self.assertEqual(by_id["road-steps-below-z15"]["maxzoom"], 15.0)
+        self.assertEqual(by_id["road-steps-z17-plus"]["minzoom"], 17.0)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-steps-z17-plus"),
+            "road-steps",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-steps-bg-z17-plus"),
+            "road-steps-bg",
+        )
+
+    def test_road_steps_line_style_keeps_layer_unsplit_when_dasharray_is_unsupported(self):
+        steps_width = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            15,
+            1,
+            16,
+            1.6,
+        ]
+        unsupported_dasharray = ["get", "dash"]
+        style = {
+            "layers": [
+                {
+                    "id": "road-steps",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {
+                        "line-width": copy.deepcopy(steps_width),
+                        "line-dasharray": unsupported_dasharray,
+                    },
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        layer = result["layers"][0]
+        self.assertEqual(layer["id"], "road-steps")
+        self.assertEqual(layer["paint"]["line-dasharray"], unsupported_dasharray)
+        self.assertAlmostEqual(
+            layer["paint"]["line-width"],
+            (
+                mapbox_config._extract_zoom_scalar_size_at_zoom(steps_width, 14.0)
+                * mapbox_config._MAPBOX_PIXEL_TO_MM
+            ),
+        )
+
     def test_filter_simplification_splits_poi_filterrank_filter_by_zoom_band(self):
         class_rank_match = [
             "match",

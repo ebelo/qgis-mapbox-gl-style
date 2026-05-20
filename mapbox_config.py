@@ -676,6 +676,16 @@ _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("z16-plus", 16.0, None, 18.0),
 )
 _PATH_TRAIL_LINE_WIDTH_QGIS_SCALE = 1.35
+_ROAD_STEPS_LINE_STYLE_LAYER_IDS = {
+    "road-steps",
+    "road-steps-bg",
+}
+_ROAD_STEPS_LINE_STYLE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
+    ("below-z15", None, 15.0, 14.0),
+    ("z15-to-z16", 15.0, 16.0, 15.0),
+    ("z16-to-z17", 16.0, 17.0, 16.0),
+    ("z17-plus", 17.0, None, 17.0),
+)
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
     "road-path-bg",
@@ -2438,6 +2448,14 @@ def _path_trail_line_width_base_layer_id(layer_id: object) -> str | None:
     )
 
 
+def _road_steps_line_style_base_layer_id(layer_id: object) -> str | None:
+    return _line_width_zoom_band_base_layer_id(
+        layer_id,
+        layer_ids=_ROAD_STEPS_LINE_STYLE_LAYER_IDS,
+        zoom_bands=_ROAD_STEPS_LINE_STYLE_ZOOM_BANDS,
+    )
+
+
 def _regional_major_road_width_base_layer_id(layer_id: object) -> str | None:
     normalized = str(layer_id or "")
     for suffix, _band_minzoom, _band_maxzoom in _REGIONAL_MAJOR_ROAD_WIDTH_BANDS:
@@ -2518,6 +2536,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         _path_background_line_color_base_layer_id(layer_id),
         _path_trail_line_width_base_layer_id(layer_id),
         _pedestrian_line_width_base_layer_id(layer_id),
+        _road_steps_line_style_base_layer_id(layer_id),
     ):
         if resolved_layer_id is not None:
             return resolved_layer_id
@@ -2698,6 +2717,98 @@ def _split_pedestrian_line_width_layers_for_qgis(layers: object) -> object:
     return _split_line_width_zoom_band_layers_for_qgis(
         layers,
         variants_for_layer=_pedestrian_line_width_layer_variants,
+    )
+
+
+def _road_steps_line_style_controls(
+    *,
+    line_width: object,
+    line_dasharray: object,
+    sampled_zoom: float,
+) -> dict[str, object] | None:
+    controls: dict[str, object] = {}
+    if isinstance(line_width, list):
+        line_width_mm = _line_width_mm_at_zoom(line_width, sampled_zoom)
+        if line_width_mm is None:
+            return None
+        controls["line-width"] = line_width_mm
+    if isinstance(line_dasharray, list):
+        dasharray = _extract_line_dasharray_literal(line_dasharray, target_zoom=sampled_zoom)
+        if dasharray is None:
+            return None
+        controls["line-dasharray"] = dasharray
+    return controls
+
+
+def _road_steps_line_style_variant(
+    layer: dict[str, object],
+    *,
+    suffix: str,
+    zoom_band: tuple[float | None, float | None],
+    controls: dict[str, object],
+) -> dict[str, object]:
+    layer_id = str(layer.get("id") or "")
+    variant = copy.deepcopy(layer)
+    variant["id"] = f"{layer_id}-{suffix}"
+    _set_zoom_bounds(variant, *zoom_band)
+    variant_paint = variant["paint"]
+    assert isinstance(variant_paint, dict)
+    variant_paint.update(controls)
+    return variant
+
+
+def _road_steps_line_style_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split audited step line styles into static QGIS zoom bands."""
+    layer_id = str(layer.get("id") or "")
+    paint = layer.get("paint")
+    if (
+        layer_id not in _ROAD_STEPS_LINE_STYLE_LAYER_IDS
+        or layer.get("type") != "line"
+        or not isinstance(paint, dict)
+    ):
+        return None
+    line_width = paint.get("line-width")
+    line_dasharray = paint.get("line-dasharray")
+    if not isinstance(line_width, list) and not isinstance(line_dasharray, list):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom, target_zoom in _ROAD_STEPS_LINE_STYLE_ZOOM_BANDS:
+        effective_zoom_band = _effective_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if effective_zoom_band is None:
+            continue
+        sampled_zoom = _zoom_in_layer_range(target_zoom, *effective_zoom_band)
+        if sampled_zoom is None:
+            continue
+
+        controls = _road_steps_line_style_controls(
+            line_width=line_width,
+            line_dasharray=line_dasharray,
+            sampled_zoom=sampled_zoom,
+        )
+        if controls is not None:
+            variants.append(
+                _road_steps_line_style_variant(
+                    layer,
+                    suffix=suffix,
+                    zoom_band=effective_zoom_band,
+                    controls=controls,
+                )
+            )
+    return variants or None
+
+
+def _split_road_steps_line_style_layers_for_qgis(layers: object) -> object:
+    return _split_line_width_zoom_band_layers_for_qgis(
+        layers,
+        variants_for_layer=_road_steps_line_style_layer_variants,
     )
 
 
@@ -5888,6 +5999,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_trail_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_pedestrian_line_width_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_road_steps_line_style_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_label_icon_image_layers_for_qgis(style.get("layers"))
