@@ -22,6 +22,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _geometry_generator_markdown_value,
     _label_settings_report,
     _label_style_summary_rows,
+    _line_label_conversion_rows,
     _line_label_repeat_spacing_rows,
     _load_original_style,
     _postprocessed_label_records,
@@ -29,6 +30,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _source_label_control_summary_rows,
     _source_label_fanout_summary_rows,
     _source_label_unresolved_control_summary_rows,
+    _symbol_placement_includes_line,
     build_label_settings_paths,
     build_run_directory,
     build_summary_markdown,
@@ -849,6 +851,174 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(rows[0]["repeat_distances"], {"66.1458": 1})
         self.assertEqual(rows[0]["qfit_symbol_spacing_to_repeat_distances"], {"(missing) -> 66.1458": 2})
 
+    def test_line_label_conversion_summary_includes_shields_and_line_center_labels(self):
+        rows = _line_label_conversion_rows(
+            [
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-z11-plus",
+                    "qfit_style_layer_id": "road-number-shield-z11-plus",
+                    "layout": {"symbol-placement": "line"},
+                    "qfit_layout": {"symbol-placement": "line", "icon-image": "default-2"},
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-below-z11",
+                    "qfit_style_layer_id": "road-number-shield-below-z11",
+                    "layout": {"symbol-placement": ["step", ["zoom"], "point", 11, "line"]},
+                    "qfit_layout": {"symbol-placement": "point", "icon-image": "default-2"},
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-low-zoom",
+                    "qfit_style_layer_id": "road-number-shield-low-zoom",
+                    "maxzoom": 11,
+                    "layout": {"symbol-placement": ["step", ["zoom"], "point", 11, "line"]},
+                    "qfit_layout": {"symbol-placement": "point", "icon-image": "default-2"},
+                },
+                {
+                    "base_style_layer_id": "ferry-aerialway-label",
+                    "style_name": "ferry-aerialway-label",
+                    "qfit_style_layer_id": "ferry-aerialway-label",
+                    "layout": {"symbol-placement": ["literal", "line"]},
+                    "qfit_layout": {"symbol-placement": "point"},
+                },
+                {
+                    "base_style_layer_id": "water-line-label",
+                    "style_name": "water-line-label",
+                    "qfit_style_layer_id": "water-line-label",
+                    "layout": {"symbol-placement": "line-center"},
+                    "qfit_layout": {"symbol-placement": "line-center"},
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "style_name": "poi-label",
+                    "qfit_style_layer_id": "poi-label",
+                    "layout": {
+                        "symbol-placement": [
+                            "match",
+                            ["get", "class"],
+                            "line",
+                            "point",
+                            "point",
+                        ]
+                    },
+                    "qfit_layout": {"symbol-placement": "point"},
+                },
+            ],
+            [
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-z11-plus",
+                    "geometry_type": "Line",
+                    "placement": "Horizontal",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": True,
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-below-z11",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-low-zoom",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "ferry-aerialway-label",
+                    "style_name": "ferry-aerialway-label",
+                    "geometry_type": "Line",
+                    "placement": "Curved",
+                    "repeat_distance": 66.1458333333,
+                    "label_per_part": False,
+                    "merge_lines": True,
+                },
+                {
+                    "base_style_layer_id": "water-line-label",
+                    "style_name": "water-line-label",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "poi-label",
+                    "style_name": "poi-label",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+            ],
+        )
+
+        self.assertEqual(
+            [row["base_style_layer_id"] for row in rows],
+            ["road-number-shield", "ferry-aerialway-label", "water-line-label"],
+        )
+        shield_row = rows[0]
+        self.assertEqual(shield_row["source_label_rows"], 2)
+        self.assertEqual(shield_row["converted_label_styles"], 2)
+        self.assertEqual(shield_row["qfit_symbol_placements"], {"line": 1, "point": 1})
+        self.assertEqual(shield_row["converted_geometry_types"], {"Line": 1, "Point": 1})
+        self.assertEqual(shield_row["converted_placements"], {"Horizontal": 1, "OverPoint": 1})
+        self.assertEqual(shield_row["repeat_distances"], {"0": 1})
+        self.assertEqual(shield_row["merge_lines"], {"false": 1, "true": 1})
+        ferry_row = rows[1]
+        self.assertEqual(ferry_row["source_symbol_placements"], {'["literal","line"]': 1})
+        self.assertEqual(ferry_row["repeat_distances"], {"66.1458": 1})
+        water_row = rows[2]
+        self.assertEqual(water_row["source_symbol_placements"], {"line-center": 1})
+        self.assertEqual(water_row["converted_geometry_types"], {"Point": 1})
+        self.assertEqual(water_row["converted_placements"], {"OverPoint": 1})
+        self.assertEqual(water_row["repeat_distances"], {})
+        self.assertEqual(water_row["merge_lines"], {"false": 1})
+
+    def test_symbol_placement_line_detection_uses_expression_outputs_and_zoom_bounds(self):
+        self.assertTrue(_symbol_placement_includes_line(["literal", "line"]))
+        self.assertTrue(
+            _symbol_placement_includes_line(["coalesce", ["get", "placement"], "line-center"])
+        )
+        self.assertFalse(_symbol_placement_includes_line(["coalesce", "point", "line"]))
+        self.assertFalse(
+            _symbol_placement_includes_line(["coalesce", ["literal", "point"], "line-center"])
+        )
+        self.assertTrue(
+            _symbol_placement_includes_line(["coalesce", ["literal", None], "line-center"])
+        )
+        self.assertTrue(
+            _symbol_placement_includes_line(
+                ["let", "placement", "line", ["var", "placement"]]
+            )
+        )
+        self.assertFalse(
+            _symbol_placement_includes_line(
+                ["match", ["get", "class"], "line", "point", "point"]
+            )
+        )
+        self.assertFalse(
+            _symbol_placement_includes_line(
+                ["step", ["zoom"], "point", 11, "line"], max_zoom=11
+            )
+        )
+        self.assertTrue(
+            _symbol_placement_includes_line(
+                ["step", ["zoom"], "point", 11, "line"], min_zoom=11
+            )
+        )
+
     def test_source_label_fanout_summary_groups_qfit_style_expansion(self):
         rows = _source_label_fanout_summary_rows(
             [
@@ -1343,6 +1513,21 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "zero_repeat_distance_count": 1,
                 }
             ],
+            "line_label_conversion_by_base_layer": [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "source_label_rows": 1,
+                    "converted_label_styles": 1,
+                    "source_symbol_placements": {"line": 1},
+                    "qfit_symbol_placements": {"line": 1},
+                    "converted_geometry_types": {"Line": 1},
+                    "converted_placements": {"Curved": 1},
+                    "repeat_distances": {"0": 1},
+                    "label_per_part": {"false": 1},
+                    "merge_lines": {"true": 1},
+                    "style_names": {"contour-label": 1},
+                }
+            ],
             "source_label_fanout_by_base_layer": [
                 {
                     "base_style_layer_id": "contour-label",
@@ -1458,6 +1643,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("## Line label repeat spacing by base layer", markdown)
         self.assertIn(
             "| contour-label | 1 | 1 | 1 | (missing)=1 | (missing)=1 | 0=1 | (missing) -> 0=1 | Curved=1 | contour-label=1 |",
+            markdown,
+        )
+        self.assertIn("## Line-placement label conversion by base layer", markdown)
+        self.assertIn(
+            "| contour-label | 1 | 1 | line=1 | line=1 | Line=1 | Curved=1 | 0=1 | no=1 | yes=1 | contour-label=1 |",
             markdown,
         )
         self.assertIn("## Source label fan-out by base layer", markdown)

@@ -559,6 +559,307 @@ def _is_line_label_source_row(row: dict[str, object]) -> bool:
     )
 
 
+def _numeric_row_zoom_bounds(
+    row: dict[str, object], *, min_key: str, max_key: str
+) -> tuple[float, float]:
+    minzoom = row.get(min_key)
+    maxzoom = row.get(max_key)
+    min_zoom = float(minzoom) if isinstance(minzoom, (int, float)) else 0.0
+    max_zoom = float(maxzoom) if isinstance(maxzoom, (int, float)) else float("inf")
+    return min_zoom, max_zoom
+
+
+def _zoom_expression(value: object) -> bool:
+    return isinstance(value, list) and value == ["zoom"]
+
+
+def _zoom_ranges_overlap(start: float, end: float, layer_min: float, layer_max: float) -> bool:
+    return start < layer_max and layer_min < end
+
+
+def _symbol_placement_zoom_step_includes_line(
+    value: list[object],
+    *,
+    min_zoom: float,
+    max_zoom: float,
+    bindings: dict[str, object],
+) -> bool | None:
+    if len(value) < 3 or not _zoom_expression(value[1]):
+        return None
+    active_start = float("-inf")
+    active_value = value[2]
+    for index in range(3, len(value) - 1, 2):
+        stop = value[index]
+        if not isinstance(stop, (int, float)):
+            return None
+        active_end = float(stop)
+        if _zoom_ranges_overlap(
+            active_start, active_end, min_zoom, max_zoom
+        ) and _symbol_placement_includes_line(
+            active_value,
+            min_zoom=max(min_zoom, active_start),
+            max_zoom=min(max_zoom, active_end),
+            bindings=bindings,
+        ):
+            return True
+        active_start = active_end
+        active_value = value[index + 1]
+    return _zoom_ranges_overlap(
+        active_start, float("inf"), min_zoom, max_zoom
+    ) and _symbol_placement_includes_line(
+        active_value,
+        min_zoom=max(min_zoom, active_start),
+        max_zoom=max_zoom,
+        bindings=bindings,
+    )
+
+
+def _interpolate_symbol_placement_output_indexes(value: list[object]) -> Iterable[int]:
+    return range(4, len(value), 2)
+
+
+def _case_symbol_placement_output_indexes(value: list[object]) -> Iterable[int] | None:
+    if len(value) < 4:
+        return None
+    return [*range(2, len(value) - 1, 2), len(value) - 1]
+
+
+def _match_symbol_placement_output_indexes(value: list[object]) -> Iterable[int] | None:
+    if len(value) < 4:
+        return None
+    return [*range(3, len(value) - 1, 2), len(value) - 1]
+
+
+_SYMBOL_PLACEMENT_OUTPUT_INDEXERS = {
+    "interpolate": _interpolate_symbol_placement_output_indexes,
+    "case": _case_symbol_placement_output_indexes,
+    "match": _match_symbol_placement_output_indexes,
+}
+
+
+def _symbol_placement_output_indexes(value: list[object]) -> Iterable[int] | None:
+    output_indexer = _SYMBOL_PLACEMENT_OUTPUT_INDEXERS.get(value[0])
+    return output_indexer(value) if output_indexer else None
+
+
+def _symbol_placement_outputs_include_line(
+    value: list[object],
+    output_indexes: Iterable[int],
+    *,
+    min_zoom: float,
+    max_zoom: float,
+    bindings: dict[str, object],
+) -> bool:
+    return any(
+        _symbol_placement_includes_line(
+            value[index],
+            min_zoom=min_zoom,
+            max_zoom=max_zoom,
+            bindings=bindings,
+        )
+        for index in output_indexes
+    )
+
+
+def _literal_symbol_placement_includes_line(
+    value: list[object], *, min_zoom: float, max_zoom: float, bindings: dict[str, object]
+) -> bool:
+    return len(value) == 2 and _symbol_placement_includes_line(
+        value[1],
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        bindings=bindings,
+    )
+
+
+def _variable_symbol_placement_includes_line(
+    value: list[object], *, min_zoom: float, max_zoom: float, bindings: dict[str, object]
+) -> bool:
+    if len(value) != 2 or not isinstance(value[1], str):
+        return False
+    return _symbol_placement_includes_line(
+        bindings.get(value[1]),
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        bindings=bindings,
+    )
+
+
+def _let_symbol_placement_includes_line(
+    value: list[object], *, min_zoom: float, max_zoom: float, bindings: dict[str, object]
+) -> bool:
+    return _symbol_placement_includes_line(
+        value[-1],
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        bindings=_symbol_placement_let_bindings(value, bindings),
+    )
+
+
+def _symbol_placement_let_bindings(
+    value: list[object],
+    bindings: dict[str, object],
+) -> dict[str, object]:
+    let_bindings = dict(bindings)
+    for index in range(1, len(value) - 1, 2):
+        variable_name = value[index]
+        if isinstance(variable_name, str) and index + 1 < len(value):
+            let_bindings[variable_name] = value[index + 1]
+    return let_bindings
+
+
+def _literal_symbol_placement_value_is_known_non_null(
+    value: list[object], *, bindings: dict[str, object]
+) -> bool:
+    return len(value) == 2 and value[1] is not None
+
+
+def _variable_symbol_placement_value_is_known_non_null(
+    value: list[object], *, bindings: dict[str, object]
+) -> bool:
+    if len(value) != 2 or not isinstance(value[1], str):
+        return False
+    return _symbol_placement_value_is_known_non_null(
+        bindings.get(value[1]),
+        bindings=bindings,
+    )
+
+
+def _let_symbol_placement_value_is_known_non_null(
+    value: list[object], *, bindings: dict[str, object]
+) -> bool:
+    if len(value) < 2:
+        return False
+    return _symbol_placement_value_is_known_non_null(
+        value[-1],
+        bindings=_symbol_placement_let_bindings(value, bindings),
+    )
+
+
+_SYMBOL_PLACEMENT_NON_NULL_TESTERS = {
+    "literal": _literal_symbol_placement_value_is_known_non_null,
+    "var": _variable_symbol_placement_value_is_known_non_null,
+    "let": _let_symbol_placement_value_is_known_non_null,
+}
+
+
+def _symbol_placement_value_is_known_non_null(
+    value: object,
+    *,
+    bindings: dict[str, object],
+) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return True
+    if not isinstance(value, list) or not value:
+        return True
+
+    tester = _SYMBOL_PLACEMENT_NON_NULL_TESTERS.get(value[0])
+    return tester(value, bindings=bindings) if tester else False
+
+
+def _coalesce_symbol_placement_includes_line(
+    value: list[object], *, min_zoom: float, max_zoom: float, bindings: dict[str, object]
+) -> bool:
+    for candidate in value[1:]:
+        if _symbol_placement_includes_line(
+            candidate,
+            min_zoom=min_zoom,
+            max_zoom=max_zoom,
+            bindings=bindings,
+        ):
+            return True
+        if _symbol_placement_value_is_known_non_null(candidate, bindings=bindings):
+            return False
+    return False
+
+
+def _step_symbol_placement_includes_line(
+    value: list[object], *, min_zoom: float, max_zoom: float, bindings: dict[str, object]
+) -> bool:
+    step_result = _symbol_placement_zoom_step_includes_line(
+        value,
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        bindings=bindings,
+    )
+    if step_result is not None:
+        return step_result
+    return _symbol_placement_outputs_include_line(
+        value,
+        range(2, len(value), 2),
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        bindings=bindings,
+    )
+
+
+def _symbol_placement_includes_line(
+    value: object,
+    *,
+    min_zoom: float = 0.0,
+    max_zoom: float = float("inf"),
+    bindings: dict[str, object] | None = None,
+) -> bool:
+    expression_bindings = bindings or {}
+    if isinstance(value, str):
+        return value in {"line", "line-center"}
+    if not isinstance(value, list) or not value:
+        return False
+
+    operator = value[0]
+    if operator == "literal":
+        return _literal_symbol_placement_includes_line(
+            value, min_zoom=min_zoom, max_zoom=max_zoom, bindings=expression_bindings
+        )
+    if operator == "var":
+        return _variable_symbol_placement_includes_line(
+            value, min_zoom=min_zoom, max_zoom=max_zoom, bindings=expression_bindings
+        )
+    if operator == "let" and len(value) >= 2:
+        return _let_symbol_placement_includes_line(
+            value, min_zoom=min_zoom, max_zoom=max_zoom, bindings=expression_bindings
+        )
+    if operator == "step":
+        return _step_symbol_placement_includes_line(
+            value, min_zoom=min_zoom, max_zoom=max_zoom, bindings=expression_bindings
+        )
+    if operator == "coalesce":
+        return _coalesce_symbol_placement_includes_line(
+            value, min_zoom=min_zoom, max_zoom=max_zoom, bindings=expression_bindings
+        )
+
+    output_indexes = _symbol_placement_output_indexes(value)
+    if output_indexes is None:
+        return False
+    return _symbol_placement_outputs_include_line(
+        value,
+        output_indexes,
+        min_zoom=min_zoom,
+        max_zoom=max_zoom,
+        bindings=expression_bindings,
+    )
+
+
+def _is_line_placement_source_row(row: dict[str, object]) -> bool:
+    source_min_zoom, source_max_zoom = _numeric_row_zoom_bounds(
+        row, min_key="minzoom", max_key="maxzoom"
+    )
+    qfit_min_zoom, qfit_max_zoom = _numeric_row_zoom_bounds(
+        row, min_key="qfit_minzoom", max_key="qfit_maxzoom"
+    )
+    return _symbol_placement_includes_line(
+        _section_control(row, "layout", "symbol-placement"),
+        min_zoom=source_min_zoom,
+        max_zoom=source_max_zoom,
+    ) or _symbol_placement_includes_line(
+        _section_control(row, "qfit_layout", "symbol-placement"),
+        min_zoom=qfit_min_zoom,
+        max_zoom=qfit_max_zoom,
+    )
+
+
 def _line_label_record_for_repeat(row: dict[str, object]) -> bool:
     placement = row.get("placement")
     return row.get("geometry_type") == "Line" or placement in {"Curved", "Line", "Horizontal"}
@@ -688,6 +989,56 @@ def _line_label_repeat_spacing_rows(
             -int(row["zero_repeat_distance_count"]),
             -int(row["missing_qfit_symbol_spacing"]),
             -int(row["converted_line_label_styles"]),
+            str(row["base_style_layer_id"]),
+        ),
+    )
+
+
+def _line_label_conversion_rows(
+    source_label_layers: list[dict[str, object]],
+    label_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    grouped: dict[str, list[tuple[dict[str, object], list[dict[str, object]]]]] = defaultdict(list)
+    labels_by_style = _label_records_by_style(label_records)
+    for row in source_label_layers:
+        if not isinstance(row, dict) or not _is_line_placement_source_row(row):
+            continue
+        base_layer = _base_style_layer_id(row)
+        if base_layer:
+            grouped[base_layer].append((row, _matched_label_records_for_source_row(row, labels_by_style)))
+
+    rows: list[dict[str, object]] = []
+    for base_layer, grouped_rows in grouped.items():
+        source_rows = [row for row, _labels in grouped_rows]
+        converted_rows = _deduplicated_label_records(
+            record for _row, labels in grouped_rows for record in labels
+        )
+        rows.append(
+            {
+                "base_style_layer_id": base_layer,
+                "source_label_rows": len(source_rows),
+                "converted_label_styles": len(converted_rows),
+                "source_symbol_placements": _sorted_count_map(
+                    _section_control(row, "layout", "symbol-placement") for row in source_rows
+                ),
+                "qfit_symbol_placements": _sorted_count_map(
+                    _section_control(row, "qfit_layout", "symbol-placement") for row in source_rows
+                ),
+                "converted_geometry_types": _sorted_count_map(row.get("geometry_type") for row in converted_rows),
+                "converted_placements": _sorted_count_map(row.get("placement") for row in converted_rows),
+                "repeat_distances": _sorted_count_map(
+                    row.get("repeat_distance") for row in converted_rows if _line_label_record_for_repeat(row)
+                ),
+                "label_per_part": _sorted_count_map(row.get("label_per_part") for row in converted_rows),
+                "merge_lines": _sorted_count_map(row.get("merge_lines") for row in converted_rows),
+                "style_names": _sorted_count_map(row.get("style_name") for row in source_rows),
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -int(row["source_label_rows"]),
+            -int(row["converted_label_styles"]),
             str(row["base_style_layer_id"]),
         ),
     )
@@ -1044,6 +1395,7 @@ def _label_settings_report(
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
         "line_label_repeat_spacing_by_base_layer": _line_label_repeat_spacing_rows(source_label_layer_rows, records),
+        "line_label_conversion_by_base_layer": _line_label_conversion_rows(source_label_layer_rows, records),
         "source_label_fanout_by_base_layer": _source_label_fanout_summary_rows(source_label_layer_rows, records),
         "source_label_control_summary_by_base_layer": _source_label_control_summary_rows(source_label_layer_rows),
         "source_label_control_omission_summary_by_base_layer": _source_label_control_omission_summary_rows(
@@ -1221,6 +1573,37 @@ def _append_line_label_repeat_spacing_summary(lines: list[str], summary_rows: li
                     repeat=_count_map_markdown_value(row.get("repeat_distances")),
                     spacing_to_repeat=_count_map_markdown_value(row.get("qfit_symbol_spacing_to_repeat_distances")),
                     placements=_count_map_markdown_value(row.get("placements")),
+                    styles=_count_map_markdown_value(row.get("style_names")),
+                )
+            )
+        lines.append("")
+
+
+def _append_line_label_conversion_summary(lines: list[str], summary_rows: list[object]) -> None:
+    if summary_rows:
+        lines.extend(
+            [
+                "## Line-placement label conversion by base layer",
+                "",
+                "| Base layer | Source rows | Converted styles | Source placement | QGIS style placement | Converted geometry | Converted placement | Repeat distances | Label/part | Merge lines | Styles |",
+                "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in summary_rows:
+            if not isinstance(row, dict):
+                continue
+            lines.append(
+                "| {base} | {source_rows} | {converted} | {source_placement} | {qfit_placement} | {geometry} | {placement} | {repeat} | {label_per_part} | {merge_lines} | {styles} |".format(
+                    base=_markdown_value(row.get("base_style_layer_id")),
+                    source_rows=_markdown_value(row.get("source_label_rows")),
+                    converted=_markdown_value(row.get("converted_label_styles")),
+                    source_placement=_count_map_markdown_value(row.get("source_symbol_placements")),
+                    qfit_placement=_count_map_markdown_value(row.get("qfit_symbol_placements")),
+                    geometry=_count_map_markdown_value(row.get("converted_geometry_types")),
+                    placement=_count_map_markdown_value(row.get("converted_placements")),
+                    repeat=_count_map_markdown_value(row.get("repeat_distances")),
+                    label_per_part=_count_map_markdown_value(row.get("label_per_part")),
+                    merge_lines=_count_map_markdown_value(row.get("merge_lines")),
                     styles=_count_map_markdown_value(row.get("style_names")),
                 )
             )
@@ -1429,6 +1812,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     summary_rows = label_summary if isinstance(label_summary, list) else []
     line_repeat_summary = report.get("line_label_repeat_spacing_by_base_layer")
     line_repeat_rows = line_repeat_summary if isinstance(line_repeat_summary, list) else []
+    line_conversion_summary = report.get("line_label_conversion_by_base_layer")
+    line_conversion_rows = line_conversion_summary if isinstance(line_conversion_summary, list) else []
     source_fanout_summary = report.get("source_label_fanout_by_base_layer")
     source_fanout_rows = source_fanout_summary if isinstance(source_fanout_summary, list) else []
     source_control_summary = report.get("source_label_control_summary_by_base_layer")
@@ -1459,6 +1844,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
     ]
     _append_label_style_summary(lines, summary_rows)
     _append_line_label_repeat_spacing_summary(lines, line_repeat_rows)
+    _append_line_label_conversion_summary(lines, line_conversion_rows)
     _append_source_label_fanout_summary(lines, source_fanout_rows)
     _append_source_label_control_summary(lines, source_control_rows)
     _append_source_label_control_omission_summary(lines, source_control_omission_rows)
