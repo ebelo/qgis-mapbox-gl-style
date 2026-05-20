@@ -52,6 +52,26 @@ DUPLICATE_LABEL_CATEGORY_KEYS = (
     ("path", "top_path_line_duplicate_names"),
     ("step", "top_step_line_duplicate_names"),
 )
+DUPLICATE_LABEL_CATEGORY_FEATURES = {
+    "pedestrian": {
+        "class": "pedestrian",
+        "layer": 0,
+        "name": "__qfit_label_probe__",
+        "type": "pedestrian",
+    },
+    "path": {
+        "class": "path",
+        "layer": 0,
+        "name": "__qfit_label_probe__",
+        "type": "path",
+    },
+    "step": {
+        "class": "path",
+        "layer": 0,
+        "name": "__qfit_label_probe__",
+        "type": "steps",
+    },
+}
 COMPARISON_VISUAL_OUTPUT_KEYS = ("browser_reference", "qgis_vector_render", "diff")
 COMPARISON_VISUAL_METRIC_KEYS = (
     "changed_pixel_ratio",
@@ -345,6 +365,185 @@ def _style_layers(style: Mapping[str, object]) -> list[dict[str, object]]:
     return [layer for layer in layers if isinstance(layer, dict)]
 
 
+def _is_path_pedestrian_label_source_layer(layer: Mapping[str, object]) -> bool:
+    layer_id = str(layer.get("id") or "")
+    return layer.get("type") == "symbol" and layer_id in PATH_PEDESTRIAN_LABEL_STYLE_IDS
+
+
+def _comparison_filter_value(
+    operator: object,
+    operands: list[object],
+    properties: Mapping[str, object],
+) -> bool:
+    if len(operands) < 2:
+        return False
+    left = _mapbox_filter_value(operands[0], properties)
+    right = _mapbox_filter_value(operands[1], properties)
+    if operator in {"==", "!="}:
+        matches = left == right
+        return matches if operator == "==" else not matches
+    if not isinstance(left, (int, float)) or not isinstance(right, (int, float)):
+        return False
+    if operator == ">=":
+        return left >= right
+    if operator == ">":
+        return left > right
+    if operator == "<=":
+        return left <= right
+    if operator == "<":
+        return left < right
+    return False
+
+
+def _match_filter_value(expression: list[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 4:
+        return False
+    candidate = _mapbox_filter_value(expression[1], properties)
+    default = expression[-1]
+    for index in range(2, len(expression) - 1, 2):
+        labels = expression[index]
+        if not isinstance(labels, list):
+            labels = [labels]
+        if candidate in labels:
+            return _mapbox_filter_value(expression[index + 1], properties)
+    return _mapbox_filter_value(default, properties)
+
+
+def _case_filter_value(expression: list[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 4:
+        return False
+    for index in range(1, len(expression) - 1, 2):
+        if bool(_mapbox_filter_value(expression[index], properties)):
+            return _mapbox_filter_value(expression[index + 1], properties)
+    return _mapbox_filter_value(expression[-1], properties)
+
+
+def _get_filter_value(expression: list[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 2:
+        return None
+    key = expression[1]
+    return properties.get(str(key)) if key is not None else None
+
+
+def _has_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    if len(expression) < 2:
+        return False
+    key = expression[1]
+    return key is not None and str(key) in properties
+
+
+def _not_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return len(expression) >= 2 and not bool(_mapbox_filter_value(expression[1], properties))
+
+
+def _all_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return all(bool(_mapbox_filter_value(child, properties)) for child in expression[1:])
+
+
+def _any_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return any(bool(_mapbox_filter_value(child, properties)) for child in expression[1:])
+
+
+def _equal_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return _comparison_filter_value("==", expression[1:], properties)
+
+
+def _not_equal_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return _comparison_filter_value("!=", expression[1:], properties)
+
+
+def _greater_equal_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return _comparison_filter_value(">=", expression[1:], properties)
+
+
+def _greater_than_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return _comparison_filter_value(">", expression[1:], properties)
+
+
+def _less_equal_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return _comparison_filter_value("<=", expression[1:], properties)
+
+
+def _less_than_filter_value(expression: list[object], properties: Mapping[str, object]) -> bool:
+    return _comparison_filter_value("<", expression[1:], properties)
+
+
+def _zoom_filter_value(expression: list[object], properties: Mapping[str, object]) -> object:
+    _ = expression
+    return properties.get("zoom")
+
+
+def _step_filter_value(expression: list[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 3:
+        return False
+    input_value = _mapbox_filter_value(expression[1], properties)
+    if not isinstance(input_value, (int, float)):
+        return False
+    selected = expression[2]
+    for index in range(3, len(expression) - 1, 2):
+        stop = expression[index]
+        if not isinstance(stop, (int, float)) or input_value < stop:
+            break
+        selected = expression[index + 1]
+    return _mapbox_filter_value(selected, properties)
+
+
+MAPBOX_FILTER_OPERATOR_HANDLERS = {
+    "get": _get_filter_value,
+    "has": _has_filter_value,
+    "zoom": _zoom_filter_value,
+    "!": _not_filter_value,
+    "all": _all_filter_value,
+    "any": _any_filter_value,
+    "==": _equal_filter_value,
+    "!=": _not_equal_filter_value,
+    ">=": _greater_equal_filter_value,
+    ">": _greater_than_filter_value,
+    "<=": _less_equal_filter_value,
+    "<": _less_than_filter_value,
+    "match": _match_filter_value,
+    "case": _case_filter_value,
+    "step": _step_filter_value,
+}
+
+
+def _mapbox_filter_value(expression: object, properties: Mapping[str, object]) -> object:
+    if not isinstance(expression, list) or not expression:
+        return expression
+    handler = MAPBOX_FILTER_OPERATOR_HANDLERS.get(str(expression[0]))
+    return handler(expression, properties) if handler is not None else False
+
+
+def _duplicate_label_category_properties(
+    category: str,
+    *,
+    camera_zoom: float | None,
+) -> Mapping[str, object]:
+    properties = dict(DUPLICATE_LABEL_CATEGORY_FEATURES[category])
+    if camera_zoom is not None:
+        properties["zoom"] = camera_zoom
+    return properties
+
+
+def _duplicate_label_categories_for_filter(
+    filter_value: object,
+    *,
+    camera_zoom: float | None = None,
+) -> list[str]:
+    if filter_value is None:
+        return list(DUPLICATE_LABEL_CATEGORY_FEATURES)
+    return [
+        category
+        for category in DUPLICATE_LABEL_CATEGORY_FEATURES
+        if bool(
+            _mapbox_filter_value(
+                filter_value,
+                _duplicate_label_category_properties(category, camera_zoom=camera_zoom),
+            )
+        )
+    ]
+
+
 def _is_path_pedestrian_style_layer(layer: Mapping[str, object]) -> bool:
     layer_id = str(layer.get("id") or "")
     layer_type = layer.get("type")
@@ -411,15 +610,41 @@ def _layer_detail(layer: Mapping[str, object]) -> dict[str, object]:
     return detail
 
 
+def _label_source_layer_detail(
+    layer: Mapping[str, object],
+    *,
+    camera_zoom: float | None,
+) -> dict[str, object]:
+    detail = {
+        "id": str(layer.get("id") or ""),
+        "type": layer.get("type"),
+        "duplicate_label_categories": _duplicate_label_categories_for_filter(
+            layer.get("filter"),
+            camera_zoom=camera_zoom,
+        ),
+    }
+    for key in ("minzoom", "maxzoom", "filter"):
+        value = layer.get(key)
+        if value is not None:
+            detail[key] = value
+    return detail
+
+
 def qgis_path_pedestrian_style_summary(
     style: Mapping[str, object],
     *,
     camera_zoom: float | None = None,
 ) -> dict[str, object]:
     layers = [layer for layer in _style_layers(style) if _is_path_pedestrian_style_layer(layer)]
+    label_source_layers = [
+        layer for layer in _style_layers(style) if _is_path_pedestrian_label_source_layer(layer)
+    ]
     line_layers = [layer for layer in layers if layer.get("type") == "line"]
     fill_layers = [layer for layer in layers if layer.get("type") == "fill"]
     visible_layers = [layer for layer in layers if _layer_is_visible_at_zoom(layer, camera_zoom)]
+    visible_label_source_layers = [
+        layer for layer in label_source_layers if _layer_is_visible_at_zoom(layer, camera_zoom)
+    ]
     visible_line_layers = [layer for layer in visible_layers if layer.get("type") == "line"]
     visible_fill_layers = [layer for layer in visible_layers if layer.get("type") == "fill"]
     return {
@@ -463,6 +688,14 @@ def qgis_path_pedestrian_style_summary(
         "qgis_path_pedestrian_visible_layer_ids": [str(layer.get("id") or "") for layer in visible_layers],
         "qgis_path_pedestrian_layer_details": [_layer_detail(layer) for layer in layers],
         "qgis_path_pedestrian_visible_layer_details": [_layer_detail(layer) for layer in visible_layers],
+        "qgis_path_pedestrian_label_source_layer_count": len(label_source_layers),
+        "qgis_path_pedestrian_visible_label_source_layer_count": len(visible_label_source_layers),
+        "qgis_path_pedestrian_label_source_details": [
+            _label_source_layer_detail(layer, camera_zoom=camera_zoom) for layer in label_source_layers
+        ],
+        "qgis_path_pedestrian_visible_label_source_details": [
+            _label_source_layer_detail(layer, camera_zoom=camera_zoom) for layer in visible_label_source_layers
+        ],
         "qgis_path_pedestrian_line_width_samples": _layer_control_sample(line_layers, "line-width"),
         "qgis_path_pedestrian_line_color_samples": _layer_control_sample(line_layers, "line-color"),
         "qgis_path_pedestrian_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),
@@ -511,6 +744,10 @@ def _missing_qgis_style_summary() -> dict[str, object]:
         "qgis_path_pedestrian_visible_layer_ids": [],
         "qgis_path_pedestrian_layer_details": [],
         "qgis_path_pedestrian_visible_layer_details": [],
+        "qgis_path_pedestrian_label_source_layer_count": 0,
+        "qgis_path_pedestrian_visible_label_source_layer_count": 0,
+        "qgis_path_pedestrian_label_source_details": [],
+        "qgis_path_pedestrian_visible_label_source_details": [],
         "qgis_path_pedestrian_line_width_samples": [],
         "qgis_path_pedestrian_line_color_samples": [],
         "qgis_path_pedestrian_fill_color_samples": [],
@@ -676,13 +913,48 @@ def _visible_label_repeat_distances(camera: Mapping[str, object]) -> list[str]:
     return repeat_distances
 
 
+def _visible_label_source_detail_rows(camera: Mapping[str, object]) -> list[Mapping[str, object]]:
+    details = camera.get("qgis_path_pedestrian_visible_label_source_details")
+    detail_rows = details if isinstance(details, list) else []
+    return [detail for detail in detail_rows if isinstance(detail, Mapping)]
+
+
+def _visible_label_source_category_matches(
+    camera: Mapping[str, object],
+    duplicate_categories: Iterable[str],
+) -> tuple[list[str], set[str]]:
+    duplicate_category_set = set(duplicate_categories)
+    matches: list[str] = []
+    matched_categories: set[str] = set()
+    for detail in _visible_label_source_detail_rows(camera):
+        layer_id = str(detail.get("id") or "")
+        categories = [
+            category
+            for category in _string_list(detail.get("duplicate_label_categories"))
+            if category in duplicate_category_set
+        ]
+        if layer_id and categories:
+            matches.append(f"{layer_id}: {', '.join(categories)}")
+            matched_categories.update(categories)
+    return matches, matched_categories
+
+
 def _duplicate_label_diagnostic(camera: Mapping[str, object]) -> dict[str, object]:
     duplicate_categories = _duplicate_label_categories(camera)
+    category_names = [str(row.get("category") or "") for row in duplicate_categories]
+    label_source_matches, matched_categories = _visible_label_source_category_matches(
+        camera,
+        category_names,
+    )
     return {
         "has_duplicate_feature_names": bool(duplicate_categories),
         "duplicate_name_categories": duplicate_categories,
         "visible_merge_line_label_styles": _visible_merge_line_label_styles(camera),
         "visible_label_repeat_distances": _visible_label_repeat_distances(camera),
+        "visible_label_source_category_matches": label_source_matches,
+        "unmatched_duplicate_name_categories": [
+            category for category in category_names if category and category not in matched_categories
+        ],
     }
 
 
@@ -1092,7 +1364,18 @@ def _duplicate_label_diagnostic_markdown_lines(cameras: Iterable[object]) -> lis
             continue
         merge_line_styles = _string_list(diagnostic.get("visible_merge_line_label_styles"))
         repeat_distances = _string_list(diagnostic.get("visible_label_repeat_distances"))
-        rows.append([camera.get("camera"), duplicate_summaries, merge_line_styles, repeat_distances])
+        label_source_matches = _string_list(diagnostic.get("visible_label_source_category_matches"))
+        unmatched_categories = _string_list(diagnostic.get("unmatched_duplicate_name_categories"))
+        rows.append(
+            [
+                camera.get("camera"),
+                duplicate_summaries,
+                merge_line_styles,
+                repeat_distances,
+                label_source_matches,
+                unmatched_categories,
+            ]
+        )
     if not rows:
         return []
     lines = ["", "## Duplicate label diagnostics", ""]
@@ -1100,11 +1383,12 @@ def _duplicate_label_diagnostic_markdown_lines(cameras: Iterable[object]) -> lis
         [
             (
                 "Connects duplicate source feature names with the visible QGIS "
-                "line-label merge/repeat controls active at each camera zoom."
+                "line-label merge/repeat controls and source-label category matches "
+                "active at each camera zoom."
             ),
             "",
-            "| Camera | Duplicate feature names | Visible merge-line label styles | Visible label repeat distances |",
-            "| --- | --- | --- | --- |",
+            "| Camera | Duplicate feature names | Visible merge-line label styles | Visible label repeat distances | Visible source-label category matches | Unmatched duplicate categories |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)

@@ -104,8 +104,38 @@ def _qgis_preprocessed_style():
                 "paint": {"fill-color": "#f6f2e8", "fill-opacity": 0.4},
             },
             {
-                "id": "road-label",
+                "id": "road-label-z12-to-z15",
                 "type": "symbol",
+                "minzoom": 12,
+                "maxzoom": 15,
+                "filter": [
+                    "all",
+                    ["has", "name"],
+                    ["match", ["get", "class"], ["street", "street_limited", "track"], True, False],
+                ],
+                "paint": {"text-color": "#333333"},
+            },
+            {
+                "id": "road-label-z15-plus",
+                "type": "symbol",
+                "minzoom": 15,
+                "filter": [
+                    "all",
+                    ["has", "name"],
+                    ["match", ["get", "class"], ["path", "pedestrian"], False, True],
+                ],
+                "paint": {"text-color": "#333333"},
+            },
+            {
+                "id": "path-pedestrian-label",
+                "type": "symbol",
+                "minzoom": 12,
+                "filter": [
+                    "all",
+                    ["has", "name"],
+                    ["any", ["!", ["has", "layer"]], [">=", ["get", "layer"], 0]],
+                    ["match", ["get", "class"], ["pedestrian"], True, False],
+                ],
                 "paint": {"text-color": "#333333"},
             },
         ],
@@ -440,6 +470,24 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             summary["qgis_path_pedestrian_visible_layer_ids"],
             ["road-path", "road-steps", "road-pedestrian-polygon"],
         )
+        self.assertEqual(summary["qgis_path_pedestrian_label_source_layer_count"], 3)
+        self.assertEqual(summary["qgis_path_pedestrian_visible_label_source_layer_count"], 2)
+        label_source_details = {
+            detail["id"]: detail
+            for detail in summary["qgis_path_pedestrian_label_source_details"]
+        }
+        self.assertEqual(
+            label_source_details["path-pedestrian-label"]["duplicate_label_categories"],
+            ["pedestrian"],
+        )
+        self.assertEqual(
+            label_source_details["road-label-z15-plus"]["duplicate_label_categories"],
+            [],
+        )
+        visible_label_source_ids = [
+            detail["id"] for detail in summary["qgis_path_pedestrian_visible_label_source_details"]
+        ]
+        self.assertEqual(visible_label_source_ids, ["road-label-z12-to-z15", "path-pedestrian-label"])
         details_by_id = {detail["id"]: detail for detail in summary["qgis_path_pedestrian_layer_details"]}
         self.assertEqual(details_by_id["road-path"]["type"], "line")
         self.assertEqual(details_by_id["road-path"]["minzoom"], 12)
@@ -496,6 +544,61 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(
             summary["qgis_path_pedestrian_visible_line_dasharray_layer_count"],
             summary["qgis_path_pedestrian_line_dasharray_layer_count"],
+        )
+
+    def test_qgis_style_summary_evaluates_zoom_step_and_comparison_label_filters(self):
+        style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-label",
+                    "type": "symbol",
+                    "filter": [
+                        "step",
+                        ["zoom"],
+                        ["match", ["get", "class"], ["pedestrian"], True, False],
+                        12,
+                        ["match", ["get", "class"], ["path"], True, False],
+                        15,
+                        ["match", ["get", "class"], ["path", "pedestrian"], False, True],
+                    ],
+                },
+                {
+                    "id": "path-pedestrian-label",
+                    "type": "symbol",
+                    "filter": [
+                        "all",
+                        [">", ["get", "layer"], -1],
+                        ["<=", ["get", "layer"], 0],
+                        ["<", ["get", "layer"], 1],
+                        ["match", ["get", "class"], ["pedestrian"], True, False],
+                    ],
+                },
+            ],
+        }
+
+        low_zoom_summary = qgis_path_pedestrian_style_summary(style, camera_zoom=11.5)
+        mid_zoom_summary = qgis_path_pedestrian_style_summary(style, camera_zoom=12.5)
+        high_zoom_summary = qgis_path_pedestrian_style_summary(style, camera_zoom=15.5)
+
+        low_zoom_sources = {
+            detail["id"]: detail
+            for detail in low_zoom_summary["qgis_path_pedestrian_visible_label_source_details"]
+        }
+        mid_zoom_sources = {
+            detail["id"]: detail
+            for detail in mid_zoom_summary["qgis_path_pedestrian_visible_label_source_details"]
+        }
+        high_zoom_sources = {
+            detail["id"]: detail
+            for detail in high_zoom_summary["qgis_path_pedestrian_visible_label_source_details"]
+        }
+        self.assertEqual(low_zoom_sources["road-label"]["duplicate_label_categories"], ["pedestrian"])
+        self.assertEqual(mid_zoom_sources["road-label"]["duplicate_label_categories"], ["path", "step"])
+        self.assertEqual(high_zoom_sources["road-label"]["duplicate_label_categories"], [])
+        self.assertEqual(
+            high_zoom_sources["path-pedestrian-label"]["duplicate_label_categories"],
+            ["pedestrian"],
         )
 
     def test_qgis_style_summary_keeps_full_layer_id_lists(self):
@@ -597,6 +700,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                 "road-label-z12-to-z15=39.6875",
                 "path-pedestrian-label=105.83333333333333",
             ],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["visible_label_source_category_matches"],
+            ["path-pedestrian-label: pedestrian"],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["unmatched_duplicate_name_categories"],
+            ["path", "step"],
         )
 
     def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
@@ -730,10 +841,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             markdown,
         )
         self.assertIn("## Duplicate label diagnostics", markdown)
+        self.assertIn("Visible source-label category matches", markdown)
         self.assertIn('"pedestrian: Englischer Viertel=5"', markdown)
         self.assertIn('"path: Hofmattweg=3"', markdown)
         self.assertIn('"road-label-z12-to-z15"', markdown)
         self.assertIn('"path-pedestrian-label=105.83333333333333"', markdown)
+        self.assertIn('"path-pedestrian-label: pedestrian"', markdown)
+        self.assertIn('"path"', markdown)
+        self.assertIn('"step"', markdown)
         self.assertIn("## Visual comparison artifacts", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | passed | metrics_available | 0.982 | 0.0352 | 0.0761 |", markdown)
         self.assertIn("`debug/comparison/chamonix/mapbox-gl-reference.png`", markdown)
