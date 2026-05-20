@@ -48,6 +48,8 @@ _SWISS_MOTORWAY_SHIELD_Z11_STYLE_MARKER = "ch-motorway-icon-z11-plus"
 _MAPBOX_SYMBOL_PIXEL_TO_MM = 25.4 / 96.0
 _MAPBOX_DEFAULT_SYMBOL_SPACING_PX = 250.0
 _ROAD_LABEL_LOW_ZOOM_SYMBOL_SPACING_PX = 150.0
+_ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING_PX = 400.0
+_REPEAT_DISTANCE_EPSILON_MM = 0.001
 _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
     "ferry-aerialway-label",
     "path-pedestrian-label",
@@ -111,6 +113,8 @@ def _label_repeat_distance(layer_name: str, style) -> float | None:
     if layer_name == "road-label":
         if style_name in {"road-label-below-z12", "road-label-z12-to-z15"}:
             return _symbol_spacing_mm(_ROAD_LABEL_LOW_ZOOM_SYMBOL_SPACING_PX)
+        if style_name == "road-label-z15-plus":
+            return _symbol_spacing_mm(_ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING_PX)
         return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
     if layer_name in _LINE_LABEL_REPEAT_DISTANCE_LAYERS:
         return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
@@ -147,9 +151,20 @@ def _settings_priority(settings) -> int:
     return int(priority) if isinstance(priority, (int, float)) else 0
 
 
-def _needs_repeat_distance(settings) -> bool:
+def _is_repeat_distance_close(left: float, right: float) -> bool:
+    return abs(left - right) <= _REPEAT_DISTANCE_EPSILON_MM
+
+
+def _needs_repeat_distance(settings, expected_repeat_distance: float | None = None) -> bool:
     repeat_distance = getattr(settings, "repeatDistance", 0.0)
-    return not isinstance(repeat_distance, (int, float)) or repeat_distance <= 0
+    if not isinstance(repeat_distance, (int, float)) or repeat_distance <= 0:
+        return True
+    if expected_repeat_distance is None or _is_repeat_distance_close(repeat_distance, expected_repeat_distance):
+        return False
+    return _is_repeat_distance_close(
+        repeat_distance,
+        _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX),
+    )
 
 
 def _apply_settlement_label_priority(settings, qgs_property) -> None:
@@ -179,7 +194,7 @@ def _apply_label_settings(
         if layer_name in _SETTLEMENT_LAYERS:
             _apply_settlement_label_priority(settings, qgs_property)
         changed = True
-    if repeat_distance is not None and _needs_repeat_distance(settings):
+    if repeat_distance is not None and _needs_repeat_distance(settings, repeat_distance):
         settings.repeatDistance = repeat_distance
         settings.repeatDistanceUnit = qgis.RenderUnit.Millimeters
         changed = True
