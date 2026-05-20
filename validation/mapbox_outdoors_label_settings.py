@@ -72,6 +72,11 @@ _SOURCE_LABEL_PAINT_PROPERTIES = (
 )
 _LINE_SYMBOL_PLACEMENTS = frozenset({"line", "line-center"})
 _LINE_CENTER_SYMBOL_PLACEMENTS = frozenset({"line-center"})
+_QGIS_DUPLICATE_LABEL_CONTROL_PROPERTIES = (
+    ("remove_duplicate_labels", "RemoveDuplicateLabels"),
+    ("remove_duplicate_label_distance", "RemoveDuplicateLabelDistance"),
+    ("label_margin_distance", "LabelMarginDistance"),
+)
 
 
 @dataclass(frozen=True)
@@ -300,6 +305,22 @@ def _label_format_record(settings: object) -> dict[str, object]:
     }
 
 
+def _label_placement_record(settings: object) -> dict[str, object]:
+    placement_settings = _method_value(settings, "placementSettings")
+    return {
+        "allow_degraded_placement": (
+            _method_value(placement_settings, "allowDegradedPlacement")
+            if placement_settings is not None
+            else None
+        ),
+        "overlap_handling": (
+            _enum_name(_method_value(placement_settings, "overlapHandling"))
+            if placement_settings is not None
+            else None
+        ),
+    }
+
+
 def _data_defined_property_keys(settings: object) -> list[object]:
     properties = _method_value(settings, "dataDefinedProperties")
     keys = _method_value(properties, "propertyKeys") if properties is not None else None
@@ -342,6 +363,7 @@ def label_settings_record(style: object, settings: object) -> dict[str, object]:
         "overrun_distance": _settings_value(settings, "overrunDistance"),
         "overrun_distance_unit": _settings_value(settings, "overrunDistanceUnit"),
         **_label_format_record(settings),
+        **_label_placement_record(settings),
         "data_defined_property_keys": _data_defined_property_keys(settings),
     }
 
@@ -379,6 +401,16 @@ def _ensure_qgis_application(qgs_application):
         app = qgs_application([], False)
         app.initQgis()
     return app, created_app
+
+
+def _qgis_duplicate_label_controls(qgs_pal_layer_settings, qgis_api) -> dict[str, object]:
+    return {
+        "qgis_version": getattr(qgis_api, "QGIS_VERSION", None),
+        **{
+            key: hasattr(qgs_pal_layer_settings, property_name)
+            for key, property_name in _QGIS_DUPLICATE_LABEL_CONTROL_PROPERTIES
+        },
+    }
 
 
 def _load_original_style(config: LabelSettingsConfig, fetch_mapbox_style_definition) -> dict[str, object]:
@@ -542,6 +574,10 @@ def _label_style_summary_rows(records: list[dict[str, object]]) -> list[dict[str
                 "repeat_distances": _sorted_count_map(row.get("repeat_distance") for row in layer_records),
                 "display_all": _sorted_count_map(row.get("display_all") for row in layer_records),
                 "obstacle": _sorted_count_map(row.get("obstacle") for row in layer_records),
+                "allow_degraded_placement": _sorted_count_map(
+                    row.get("allow_degraded_placement") for row in layer_records
+                ),
+                "overlap_handling": _sorted_count_map(row.get("overlap_handling") for row in layer_records),
                 "label_per_part": _sorted_count_map(row.get("label_per_part") for row in layer_records),
                 "merge_lines": _sorted_count_map(row.get("merge_lines") for row in layer_records),
             }
@@ -1218,6 +1254,8 @@ def _road_shield_label_placement_rows(
                     "repeat_distance": label_row.get("repeat_distance"),
                     "display_all": label_row.get("display_all"),
                     "obstacle": label_row.get("obstacle"),
+                    "allow_degraded_placement": label_row.get("allow_degraded_placement"),
+                    "overlap_handling": label_row.get("overlap_handling"),
                     "label_per_part": label_row.get("label_per_part"),
                     "merge_lines": label_row.get("merge_lines"),
                     "text_color": label_row.get("text_color"),
@@ -1572,6 +1610,7 @@ def _label_settings_report(
     sprite_count: int,
     records: list[dict[str, object]],
     source_label_layers: list[dict[str, object]] | None = None,
+    qgis_duplicate_label_controls: dict[str, object] | None = None,
 ) -> dict[str, object]:
     source_label_layer_rows = source_label_layers or []
     return {
@@ -1582,6 +1621,7 @@ def _label_settings_report(
         "sprite_context_requested": config.include_sprite_context,
         "sprite_context_loaded": sprite_loaded,
         "sprite_definition_count": sprite_count,
+        "qgis_duplicate_label_controls": qgis_duplicate_label_controls or {},
         "qgis_contour_bbox_edge_difference_label_probe": (
             config.qgis_contour_bbox_edge_difference_label_probe
         ),
@@ -1621,6 +1661,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             QgsApplication,
             QgsMapBoxGlStyleConversionContext,
             QgsMapBoxGlStyleConverter,
+            QgsPalLayerSettings,
             Qgis,
         )
     except ImportError as exc:  # pragma: no cover - depends on optional PyQGIS runtime
@@ -1655,6 +1696,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             sprite_count=sprite_count,
             records=records,
             source_label_layers=source_label_layers,
+            qgis_duplicate_label_controls=_qgis_duplicate_label_controls(QgsPalLayerSettings, Qgis),
         )
     finally:
         if created_app:
@@ -1718,6 +1760,19 @@ def _count_map_markdown_value(value: object) -> str:
     )
 
 
+def _qgis_duplicate_label_controls_markdown_value(value: object) -> str:
+    if not isinstance(value, dict) or not value:
+        return "—"
+    controls = [
+        f"{key}={_markdown_value(value.get(key))}"
+        for key, _property_name in _QGIS_DUPLICATE_LABEL_CONTROL_PROPERTIES
+    ]
+    qgis_version = value.get("qgis_version")
+    if qgis_version:
+        controls.insert(0, f"QGIS {_markdown_value(qgis_version)}")
+    return "; ".join(controls)
+
+
 def _zoom_range_markdown_value(minzoom: object, maxzoom: object) -> str:
     return _zoom_range_value(minzoom, maxzoom, _markdown_value)
 
@@ -1728,15 +1783,15 @@ def _append_label_style_summary(lines: list[str], summary_rows: list[object]) ->
             [
                 "## Label style summary by base layer",
                 "",
-                "| Base layer | Count | Source layers | Geometry | Priorities | Placements | Repeat distances | Display all | Obstacle | Label/part | Merge lines |",
-                "| --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| Base layer | Count | Source layers | Geometry | Priorities | Placements | Repeat distances | Display all | Obstacle | Degraded placement | Overlap handling | Label/part | Merge lines |",
+                "| --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for row in summary_rows:
             if not isinstance(row, dict):
                 continue
             lines.append(
-                "| {base} | {count} | {source_layers} | {geometry} | {priorities} | {placements} | {repeat} | {display_all} | {obstacle} | {label_per_part} | {merge_lines} |".format(
+                "| {base} | {count} | {source_layers} | {geometry} | {priorities} | {placements} | {repeat} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {label_per_part} | {merge_lines} |".format(
                     base=_markdown_value(row.get("base_style_layer_id")),
                     count=_markdown_value(row.get("count")),
                     source_layers=_count_map_markdown_value(row.get("source_layers")),
@@ -1746,6 +1801,8 @@ def _append_label_style_summary(lines: list[str], summary_rows: list[object]) ->
                     repeat=_count_map_markdown_value(row.get("repeat_distances")),
                     display_all=_count_map_markdown_value(row.get("display_all")),
                     obstacle=_count_map_markdown_value(row.get("obstacle")),
+                    allow_degraded=_count_map_markdown_value(row.get("allow_degraded_placement")),
+                    overlap=_count_map_markdown_value(row.get("overlap_handling")),
                     label_per_part=_count_map_markdown_value(row.get("label_per_part")),
                     merge_lines=_count_map_markdown_value(row.get("merge_lines")),
                 )
@@ -1791,15 +1848,15 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 "",
                 "Focused `road-number-shield` rows for placement, repeat-distance, and collision-priority follow-up.",
                 "",
-                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Label/part | Merge lines | Text color |",
-                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- |",
+                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Degraded placement | Overlap handling | Label/part | Merge lines | Text color |",
+                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {label_per_part} | {merge_lines} | {text_color} |".format(
+            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {label_per_part} | {merge_lines} | {text_color} |".format(
                 style=_markdown_value(row.get("style_name")),
                 source_zoom=_markdown_value(row.get("source_zoom")),
                 qfit_zoom=_markdown_value(row.get("qfit_zoom")),
@@ -1812,6 +1869,8 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 repeat=_markdown_value(row.get("repeat_distance")),
                 display_all=_markdown_value(row.get("display_all")),
                 obstacle=_markdown_value(row.get("obstacle")),
+                allow_degraded=_markdown_value(row.get("allow_degraded_placement")),
+                overlap=_markdown_value(row.get("overlap_handling")),
                 label_per_part=_markdown_value(row.get("label_per_part")),
                 merge_lines=_markdown_value(row.get("merge_lines")),
                 text_color=_markdown_value(row.get("text_color")),
@@ -2012,15 +2071,15 @@ def _append_converted_label_rows(lines: list[str], rows: list[object]) -> None:
         [
             "## Converted QGIS label styles",
             "",
-            "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Geometry generator | Curve angles | Overrun | Data-defined keys |",
-            "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | --- |",
+            "| Base layer | Style | Source layer | Geometry | Field | Expr | Priority | Placement | Placement flags | Repeat distance | Repeat unit | Display all | Obstacle | Degraded placement | Overlap handling | Text size | Text color | Text opacity | Buffer | Buffer size | Buffer color | Buffer opacity | Label/part | Merge lines | Geometry generator | Curve angles | Overrun | Data-defined keys |",
+            "| --- | --- | --- | --- | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | --- | --- | ---: | --- | ---: | --- | ---: | --- | ---: | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {base} | {style} | {source} | {geometry} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {generator} | {curve_angles} | {overrun} | {keys} |".format(
+            "| {base} | {style} | {source} | {geometry} | {field} | {expr} | {priority} | {placement} | {placement_flags} | {repeat} | {unit} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {text_size} | {text_color} | {text_opacity} | {buffer_enabled} | {buffer_size} | {buffer_color} | {buffer_opacity} | {label_per_part} | {merge_lines} | {generator} | {curve_angles} | {overrun} | {keys} |".format(
                 base=_markdown_value(row.get("base_style_layer_id")),
                 style=_markdown_value(row.get("style_name")),
                 source=_markdown_value(row.get("source_layer")),
@@ -2034,6 +2093,8 @@ def _append_converted_label_rows(lines: list[str], rows: list[object]) -> None:
                 unit=_markdown_value(row.get("repeat_distance_unit")),
                 display_all=_markdown_value(row.get("display_all")),
                 obstacle=_markdown_value(row.get("obstacle")),
+                allow_degraded=_markdown_value(row.get("allow_degraded_placement")),
+                overlap=_markdown_value(row.get("overlap_handling")),
                 text_size=_compound_markdown_value(row.get("text_size"), row.get("text_size_unit")),
                 text_color=_markdown_value(row.get("text_color")),
                 text_opacity=_markdown_value(row.get("text_opacity")),
@@ -2130,6 +2191,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Converted label styles: {report.get('label_count', len(rows))}",
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
+        "QGIS duplicate-label controls: "
+        f"{_qgis_duplicate_label_controls_markdown_value(report.get('qgis_duplicate_label_controls'))}",
         f"Bbox-edge contour label probe: {_markdown_value(report.get('qgis_contour_bbox_edge_difference_label_probe'))}",
         "Bbox-edge source-style contour label probe: "
         f"{_markdown_value(report.get('qgis_contour_bbox_edge_difference_source_style_label_probe'))}",

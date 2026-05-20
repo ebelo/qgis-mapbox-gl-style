@@ -27,6 +27,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _line_label_repeat_spacing_rows,
     _load_original_style,
     _postprocessed_label_records,
+    _qgis_duplicate_label_controls,
     _road_shield_label_placement_rows,
     _source_label_control_omission_summary_rows,
     _source_label_control_summary_rows,
@@ -97,6 +98,14 @@ class FakeTextFormat:
         return FakeTextBuffer()
 
 
+class FakePlacementSettings:
+    def allowDegradedPlacement(self):
+        return False
+
+    def overlapHandling(self):
+        return SimpleNamespace(name="PreventOverlap")
+
+
 class FakeStyle:
     def __init__(self, *, style_name, layer_name, geometry_type=None):
         self._style_name = style_name
@@ -156,6 +165,9 @@ class FakeSettings:
     def format(self):
         return FakeTextFormat()
 
+    def placementSettings(self):
+        return FakePlacementSettings()
+
 
 class FakeQgsApplication:
     _instance = None
@@ -177,6 +189,10 @@ class FakeQgsApplication:
     def exitQgis(self):
         self.exited = True
         type(self)._instance = None
+
+
+class FakeQgsPalLayerSettings:
+    pass
 
 
 class FakeConversionContext:
@@ -234,6 +250,7 @@ def _fake_qgis_modules():
     core_module.QgsApplication = FakeQgsApplication
     core_module.QgsMapBoxGlStyleConversionContext = FakeConversionContext
     core_module.QgsMapBoxGlStyleConverter = FakeConverter
+    core_module.QgsPalLayerSettings = FakeQgsPalLayerSettings
     core_module.Qgis = SimpleNamespace(RenderUnit=SimpleNamespace(Millimeters="millimeters"))
     qgis_module.core = core_module
     return {"qgis": qgis_module, "qgis.core": core_module}
@@ -335,6 +352,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(record["buffer_size_unit"], "Millimeters")
         self.assertEqual(record["buffer_color"], "#dcdcd4")
         self.assertEqual(record["buffer_opacity"], 0.75)
+        self.assertFalse(record["allow_degraded_placement"])
+        self.assertEqual(record["overlap_handling"], "PreventOverlap")
         self.assertEqual(record["data_defined_property_keys"], [50, 87])
 
     def test_ensure_qgis_application_reuses_or_creates_application(self):
@@ -352,6 +371,21 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertTrue(created)
         self.assertTrue(app.initialized)
         self.assertIs(FakeQgsApplication.instance(), app)
+
+    def test_qgis_duplicate_label_controls_report_runtime_support(self):
+        class FakeQgis:
+            QGIS_VERSION = "3.44.0"
+
+        class FakePalLayerSettings:
+            RemoveDuplicateLabels = 1
+            RemoveDuplicateLabelDistance = 2
+
+        controls = _qgis_duplicate_label_controls(FakePalLayerSettings, FakeQgis)
+
+        self.assertEqual(controls["qgis_version"], "3.44.0")
+        self.assertTrue(controls["remove_duplicate_labels"])
+        self.assertTrue(controls["remove_duplicate_label_distance"])
+        self.assertFalse(controls["label_margin_distance"])
 
     def test_load_original_style_uses_fixture_or_live_fetcher(self):
         config = LabelSettingsConfig(token=None, output_root=Path("/tmp"))
@@ -689,6 +723,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["qgis_converter_result"], "success")
         self.assertTrue(report["sprite_context_loaded"])
         self.assertEqual(report["sprite_definition_count"], 440)
+        self.assertEqual(report["qgis_duplicate_label_controls"], {})
         self.assertEqual(report["label_count"], 1)
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["count"], 1)
@@ -713,6 +748,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance": 39.6875,
                     "display_all": False,
                     "obstacle": True,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": False,
                 },
@@ -725,6 +762,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance": 66.1458333333,
                     "display_all": False,
                     "obstacle": True,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": False,
                 },
@@ -737,6 +776,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance": 0.0,
                     "display_all": False,
                     "obstacle": True,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": False,
                 },
@@ -750,6 +791,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(road_row["priorities"], {"4": 2})
         self.assertEqual(road_row["repeat_distances"], {"39.6875": 1, "66.1458": 1})
         self.assertEqual(road_row["display_all"], {"false": 2})
+        self.assertEqual(road_row["allow_degraded_placement"], {"false": 2})
+        self.assertEqual(road_row["overlap_handling"], {"PreventOverlap": 2})
 
     def test_line_label_repeat_spacing_summary_highlights_missing_spacing_and_zero_repeat(self):
         rows = _line_label_repeat_spacing_rows(
@@ -1027,6 +1070,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance": 123.4722222222,
                     "display_all": False,
                     "obstacle": True,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": True,
                     "text_color": "#1d1f25",
@@ -1039,6 +1084,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance": 0.0,
                     "display_all": False,
                     "obstacle": True,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": False,
                     "text_color": "#1d1f25",
@@ -1060,12 +1107,16 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(below["qfit_symbol_placement"], "point")
         self.assertEqual(below["priority"], 3)
         self.assertFalse(below["display_all"])
+        self.assertFalse(below["allow_degraded_placement"])
+        self.assertEqual(below["overlap_handling"], "PreventOverlap")
         self.assertFalse(below["label_per_part"])
         self.assertEqual(z11_plus["qfit_zoom"], "11+")
         self.assertEqual(z11_plus["qfit_symbol_placement"], "line")
         self.assertAlmostEqual(z11_plus["qfit_symbol_spacing"], 466.6666666667)
         self.assertEqual(z11_plus["priority"], 6)
         self.assertFalse(z11_plus["display_all"])
+        self.assertFalse(z11_plus["allow_degraded_placement"])
+        self.assertEqual(z11_plus["overlap_handling"], "PreventOverlap")
         self.assertFalse(z11_plus["label_per_part"])
         self.assertTrue(z11_plus["merge_lines"])
 
@@ -1668,6 +1719,12 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "generated": "2026-05-18T08:22:00+00:00",
             "sprite_context_loaded": True,
             "sprite_definition_count": 440,
+            "qgis_duplicate_label_controls": {
+                "qgis_version": "3.34.4-Prizren",
+                "remove_duplicate_labels": False,
+                "remove_duplicate_label_distance": False,
+                "label_margin_distance": False,
+            },
             "qgis_contour_bbox_edge_difference_label_probe": True,
             "qgis_contour_bbox_edge_difference_source_style_label_probe": True,
             "qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe": True,
@@ -1683,6 +1740,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distances": {"0": 1},
                     "display_all": {"false": 1},
                     "obstacle": {"true": 1},
+                    "allow_degraded_placement": {"false": 1},
+                    "overlap_handling": {"PreventOverlap": 1},
                     "label_per_part": {"false": 1},
                     "merge_lines": {"false": 1},
                 }
@@ -1701,6 +1760,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "repeat_distance": 123.4722222222,
                     "display_all": False,
                     "obstacle": True,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": True,
                     "text_color": "#1d1f25",
@@ -1813,6 +1874,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "display_all": False,
                     "obstacle": True,
                     "placement_flags": 1,
+                    "allow_degraded_placement": False,
+                    "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": False,
                     "geometry_generator": "boundary($geometry)",
@@ -1859,14 +1922,21 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("# Mapbox Outdoors QGIS label settings — mapbox/outdoors-v12", markdown)
         self.assertIn("Converted label styles: 1", markdown)
         self.assertIn("Sprite context loaded: yes", markdown)
+        self.assertIn(
+            "QGIS duplicate-label controls: QGIS 3.34.4-Prizren; remove_duplicate_labels=no; remove_duplicate_label_distance=no; label_margin_distance=no",
+            markdown,
+        )
         self.assertIn("Bbox-edge contour label probe: yes", markdown)
         self.assertIn("Bbox-edge source-style contour label probe: yes", markdown)
         self.assertIn("Bbox-edge source-style high-zoom contour label probe: yes", markdown)
         self.assertIn("## Label style summary by base layer", markdown)
-        self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
+        self.assertIn(
+            "| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | PreventOverlap=1 | no=1 | no=1 |",
+            markdown,
+        )
         self.assertIn("## Road shield label placement detail", markdown)
         self.assertIn(
-            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | yes | #1d1f25 |",
+            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | #1d1f25 |",
             markdown,
         )
         self.assertIn("## Line label repeat spacing by base layer", markdown)
