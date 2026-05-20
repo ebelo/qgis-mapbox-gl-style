@@ -803,6 +803,137 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertNotIn("filter<br>paint.line-opacity", markdown)
         self.assertNotIn("hidden-road` |", markdown)
 
+    def test_build_style_audit_reports_path_pedestrian_hierarchy_candidates(self):
+        audit = build_style_audit(
+            {
+                "version": 8,
+                "layers": [
+                    {
+                        "id": "road-primary",
+                        "type": "line",
+                        "source-layer": "road",
+                        "minzoom": 5,
+                        "filter": ["==", ["get", "class"], "primary"],
+                        "paint": {"line-color": "#ffffff", "line-width": 2},
+                    },
+                    {
+                        "id": "road-path-trail",
+                        "type": "line",
+                        "source-layer": "road",
+                        "minzoom": 12,
+                        "filter": [
+                            "all",
+                            ["==", ["geometry-type"], "LineString"],
+                            ["match", ["get", "type"], ["piste", "trail"], True, False],
+                        ],
+                        "layout": {"line-join": "round"},
+                        "paint": {
+                            "line-color": ["match", ["get", "type"], "trail", "#8b7d45", "#c88a2a"],
+                            "line-dasharray": [1, 2],
+                            "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.7, 16, 1.5],
+                        },
+                    },
+                    {
+                        "id": "road-pedestrian-polygon-fill",
+                        "type": "fill",
+                        "source-layer": "road",
+                        "minzoom": 14,
+                        "filter": ["==", ["get", "class"], "pedestrian"],
+                        "paint": {
+                            "fill-color": ["match", ["get", "class"], "pedestrian", "#eeeeee", "#ffffff"],
+                            "fill-opacity": ["interpolate", ["linear"], ["zoom"], 14, 0, 16, 1],
+                        },
+                    },
+                    {
+                        "id": "hidden-road-path",
+                        "type": "line",
+                        "source-layer": "road",
+                        "layout": {"visibility": "none"},
+                        "paint": {"line-color": "#cccccc"},
+                    },
+                    {
+                        "id": "landuse-path-outline",
+                        "type": "line",
+                        "source-layer": "landuse",
+                        "paint": {"line-color": "#88aa77"},
+                    },
+                    {
+                        "id": "road-no-hiking",
+                        "type": "line",
+                        "source-layer": "road",
+                        "filter": ["!=", ["get", "type"], "hiking"],
+                        "paint": {"line-color": "#cccccc"},
+                    },
+                    {
+                        "id": "path-pedestrian-label",
+                        "type": "symbol",
+                        "source-layer": "road",
+                        "layout": {"symbol-placement": "line", "text-field": ["get", "name"]},
+                    },
+                ],
+            }
+        )
+
+        candidates = audit["summary"]["path_pedestrian_hierarchy_candidates"]
+        self.assertEqual(
+            [candidate["layer"] for candidate in candidates],
+            ["road-pedestrian-polygon-fill", "road-path-trail"],
+        )
+        fill_candidate, line_candidate = candidates
+        self.assertEqual(fill_candidate["path_pedestrian_markers"], ["pedestrian"])
+        self.assertEqual(fill_candidate["path_pedestrian_marker"], "pedestrian")
+        self.assertEqual(line_candidate["path_pedestrian_markers"], ["path", "piste", "trail"])
+        self.assertEqual(line_candidate["zoom_band"], "z≥12")
+        self.assertEqual(line_candidate["filter_operator_signature"], "==, all, geometry-type, get, match")
+        self.assertEqual(
+            line_candidate["road_trail_control_properties"],
+            [
+                "filter",
+                "layout.line-join",
+                "paint.line-color",
+                "paint.line-dasharray",
+                "paint.line-width",
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["path_pedestrian_hierarchy_candidates_by_marker"],
+            [
+                {"path_pedestrian_marker": "path", "count": 1},
+                {"path_pedestrian_marker": "pedestrian", "count": 1},
+                {"path_pedestrian_marker": "piste", "count": 1},
+                {"path_pedestrian_marker": "trail", "count": 1},
+            ],
+        )
+        self.assertEqual(
+            audit["summary"]["path_pedestrian_hierarchy_candidates_by_type"],
+            [{"type": "fill", "count": 1}, {"type": "line", "count": 1}],
+        )
+        self.assertIn(
+            {"property": "paint.line-width", "count": 1},
+            audit["summary"]["path_pedestrian_hierarchy_simplified_by_property"],
+        )
+        self.assertEqual(
+            audit["summary"]["path_pedestrian_hierarchy_qgis_dependent_by_property"],
+            [
+                {"property": "filter", "count": 2},
+                {"property": "paint.fill-opacity", "count": 1},
+            ],
+        )
+
+        markdown = build_audit_markdown(audit)
+        self.assertIn("### Path/pedestrian hierarchy candidates", markdown)
+        self.assertIn("#### Path/pedestrian hierarchy candidates QGIS-dependent controls", markdown)
+        self.assertIn("| `path, piste, trail` | `road-path-trail` | `line` | `road` | z≥12 |", markdown)
+        self.assertIn("| `pedestrian` | `road-pedestrian-polygon-fill` | `fill` | `road` | z≥14 |", markdown)
+        path_pedestrian_section = markdown.split("### Path/pedestrian hierarchy candidates", 1)[1].split(
+            "### Terrain/landcover palette candidates",
+            1,
+        )[0]
+        self.assertNotIn("hidden-road-path` |", path_pedestrian_section)
+        self.assertNotIn("landuse-path-outline` |", path_pedestrian_section)
+        self.assertNotIn("road-no-hiking` |", path_pedestrian_section)
+        self.assertNotIn("path-pedestrian-label` |", path_pedestrian_section)
+
     def test_build_style_audit_reports_terrain_landcover_palette_candidates(self):
         audit = build_style_audit(
             {

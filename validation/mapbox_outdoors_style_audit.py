@@ -47,6 +47,13 @@ _ROAD_TRAIL_HIERARCHY_CANDIDATES_BY_TYPE_KEY = "road_trail_hierarchy_candidates_
 _ROAD_TRAIL_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY = "road_trail_hierarchy_simplified_by_property"
 _ROAD_TRAIL_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY = "road_trail_hierarchy_qgis_dependent_by_property"
 _ROAD_TRAIL_CONTROL_PROPERTIES_KEY = "road_trail_control_properties"
+_PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_KEY = "path_pedestrian_hierarchy_candidates"
+_PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_BY_MARKER_KEY = "path_pedestrian_hierarchy_candidates_by_marker"
+_PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_BY_TYPE_KEY = "path_pedestrian_hierarchy_candidates_by_type"
+_PATH_PEDESTRIAN_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY = "path_pedestrian_hierarchy_simplified_by_property"
+_PATH_PEDESTRIAN_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY = "path_pedestrian_hierarchy_qgis_dependent_by_property"
+_PATH_PEDESTRIAN_HIERARCHY_MARKER_KEY = "path_pedestrian_marker"
+_PATH_PEDESTRIAN_HIERARCHY_MARKERS_KEY = "path_pedestrian_markers"
 _TERRAIN_LANDCOVER_CANDIDATES_KEY = "terrain_landcover_palette_candidates"
 _TERRAIN_LANDCOVER_CANDIDATES_BY_SOURCE_LAYER_KEY = "terrain_landcover_palette_candidates_by_source_layer"
 _TERRAIN_LANDCOVER_CANDIDATES_BY_TYPE_KEY = "terrain_landcover_palette_candidates_by_type"
@@ -189,6 +196,21 @@ _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES = (
     "paint.line-pattern",
     "paint.line-translate",
     "paint.line-width",
+)
+_PATH_PEDESTRIAN_HIERARCHY_MARKERS = (
+    "pedestrian",
+    "path",
+    "footway",
+    "cycleway",
+    "piste",
+    "trail",
+    "hiking",
+    "steps",
+    "platform",
+    "corridor",
+)
+_PATH_PEDESTRIAN_HIERARCHY_NEGATION_PREFIXES = frozenset(
+    {"except", "exclude", "excluded", "excluding", "no", "non", "not", "without"}
 )
 _ROUTE_OVERLAY_LAYER_TYPES = frozenset({"line", "symbol"})
 _ROUTE_OVERLAY_TEXT_PAINT_PROPERTIES = (
@@ -1029,6 +1051,90 @@ def _road_trail_hierarchy_control_properties(layer: dict[str, object]) -> list[s
     return _control_properties(layer, _ROAD_TRAIL_HIERARCHY_CONTROL_PROPERTIES, include_filter=True)
 
 
+def _ordered_path_pedestrian_hierarchy_markers(markers: Iterable[str]) -> list[str]:
+    found = set(markers)
+    return [marker for marker in _PATH_PEDESTRIAN_HIERARCHY_MARKERS if marker in found]
+
+
+def _path_pedestrian_hierarchy_text_markers(value: object) -> list[str]:
+    tokens = [token for token in re.split(r"[^a-z0-9]+", str(value).lower()) if token]
+    markers = [
+        token
+        for index, token in enumerate(tokens)
+        if token in _PATH_PEDESTRIAN_HIERARCHY_MARKERS
+        and (index == 0 or tokens[index - 1] not in _PATH_PEDESTRIAN_HIERARCHY_NEGATION_PREFIXES)
+    ]
+    return _ordered_path_pedestrian_hierarchy_markers(markers)
+
+
+def _path_pedestrian_hierarchy_filter_label_markers(value: object) -> list[str]:
+    if isinstance(value, list):
+        markers: list[str] = []
+        for item in value:
+            markers.extend(_path_pedestrian_hierarchy_filter_label_markers(item))
+        return _ordered_path_pedestrian_hierarchy_markers(markers)
+    if isinstance(value, str):
+        return _path_pedestrian_hierarchy_text_markers(value)
+    return []
+
+
+def _path_pedestrian_hierarchy_filter_output_is_truthy(value: object) -> bool:
+    return value is True or (
+        isinstance(value, str) and value.lower() in {"1", "true", "yes"}
+    )
+
+
+def _path_pedestrian_hierarchy_positive_match_markers(value: list[object]) -> list[str]:
+    markers: list[str] = []
+    for label_index in range(2, len(value) - 1, 2):
+        if _path_pedestrian_hierarchy_filter_output_is_truthy(value[label_index + 1]):
+            markers.extend(_path_pedestrian_hierarchy_filter_label_markers(value[label_index]))
+    return _ordered_path_pedestrian_hierarchy_markers(markers)
+
+
+def _path_pedestrian_hierarchy_positive_filter_markers(value: object) -> list[str]:
+    if not isinstance(value, list) or not value:
+        return []
+    operator = value[0]
+    if operator in {"!", "!=", "!in", "none", "not"}:
+        return []
+    if operator in {"all", "any"}:
+        markers: list[str] = []
+        for item in value[1:]:
+            markers.extend(_path_pedestrian_hierarchy_positive_filter_markers(item))
+        return _ordered_path_pedestrian_hierarchy_markers(markers)
+    if operator == "==":
+        return _path_pedestrian_hierarchy_filter_label_markers(value[2:])
+    if operator == "in":
+        return _path_pedestrian_hierarchy_filter_label_markers(value[2:])
+    if operator == "match":
+        return _path_pedestrian_hierarchy_positive_match_markers(value)
+    if operator == "case":
+        markers = []
+        for predicate_index in range(1, len(value) - 1, 2):
+            if _path_pedestrian_hierarchy_filter_output_is_truthy(value[predicate_index + 1]):
+                markers.extend(_path_pedestrian_hierarchy_positive_filter_markers(value[predicate_index]))
+        return _ordered_path_pedestrian_hierarchy_markers(markers)
+    return []
+
+
+def _path_pedestrian_hierarchy_markers(layer: dict[str, object]) -> list[str]:
+    markers = [
+        *_path_pedestrian_hierarchy_text_markers(layer.get("id") or ""),
+        *_path_pedestrian_hierarchy_positive_filter_markers(_qgis_filter_value(layer)),
+    ]
+    return _ordered_path_pedestrian_hierarchy_markers(markers)
+
+
+def _is_path_pedestrian_hierarchy_candidate_layer(layer: dict[str, object]) -> bool:
+    source_layer = str(layer.get("source_layer") or "").replace("-", "_").lower()
+    return (
+        source_layer == "road"
+        and _is_road_trail_hierarchy_candidate_layer(layer)
+        and bool(_path_pedestrian_hierarchy_markers(layer))
+    )
+
+
 def _is_terrain_landcover_candidate_layer(layer: dict[str, object]) -> bool:
     return (
         str(layer.get("group") or "") == "terrain/landcover"
@@ -1411,22 +1517,46 @@ def _road_trail_hierarchy_candidate_rows(layers: list[dict[str, object]]) -> lis
     for layer in layers:
         if not _is_road_trail_hierarchy_candidate_layer(layer):
             continue
-        controls = _road_trail_hierarchy_control_properties(layer)
-        if not controls:
+        row = _road_trail_hierarchy_candidate_row(layer)
+        if row is not None:
+            rows.append(row)
+    return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
+
+
+def _road_trail_hierarchy_candidate_row(
+    layer: dict[str, object],
+    *,
+    markers: list[str] | None = None,
+) -> dict[str, object] | None:
+    controls = _road_trail_hierarchy_control_properties(layer)
+    if not controls:
+        return None
+    control_set = set(controls)
+    row: dict[str, object] = {
+        "layer": str(layer.get("id") or ""),
+        "type": str(layer.get("type") or ""),
+        "source_layer": str(layer.get("source_layer") or ""),
+        "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
+        _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
+        _ROAD_TRAIL_CONTROL_PROPERTIES_KEY: controls,
+        _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
+        _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
+    }
+    if markers is not None:
+        row[_PATH_PEDESTRIAN_HIERARCHY_MARKER_KEY] = ", ".join(markers)
+        row[_PATH_PEDESTRIAN_HIERARCHY_MARKERS_KEY] = markers
+    return row
+
+
+def _path_pedestrian_hierarchy_candidate_rows(layers: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for layer in layers:
+        if not _is_path_pedestrian_hierarchy_candidate_layer(layer):
             continue
-        control_set = set(controls)
-        rows.append(
-            {
-                "layer": str(layer.get("id") or ""),
-                "type": str(layer.get("type") or ""),
-                "source_layer": str(layer.get("source_layer") or ""),
-                "zoom_band": str(layer.get("zoom_band") or _ALL_ZOOMS_BAND),
-                _FILTER_OPERATOR_SIGNATURE_KEY: _operator_signature(_qgis_filter_value(layer)),
-                _ROAD_TRAIL_CONTROL_PROPERTIES_KEY: controls,
-                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY: _qfit_simplified_control_properties(layer, control_set),
-                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY: _qgis_dependent_control_properties(layer, control_set),
-            }
-        )
+        markers = _path_pedestrian_hierarchy_markers(layer)
+        row = _road_trail_hierarchy_candidate_row(layer, markers=markers)
+        if row is not None:
+            rows.append(row)
     return sorted(rows, key=lambda row: (str(row["type"]), str(row["layer"])))
 
 
@@ -1984,18 +2114,39 @@ def _count_row_values(rows: list[dict[str, object]], key: str) -> list[dict[str,
     ]
 
 
-def _count_route_overlay_markers(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _count_multi_value_rows(
+    rows: list[dict[str, object]],
+    *,
+    values_key: str,
+    output_key: str,
+) -> list[dict[str, object]]:
     counts: Counter[str] = Counter()
     for row in rows:
-        values = row.get(_ROUTE_OVERLAY_MARKERS_KEY)
+        values = row.get(values_key)
         if not isinstance(values, list):
             continue
         counts.update(str(value) for value in values if value)
     return [
-        {_ROUTE_OVERLAY_MARKER_KEY: name, "count": count}
+        {output_key: name, "count": count}
         for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
         if name
     ]
+
+
+def _count_route_overlay_markers(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return _count_multi_value_rows(
+        rows,
+        values_key=_ROUTE_OVERLAY_MARKERS_KEY,
+        output_key=_ROUTE_OVERLAY_MARKER_KEY,
+    )
+
+
+def _count_path_pedestrian_hierarchy_markers(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return _count_multi_value_rows(
+        rows,
+        values_key=_PATH_PEDESTRIAN_HIERARCHY_MARKERS_KEY,
+        output_key=_PATH_PEDESTRIAN_HIERARCHY_MARKER_KEY,
+    )
 
 
 def _filter_parse_signature_summary(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -3422,6 +3573,7 @@ def build_style_audit(
     label_density_candidates = _label_density_candidate_rows(layers)
     line_label_repetition_candidates = _line_label_repetition_candidate_rows(layers)
     road_trail_hierarchy_candidates = _road_trail_hierarchy_candidate_rows(layers)
+    path_pedestrian_hierarchy_candidates = _path_pedestrian_hierarchy_candidate_rows(layers)
     terrain_landcover_candidates = _terrain_landcover_candidate_rows(layers)
     water_flow_candidates = _water_flow_candidate_rows(layers)
     icon_sprite_candidates = _icon_sprite_candidate_rows(layers)
@@ -3521,6 +3673,22 @@ def build_style_audit(
                 _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
             ),
             _ROAD_TRAIL_HIERARCHY_CANDIDATES_KEY: road_trail_hierarchy_candidates,
+            _PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_BY_MARKER_KEY: _count_path_pedestrian_hierarchy_markers(
+                path_pedestrian_hierarchy_candidates,
+            ),
+            _PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_BY_TYPE_KEY: _count_rows_by_key(
+                path_pedestrian_hierarchy_candidates,
+                "type",
+            ),
+            _PATH_PEDESTRIAN_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY: _count_row_values(
+                path_pedestrian_hierarchy_candidates,
+                _QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY,
+            ),
+            _PATH_PEDESTRIAN_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY: _count_row_values(
+                path_pedestrian_hierarchy_candidates,
+                _QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY,
+            ),
+            _PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_KEY: path_pedestrian_hierarchy_candidates,
             _TERRAIN_LANDCOVER_CANDIDATES_BY_SOURCE_LAYER_KEY: _count_rows_by_key(
                 terrain_landcover_candidates,
                 "source_layer",
@@ -3849,32 +4017,38 @@ def _markdown_road_trail_hierarchy_candidate_table(
     rows: list[dict[str, object]],
     *,
     empty: str = "—",
+    leading_label: str | None = None,
+    leading_key: str | None = None,
 ) -> list[str]:
     if not rows:
         return [empty, ""]
-    lines = [
-        (
-            "| Layer | Type | Source layer | Zoom | Filter operators | Road/trail controls | "
-            "Simplified/substituted by qfit | QGIS-dependent controls |"
-        ),
-        _MARKDOWN_TYPED_CANDIDATE_SEPARATOR,
+    headers = [
+        "Layer",
+        "Type",
+        "Source layer",
+        "Zoom",
+        "Filter operators",
+        "Road/trail controls",
+        "Simplified/substituted by qfit",
+        "QGIS-dependent controls",
     ]
+    if leading_label is not None:
+        headers.insert(0, leading_label)
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _header in headers) + " |"]
     for row in rows:
-        lines.append(
-            (
-                _MARKDOWN_TYPED_CANDIDATE_ROW_PREFIX
-                + _MARKDOWN_TYPED_CANDIDATE_ROW_SUFFIX
-            ).format(
-                layer=row.get("layer", ""),
-                layer_type=row.get("type", ""),
-                source_layer=row.get("source_layer", ""),
-                zoom=row.get("zoom_band", _ALL_ZOOMS_BAND),
-                filter_operators=row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE),
-                controls=_markdown_list(list(row.get(_ROAD_TRAIL_CONTROL_PROPERTIES_KEY) or [])),
-                simplified=_markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
-                unresolved=_markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
-            )
-        )
+        cells = [
+            f"`{row.get('layer', '')}`",
+            f"`{row.get('type', '')}`",
+            f"`{row.get('source_layer', '')}`",
+            str(row.get("zoom_band", _ALL_ZOOMS_BAND)),
+            f"`{row.get(_FILTER_OPERATOR_SIGNATURE_KEY, _NO_OPERATOR_SIGNATURE)}`",
+            _markdown_list(list(row.get(_ROAD_TRAIL_CONTROL_PROPERTIES_KEY) or [])),
+            _markdown_list(list(row.get(_QFIT_SIMPLIFIED_CONTROL_PROPERTIES_KEY) or [])),
+            _markdown_list(list(row.get(_QGIS_DEPENDENT_CONTROL_PROPERTIES_KEY) or [])),
+        ]
+        if leading_key is not None:
+            cells.insert(0, f"`{row.get(leading_key, '')}`")
+        lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
     return lines
 
@@ -5449,6 +5623,40 @@ def _markdown_road_trail_hierarchy_summary(summary: dict[str, object]) -> list[s
     ]
 
 
+def _markdown_path_pedestrian_hierarchy_summary(summary: dict[str, object]) -> list[str]:
+    return [
+        "### Path/pedestrian hierarchy candidates",
+        "",
+        (
+            "Visible road source line and fill layers matching path, pedestrian, footway, cycleway, piste, "
+            "trail, hiking, steps, platform, or corridor markers. Use this diagnostic with live road-feature "
+            "counts before changing path, pedestrian, trail, piste, or step styling."
+        ),
+        "",
+        *_markdown_named_count_table(
+            _summary_rows(summary, _PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_BY_MARKER_KEY),
+            key=_PATH_PEDESTRIAN_HIERARCHY_MARKER_KEY,
+            label="Marker",
+        ),
+        *_markdown_named_count_table(
+            _summary_rows(summary, _PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_BY_TYPE_KEY),
+            key="type",
+            label=_MARKDOWN_LAYER_TYPE_LABEL,
+        ),
+        "#### Path/pedestrian hierarchy candidates simplified/substituted by qfit",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _PATH_PEDESTRIAN_HIERARCHY_SIMPLIFIED_BY_PROPERTY_KEY)),
+        "#### Path/pedestrian hierarchy candidates QGIS-dependent controls",
+        "",
+        *_markdown_count_table(_summary_rows(summary, _PATH_PEDESTRIAN_HIERARCHY_QGIS_DEPENDENT_BY_PROPERTY_KEY)),
+        *_markdown_road_trail_hierarchy_candidate_table(
+            _summary_rows(summary, _PATH_PEDESTRIAN_HIERARCHY_CANDIDATES_KEY),
+            leading_label="Markers",
+            leading_key=_PATH_PEDESTRIAN_HIERARCHY_MARKER_KEY,
+        ),
+    ]
+
+
 def _markdown_terrain_landcover_summary(summary: dict[str, object]) -> list[str]:
     return [
         "### Terrain/landcover palette candidates",
@@ -5709,6 +5917,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_label_density_summary(summary),
         *_markdown_line_label_repetition_summary(summary),
         *_markdown_road_trail_hierarchy_summary(summary),
+        *_markdown_path_pedestrian_hierarchy_summary(summary),
         *_markdown_terrain_landcover_summary(summary),
         *_markdown_water_flow_summary(summary),
         *_markdown_icon_sprite_summary(summary),
