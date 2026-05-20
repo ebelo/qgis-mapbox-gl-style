@@ -241,36 +241,37 @@ def _apply_label_settings(
 
 
 def _apply_line_center_label_placement(settings, qgs_label_line_settings, qgis) -> bool:
-    changed = False
+    placement_changed = False
     if getattr(settings, "placement", None) != qgis.LabelPlacement.Line:
         settings.placement = qgis.LabelPlacement.Line
-        changed = True
+        placement_changed = True
 
     try:
         line_settings = settings.lineSettings()
     except (AttributeError, RuntimeError, TypeError):
-        return changed
+        return placement_changed
+    line_settings_changed = False
     if _needs_line_center_anchor_percent(line_settings):
         line_settings.setLineAnchorPercent(_LINE_CENTER_ANCHOR_PERCENT)
-        changed = True
+        line_settings_changed = True
     if (
         line_settings.anchorTextPoint()
         != qgs_label_line_settings.AnchorTextPoint.CenterOfText
     ):
         line_settings.setAnchorTextPoint(qgs_label_line_settings.AnchorTextPoint.CenterOfText)
-        changed = True
+        line_settings_changed = True
     if line_settings.anchorType() != qgs_label_line_settings.AnchorType.Strict:
         line_settings.setAnchorType(qgs_label_line_settings.AnchorType.Strict)
-        changed = True
+        line_settings_changed = True
     if (
         line_settings.anchorClipping()
         != qgs_label_line_settings.AnchorClipping.UseEntireLine
     ):
         line_settings.setAnchorClipping(qgs_label_line_settings.AnchorClipping.UseEntireLine)
-        changed = True
-    if changed:
+        line_settings_changed = True
+    if line_settings_changed:
         settings.setLineSettings(line_settings)
-    return changed
+    return placement_changed or line_settings_changed
 
 
 def _apply_line_center_label_geometry(style, qgis) -> bool:
