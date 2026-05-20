@@ -54,6 +54,9 @@ _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
     "ferry-aerialway-label",
     "path-pedestrian-label",
 }
+_LINE_LABEL_MERGE_LAYERS = {
+    "path-pedestrian-label",
+}
 # Representative-zoom values from mapbox_config's waterway-label spacing
 # expression after qfit splits it into static QGIS zoom bands.  The z17+
 # value is wider than Mapbox's raw 400 px spacing because QGIS repeats labels
@@ -127,6 +130,12 @@ def _label_repeat_distance(layer_name: str, style) -> float | None:
     return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
 
 
+def _label_merge_lines(layer_name: str) -> bool | None:
+    if layer_name in _LINE_LABEL_MERGE_LAYERS:
+        return True
+    return None
+
+
 def _label_field_expression(layer_name: str, settings) -> str | None:
     if (
         layer_name == _CONTOUR_LABEL_LAYER_ID
@@ -184,6 +193,7 @@ def _apply_label_settings(
     layer_name: str,
     priority: int | None,
     repeat_distance: float | None,
+    merge_lines: bool | None,
     field_expression: str | None,
     qgs_property,
     qgis,
@@ -197,6 +207,9 @@ def _apply_label_settings(
     if repeat_distance is not None and _needs_repeat_distance(settings, repeat_distance):
         settings.repeatDistance = repeat_distance
         settings.repeatDistanceUnit = qgis.RenderUnit.Millimeters
+        changed = True
+    if merge_lines is not None and getattr(settings, "mergeLines", None) != merge_lines:
+        settings.mergeLines = merge_lines
         changed = True
     if field_expression is not None and (
         getattr(settings, "fieldName", "") != field_expression
@@ -272,9 +285,11 @@ def apply_mapbox_label_priority(labeling) -> None:
             layer_name = _label_style_mapbox_layer_id(style)
             priority = _label_priority(layer_name, style)
             repeat_distance = _label_repeat_distance(layer_name, style)
+            merge_lines = _label_merge_lines(layer_name)
             if (
                 priority is None
                 and repeat_distance is None
+                and merge_lines is None
                 and layer_name != _CONTOUR_LABEL_LAYER_ID
             ):
                 continue
@@ -282,13 +297,14 @@ def apply_mapbox_label_priority(labeling) -> None:
             if settings is None:
                 continue
             field_expression = _label_field_expression(layer_name, settings)
-            if priority is None and repeat_distance is None and field_expression is None:
+            if priority is None and repeat_distance is None and merge_lines is None and field_expression is None:
                 continue
             if _apply_label_settings(
                 settings,
                 layer_name=layer_name,
                 priority=priority,
                 repeat_distance=repeat_distance,
+                merge_lines=merge_lines,
                 field_expression=field_expression,
                 qgs_property=QgsProperty,
                 qgis=Qgis,
