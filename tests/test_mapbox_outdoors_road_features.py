@@ -47,6 +47,18 @@ def _feature(geometry_type, properties):
 
 
 class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
+    def test_top_count_labels_preserves_count_order_and_limit(self):
+        labels = road_features._top_count_labels(
+            {
+                "trail": 2,
+                "footway": 3,
+                "piste": 1,
+                "path": 4,
+            }
+        )
+
+        self.assertEqual(labels, ["path=4", "footway=3", "trail=2"])
+
     def test_resolve_mapbox_token_prefers_argument_then_environment(self):
         self.assertEqual(
             resolve_mapbox_token(
@@ -1025,6 +1037,61 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn("| zermatt-trails-z18-outdoors | decoded | 18.0 | 18 | 1/1 | - | 4 | 1 | 1 | 1 | 1 | 1 | 1 | 1 | 1 |", markdown)
         self.assertIn(f'Path line signatures: {{"{path_signature}":1}}', markdown)
         self.assertIn(f'Road exit shield signatures: {{"{exit_shield_signature}":1}}', markdown)
+        self.assertIn("## Path/pedestrian focus", markdown)
+        self.assertIn(
+            '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 1 | 1 | ["pedestrian=1"] | ["footway=1"] | ["bridge=1"] |',
+            markdown,
+        )
+        self.assertIn(f'["{path_signature}=1"] | ["{step_signature}=1"] |', markdown)
+
+    def test_build_all_camera_summary_markdown_omits_path_pedestrian_focus_for_zero_counts(self):
+        report = {
+            "generated": "2026-05-18T15:40:00+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "camera_count": 1,
+            "successful_camera_count": 1,
+            "failed_camera_count": 0,
+            "decoded_tile_count": 1,
+            "tile_count": 1,
+            "road_feature_count": 0,
+            "motorway_junction_feature_count": 0,
+            "pedestrian_polygon_candidate_count": 0,
+            "pedestrian_line_candidate_count": 0,
+            "path_line_candidate_count": 0,
+            "step_line_candidate_count": 0,
+            "oneway_arrow_candidate_count": 0,
+            "road_intersection_candidate_count": 0,
+            "level_crossing_candidate_count": 0,
+            "road_number_shield_candidate_count": 0,
+            "road_exit_shield_candidate_count": 0,
+            "cameras": [
+                {
+                    "status": "decoded",
+                    "camera": "switzerland-alps-z5-outdoors",
+                    "camera_zoom": 5.35,
+                    "tile_zoom": 5,
+                    "decoded_tile_count": 1,
+                    "failed_tile_count": 0,
+                    "tile_count": 1,
+                    "road_feature_count": 0,
+                    "motorway_junction_feature_count": 0,
+                    "pedestrian_polygon_candidate_count": 0,
+                    "pedestrian_line_candidate_count": 0,
+                    "path_line_candidate_count": 0,
+                    "step_line_candidate_count": 0,
+                    "oneway_arrow_candidate_count": 0,
+                    "road_intersection_candidate_count": 0,
+                    "level_crossing_candidate_count": 0,
+                    "road_number_shield_candidate_count": 0,
+                    "road_exit_shield_candidate_count": 0,
+                }
+            ],
+        }
+
+        markdown = build_all_camera_summary_markdown(report)
+
+        self.assertNotIn("## Path/pedestrian focus", markdown)
 
     def test_write_report_writes_json_and_markdown(self):
         report = {

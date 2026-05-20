@@ -98,6 +98,7 @@ ROAD_INTERSECTION_SIGNATURE_KEYS = ("class", "name")
 LEVEL_CROSSING_SIGNATURE_KEYS = ("class", "structure", "layer")
 ROAD_NUMBER_SHIELD_SIGNATURE_KEYS = ("class", "reflen", "shield", "shield_beta", "structure", "layer")
 ROAD_EXIT_SHIELD_SIGNATURE_KEYS = ("ref", "reflen")
+PATH_PEDESTRIAN_FOCUS_TOP_COUNT_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -587,6 +588,26 @@ def _road_feature_table_cells(record: dict[str, object]) -> list[str]:
 
 def _markdown_table_row(cells: Iterable[object]) -> str:
     return "| " + " | ".join(_markdown_value(cell) for cell in cells) + " |"
+
+
+def _top_count_labels(value: object, *, limit: int = PATH_PEDESTRIAN_FOCUS_TOP_COUNT_LIMIT) -> list[str]:
+    if not isinstance(value, dict):
+        return []
+    counts = [(str(label), count) for label, count in value.items() if isinstance(count, int)]
+    counts.sort(key=lambda item: (-item[1], item[0]))
+    return [f"{label}={count}" for label, count in counts[:limit]]
+
+
+def _has_path_pedestrian_focus(record: dict[str, object]) -> bool:
+    return any(
+        isinstance(record.get(key), int) and record.get(key) > 0
+        for key in (
+            "pedestrian_polygon_candidate_count",
+            "pedestrian_line_candidate_count",
+            "path_line_candidate_count",
+            "step_line_candidate_count",
+        )
+    )
 
 
 def _load_original_style(config: RoadFeatureConfig, style_fetcher) -> dict[str, object]:
@@ -1080,6 +1101,40 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 ]
             )
         )
+    focus_rows = [
+        row
+        for row in rows
+        if isinstance(row, dict) and row.get("status") == "decoded" and _has_path_pedestrian_focus(row)
+    ]
+    if focus_rows:
+        lines.extend(
+            [
+                "",
+                "## Path/pedestrian focus",
+                "",
+                "| Camera | Camera zoom | Tile zoom | Pedestrian/path polygons | Pedestrian lines | Path lines | Steps | Pedestrian line types | Path line types | Step structures | Path signatures | Step signatures |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for camera_report in focus_rows:
+            lines.append(
+                _markdown_table_row(
+                    [
+                        camera_report.get("camera"),
+                        camera_report.get("camera_zoom"),
+                        camera_report.get("tile_zoom"),
+                        camera_report.get("pedestrian_polygon_candidate_count"),
+                        camera_report.get("pedestrian_line_candidate_count"),
+                        camera_report.get("path_line_candidate_count"),
+                        camera_report.get("step_line_candidate_count"),
+                        _top_count_labels(camera_report.get("pedestrian_line_type_counts")),
+                        _top_count_labels(camera_report.get("path_line_type_counts")),
+                        _top_count_labels(camera_report.get("step_line_structure_counts")),
+                        _top_count_labels(camera_report.get("path_line_signature_counts")),
+                        _top_count_labels(camera_report.get("step_line_signature_counts")),
+                    ]
+                )
+            )
     return "\n".join(lines) + "\n"
 
 
