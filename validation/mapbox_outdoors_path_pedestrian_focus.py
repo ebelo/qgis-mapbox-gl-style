@@ -442,6 +442,17 @@ def _qgis_color_samples(camera: Mapping[str, object]) -> list[str]:
     return samples
 
 
+def _qgis_stroke_samples(camera: Mapping[str, object]) -> list[str]:
+    width_samples = camera.get("qgis_path_pedestrian_visible_line_width_samples")
+    dash_samples = camera.get("qgis_path_pedestrian_visible_line_dasharray_samples")
+    samples = []
+    if isinstance(width_samples, list):
+        samples.extend(str(sample) for sample in width_samples[:2])
+    if isinstance(dash_samples, list):
+        samples.extend(str(sample) for sample in dash_samples[:2])
+    return samples
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     cameras = report.get("cameras")
     rows = cameras if isinstance(cameras, list) else []
@@ -472,8 +483,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         return "\n".join(lines) + "\n"
     lines.extend(
         [
-            "| Camera | Camera zoom | Tile zoom | Feature counts | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample visible QGIS colors | Sample visible QGIS layer ids |",
-            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| Camera | Camera zoom | Tile zoom | Feature counts | Top pedestrian types | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample visible QGIS strokes | Sample visible QGIS colors | Sample visible QGIS layer ids |",
+            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for camera in rows:
@@ -499,11 +510,13 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     camera.get("camera_zoom"),
                     camera.get("tile_zoom"),
                     feature_counts,
+                    camera.get("top_pedestrian_line_types"),
                     camera.get("top_path_line_types"),
                     camera.get("top_path_signatures"),
                     camera.get("top_step_signatures"),
                     qgis_layers,
                     _qgis_control_summary(camera),
+                    _qgis_stroke_samples(camera),
                     _qgis_color_samples(camera),
                     camera.get("qgis_path_pedestrian_visible_layer_ids"),
                 ]
