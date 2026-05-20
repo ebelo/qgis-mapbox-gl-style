@@ -654,9 +654,9 @@ _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_LAYER_PREFIXES = (
     "bridge-path-bg-below-z16",
 )
 _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 14.0
-# The z14 Chamonix comparison showed Outdoors path casings reading too faintly
-# in QGIS after px-to-mm conversion; keep this as a modest casing-only boost.
-_PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.25
+# The z14 Geneva/Chamonix comparisons benefit from a small casing-only boost,
+# but larger low-zoom path casings overshoot the Mapbox GL reference.
+_PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.15
 _PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.5
 _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "bridge-pedestrian",
