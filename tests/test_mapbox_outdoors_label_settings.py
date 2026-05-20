@@ -1025,7 +1025,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "placement": "Horizontal",
                     "priority": 6,
                     "repeat_distance": 123.4722222222,
+                    "display_all": False,
                     "obstacle": True,
+                    "label_per_part": False,
                     "merge_lines": True,
                     "text_color": "#1d1f25",
                 },
@@ -1035,7 +1037,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "placement": "OverPoint",
                     "priority": 3,
                     "repeat_distance": 0.0,
+                    "display_all": False,
                     "obstacle": True,
+                    "label_per_part": False,
                     "merge_lines": False,
                     "text_color": "#1d1f25",
                 },
@@ -1055,10 +1059,14 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(below["source_zoom"], "6+")
         self.assertEqual(below["qfit_symbol_placement"], "point")
         self.assertEqual(below["priority"], 3)
+        self.assertFalse(below["display_all"])
+        self.assertFalse(below["label_per_part"])
         self.assertEqual(z11_plus["qfit_zoom"], "11+")
         self.assertEqual(z11_plus["qfit_symbol_placement"], "line")
         self.assertAlmostEqual(z11_plus["qfit_symbol_spacing"], 466.6666666667)
         self.assertEqual(z11_plus["priority"], 6)
+        self.assertFalse(z11_plus["display_all"])
+        self.assertFalse(z11_plus["label_per_part"])
         self.assertTrue(z11_plus["merge_lines"])
 
     def test_line_center_label_conversion_summary_isolates_line_center_labels(self):
@@ -1691,7 +1699,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "placement": "Horizontal",
                     "priority": 6,
                     "repeat_distance": 123.4722222222,
+                    "display_all": False,
                     "obstacle": True,
+                    "label_per_part": False,
                     "merge_lines": True,
                     "text_color": "#1d1f25",
                 }
@@ -1856,7 +1866,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
         self.assertIn("## Road shield label placement detail", markdown)
         self.assertIn(
-            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | yes | yes | #1d1f25 |",
+            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | yes | #1d1f25 |",
             markdown,
         )
         self.assertIn("## Line label repeat spacing by base layer", markdown)

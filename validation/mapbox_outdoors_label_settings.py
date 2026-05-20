@@ -1216,7 +1216,9 @@ def _road_shield_label_placement_rows(
                     "placement": label_row.get("placement"),
                     "priority": label_row.get("priority"),
                     "repeat_distance": label_row.get("repeat_distance"),
+                    "display_all": label_row.get("display_all"),
                     "obstacle": label_row.get("obstacle"),
+                    "label_per_part": label_row.get("label_per_part"),
                     "merge_lines": label_row.get("merge_lines"),
                     "text_color": label_row.get("text_color"),
                 }
@@ -1789,15 +1791,15 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 "",
                 "Focused `road-number-shield` rows for placement, repeat-distance, and collision-priority follow-up.",
                 "",
-                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Obstacle | Merge lines | Text color |",
-                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- |",
+                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Label/part | Merge lines | Text color |",
+                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- |",
             ]
         )
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {obstacle} | {merge_lines} | {text_color} |".format(
+            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {label_per_part} | {merge_lines} | {text_color} |".format(
                 style=_markdown_value(row.get("style_name")),
                 source_zoom=_markdown_value(row.get("source_zoom")),
                 qfit_zoom=_markdown_value(row.get("qfit_zoom")),
@@ -1808,7 +1810,9 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 placement=_markdown_value(row.get("placement")),
                 priority=_markdown_value(row.get("priority")),
                 repeat=_markdown_value(row.get("repeat_distance")),
+                display_all=_markdown_value(row.get("display_all")),
                 obstacle=_markdown_value(row.get("obstacle")),
+                label_per_part=_markdown_value(row.get("label_per_part")),
                 merge_lines=_markdown_value(row.get("merge_lines")),
                 text_color=_markdown_value(row.get("text_color")),
             )
