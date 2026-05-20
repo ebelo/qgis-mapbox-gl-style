@@ -1177,8 +1177,8 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 "",
                 "## Road label/shield focus",
                 "",
-                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Exit shield reflens | Road label classes | Duplicate road labels |",
-                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Shield signatures | Exit shield reflens | Road label classes | Duplicate road labels |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for camera_report in road_focus_rows:
@@ -1193,6 +1193,7 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                         camera_report.get("road_label_candidate_count"),
                         _top_count_labels(camera_report.get("road_number_shield_class_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_reflen_counts")),
+                        _top_count_labels(camera_report.get("road_number_shield_signature_counts")),
                         _top_count_labels(camera_report.get("road_exit_shield_reflen_counts")),
                         _top_count_labels(camera_report.get("road_label_class_counts")),
                         _top_count_labels(camera_report.get("road_label_duplicate_name_counts")),

@@ -1228,7 +1228,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn(f'["{path_signature}=1"] | ["{step_signature}=1"] |', markdown)
         self.assertIn("## Road label/shield focus", markdown)
         self.assertIn(
-            '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
+            f'| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | ["{shield_signature}=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
             markdown,
         )
 
