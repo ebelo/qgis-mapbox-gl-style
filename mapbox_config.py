@@ -739,10 +739,11 @@ _ROAD_LABEL_FILTER_ZOOM_STEP_ENTRIES: tuple[tuple[int, object], ...] = (
     (4, _ROAD_LABEL_MID_ZOOM_CLASS_FILTER),
     (6, _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER),
 )
+_ROAD_LABEL_MID_ZOOM_SUFFIX = "z12-to-z15"
 _ROAD_LABEL_HIGH_ZOOM_SUFFIX = "z15-plus"
 _ROAD_LABEL_FILTER_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, object], ...] = (
     ("below-z12", None, 12.0, _ROAD_LABEL_LOW_ZOOM_CLASS_FILTER),
-    ("z12-to-z15", 12.0, 15.0, _ROAD_LABEL_MID_ZOOM_CLASS_FILTER),
+    (_ROAD_LABEL_MID_ZOOM_SUFFIX, 12.0, 15.0, _ROAD_LABEL_MID_ZOOM_CLASS_FILTER),
     (_ROAD_LABEL_HIGH_ZOOM_SUFFIX, 15.0, None, _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER),
 )
 _ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS = {
@@ -750,6 +751,7 @@ _ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS = {
 }
 _ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING = 400.0
 _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR = "hsl(0, 0%, 38%)"
+_ROAD_LABEL_MID_ZOOM_TEXT_COLOR = _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR
 _PATH_BACKGROUND_LINE_COLOR_EXPRESSION = [
     "match",
     ["get", "type"],
@@ -2034,6 +2036,12 @@ def _apply_high_zoom_road_label_style(variant: dict[str, object]) -> None:
         variant_paint["text-color"] = _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR
 
 
+def _apply_mid_zoom_road_label_style(variant: dict[str, object]) -> None:
+    variant_paint = variant.setdefault("paint", {})
+    if isinstance(variant_paint, dict):
+        variant_paint["text-color"] = _ROAD_LABEL_MID_ZOOM_TEXT_COLOR
+
+
 def _road_label_filter_layer_variant(
     layer: dict[str, object],
     filter_value: list[object],
@@ -2050,6 +2058,8 @@ def _road_label_filter_layer_variant(
         clause_index,
         class_filter,
     )
+    if suffix == _ROAD_LABEL_MID_ZOOM_SUFFIX:
+        _apply_mid_zoom_road_label_style(variant)
     if suffix == _ROAD_LABEL_HIGH_ZOOM_SUFFIX:
         _apply_high_zoom_road_label_style(variant)
     return variant
