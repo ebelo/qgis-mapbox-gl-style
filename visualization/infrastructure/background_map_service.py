@@ -55,6 +55,7 @@ _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
     "path-pedestrian-label",
 }
 _LINE_LABEL_MERGE_LAYERS = {
+    "contour-label",
     "ferry-aerialway-label",
     "path-pedestrian-label",
     "road-label",
