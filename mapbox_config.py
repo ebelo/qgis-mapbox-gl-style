@@ -775,6 +775,18 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
         "hsl(60, 1%, 64%)",
     ),
 )
+_PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
+    "bridge-path-bg-z16-plus-outdoor",
+    "bridge-path-bg-z16-plus-remaining",
+    "bridge-pedestrian-case-z16-plus",
+    "road-path-bg-z16-plus-outdoor",
+    "road-path-bg-z16-plus-remaining",
+    "road-pedestrian-case-z16-plus",
+}
+_PATH_HIGH_ZOOM_PALE_CASING_SUFFIX = "pale-casing"
+_PATH_HIGH_ZOOM_PALE_CASING_COLOR = "hsl(0, 0%, 98%)"
+_PATH_HIGH_ZOOM_PALE_CASING_WIDTH_MM = 3.0
+_PATH_HIGH_ZOOM_PALE_CASING_OPACITY = 1.0
 _PATH_TYPE_FILTER_LOW_ZOOM_TYPES = ["steps", "sidewalk", "crossing"]
 _PATH_TYPE_FILTER_LOW_ZOOM_INVERTED_MATCH = [
     "!",
@@ -2152,6 +2164,36 @@ def _split_path_background_line_color_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _path_high_zoom_pale_casing_layer_variant(layer: dict[str, object]) -> dict[str, object] | None:
+    """Add a pale underlay behind selected high-zoom path and pedestrian casings."""
+    layer_id = str(layer.get("id") or "")
+    if layer_id not in _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS or layer.get("type") != "line":
+        return None
+    variant = copy.deepcopy(layer)
+    variant["id"] = f"{layer_id}-{_PATH_HIGH_ZOOM_PALE_CASING_SUFFIX}"
+    variant["paint"] = {
+        "line-width": _PATH_HIGH_ZOOM_PALE_CASING_WIDTH_MM,
+        "line-color": _PATH_HIGH_ZOOM_PALE_CASING_COLOR,
+        "line-opacity": _PATH_HIGH_ZOOM_PALE_CASING_OPACITY,
+    }
+    return variant
+
+
+def _add_path_high_zoom_pale_casing_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variant = _path_high_zoom_pale_casing_layer_variant(layer)
+        if variant is not None:
+            expanded_layers.append(variant)
+        expanded_layers.append(layer)
+    return expanded_layers
+
+
 def _numeric_match_filter_with_offset(value: object, offset: float) -> object | None:
     if not isinstance(value, list) or len(value) < 5 or value[0] != "match" or (len(value) - 3) % 2 != 0:
         return None
@@ -2477,6 +2519,20 @@ def _path_background_line_color_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _path_high_zoom_pale_casing_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    casing_suffix = f"-{_PATH_HIGH_ZOOM_PALE_CASING_SUFFIX}"
+    if not normalized.endswith(casing_suffix):
+        return None
+    cased_layer_id = normalized[: -len(casing_suffix)]
+    if cased_layer_id not in _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS:
+        return None
+    path_background_base_layer_id = _path_background_line_color_base_layer_id(cased_layer_id)
+    if path_background_base_layer_id is not None:
+        return path_background_base_layer_id
+    return _pedestrian_line_width_base_layer_id(cased_layer_id)
+
+
 def _line_width_zoom_band_base_layer_id(
     layer_id: object,
     *,
@@ -2597,6 +2653,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         _landcover_fill_opacity_base_layer_id(layer_id),
         _landuse_fill_opacity_base_layer_id(layer_id),
         _path_background_line_color_base_layer_id(layer_id),
+        _path_high_zoom_pale_casing_base_layer_id(layer_id),
         _path_trail_line_width_base_layer_id(layer_id),
         _pedestrian_line_width_base_layer_id(layer_id),
         _road_steps_line_style_base_layer_id(layer_id),
@@ -6056,7 +6113,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
     QGIS can parse, splits visible hillshade, landcover, landuse, waterway,
-    path background, and road class colors into static class layers, and collapses
+    path background, and road class colors into static class layers, adds
+    high-zoom pale path/pedestrian casings for Outdoors parity, and collapses
     Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
@@ -6078,6 +6136,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_trail_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_pedestrian_line_width_layers_for_qgis(style.get("layers"))
+    style["layers"] = _add_path_high_zoom_pale_casing_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_steps_line_style_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_poi_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_label_icon_visibility_layers_for_qgis(style.get("layers"))

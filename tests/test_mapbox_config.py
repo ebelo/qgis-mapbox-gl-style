@@ -5179,13 +5179,17 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-path-bg-below-z16-outdoor",
                 "road-path-bg-below-z16-remaining",
                 "road-path-bg-z16-plus-piste",
+                "road-path-bg-z16-plus-outdoor-pale-casing",
                 "road-path-bg-z16-plus-outdoor",
+                "road-path-bg-z16-plus-remaining-pale-casing",
                 "road-path-bg-z16-plus-remaining",
                 "bridge-path-bg-below-z16-piste",
                 "bridge-path-bg-below-z16-outdoor",
                 "bridge-path-bg-below-z16-remaining",
                 "bridge-path-bg-z16-plus-piste",
+                "bridge-path-bg-z16-plus-outdoor-pale-casing",
                 "bridge-path-bg-z16-plus-outdoor",
+                "bridge-path-bg-z16-plus-remaining-pale-casing",
                 "bridge-path-bg-z16-plus-remaining",
             ],
         )
@@ -5198,6 +5202,27 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             for suffix in ("piste", "outdoor", "remaining"):
                 self.assertEqual(by_id[f"{layer_id}-below-z16-{suffix}"]["maxzoom"], 16.0)
                 self.assertEqual(by_id[f"{layer_id}-z16-plus-{suffix}"]["minzoom"], 16.0)
+            for suffix in ("outdoor", "remaining"):
+                cased_layer = by_id[f"{layer_id}-z16-plus-{suffix}-pale-casing"]
+                target_layer = by_id[f"{layer_id}-z16-plus-{suffix}"]
+                self.assertEqual(cased_layer["filter"], target_layer["filter"])
+                self.assertEqual(cased_layer["minzoom"], 16.0)
+                self.assertNotIn("maxzoom", cased_layer)
+                self.assertEqual(
+                    cased_layer["paint"],
+                    {
+                        "line-width": 3.0,
+                        "line-color": "hsl(0, 0%, 98%)",
+                        "line-opacity": 1.0,
+                    },
+                )
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                        f"{layer_id}-z16-plus-{suffix}-pale-casing"
+                    ),
+                    layer_id,
+                )
+            self.assertNotIn(f"{layer_id}-z16-plus-piste-pale-casing", by_id)
         self.assertEqual(by_id["road-path-bg-below-z16-piste"]["minzoom"], 12)
         self.assertEqual(by_id["bridge-path-bg-below-z16-piste"]["minzoom"], 14)
         expected_below_z16_outdoor_filter = [
@@ -5271,6 +5296,57 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "bridge-path-bg-below-z16-piste")
         self.assertEqual(result[3]["id"], "bridge-path-bg-below-z16-outdoor")
         self.assertEqual(result[4]["id"], "bridge-path-bg-below-z16-remaining")
+
+    def test_path_high_zoom_pale_casing_helper_inserts_only_selected_layers(self):
+        unchanged_layers = "not-a-layer-list"
+        selected_layer = {
+            "id": "road-pedestrian-case-z16-plus",
+            "type": "line",
+            "minzoom": 16,
+            "filter": ["==", ["get", "class"], "pedestrian"],
+            "paint": {"line-width": 2.4, "line-color": "hsl(60, 10%, 70%)"},
+        }
+        mixed_layers = [
+            "not-a-layer",
+            {"id": "road-path-bg-z16-plus-piste", "type": "line"},
+            selected_layer,
+        ]
+
+        self.assertIs(
+            mapbox_config._add_path_high_zoom_pale_casing_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._add_path_high_zoom_pale_casing_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "road-path-bg-z16-plus-piste")
+        self.assertEqual(result[2]["id"], "road-pedestrian-case-z16-plus-pale-casing")
+        self.assertEqual(result[2]["filter"], selected_layer["filter"])
+        self.assertEqual(
+            result[2]["paint"],
+            {
+                "line-width": 3.0,
+                "line-color": "hsl(0, 0%, 98%)",
+                "line-opacity": 1.0,
+            },
+        )
+        self.assertEqual(result[3]["id"], "road-pedestrian-case-z16-plus")
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z16-plus-pale-casing"),
+            "road-pedestrian-case",
+        )
+        self.assertEqual(
+            mapbox_config._path_high_zoom_pale_casing_base_layer_id(
+                "road-path-bg-z16-plus-outdoor-pale-casing"
+            ),
+            "road-path-bg",
+        )
+        self.assertEqual(
+            mapbox_config._path_high_zoom_pale_casing_base_layer_id(
+                "road-pedestrian-case-z16-plus-pale-casing"
+            ),
+            "road-pedestrian-case",
+        )
 
     def test_path_line_width_uses_split_zoom_band_samples(self):
         path_filter = [
@@ -5691,6 +5767,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-pedestrian-below-z16",
                 "road-pedestrian-z16-plus",
                 "road-pedestrian-case-below-z16",
+                "road-pedestrian-case-z16-plus-pale-casing",
                 "road-pedestrian-case-z16-plus",
                 "bridge-pedestrian-below-z16",
                 "bridge-pedestrian-z16-plus",
@@ -5723,6 +5800,18 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             by_id["road-pedestrian-case-z16-plus"]["paint"]["line-width"],
             case_high_mm,
         )
+        self.assertEqual(
+            by_id["road-pedestrian-case-z16-plus-pale-casing"]["paint"],
+            {
+                "line-width": 3.0,
+                "line-color": "hsl(0, 0%, 98%)",
+                "line-opacity": 1.0,
+            },
+        )
+        self.assertEqual(
+            by_id["road-pedestrian-case-z16-plus-pale-casing"].get("filter"),
+            by_id["road-pedestrian-case-z16-plus"].get("filter"),
+        )
         self.assertGreater(case_high_mm, pedestrian_high_mm)
         self.assertEqual(by_id["road-pedestrian-below-z16"]["maxzoom"], 16.0)
         self.assertEqual(by_id["road-pedestrian-z16-plus"]["minzoom"], 16.0)
@@ -5733,6 +5822,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z16-plus"),
+            "road-pedestrian-case",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                "road-pedestrian-case-z16-plus-pale-casing"
+            ),
             "road-pedestrian-case",
         )
         self.assertAlmostEqual(
