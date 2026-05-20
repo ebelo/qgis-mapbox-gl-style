@@ -232,6 +232,7 @@ _ROAD_NUMBER_SHIELD_SPRITE_NAME_RE = re.compile(
     r"^(?:default|rectangle-(?:blue|green|red|white|yellow)|"
     r"[a-z]{2}-(?:highway|main|motorway|national-highway)(?:-toll)?)-[2-6]$"
 )
+_ROAD_NUMBER_SHIELD_ICON_TOKEN_RE = re.compile(r"^\{(?P<field>shield(?:_beta)?)\}-(?P<reflen>[2-6])$")
 _MOTORWAY_EXIT_SPRITE_NAME_RE = re.compile(r"^motorway-exit-[1-9]$")
 _TERRAIN_LANDCOVER_LAYER_TYPES = frozenset({"fill", "line"})
 _TERRAIN_LANDCOVER_CONTROL_PROPERTIES = (
@@ -1199,8 +1200,39 @@ def _match_expression_string_outputs(expr: object) -> list[str]:
     return sorted({str(output) for output in outputs if isinstance(output, str)})
 
 
-def _icon_image_string_outputs(expr: object) -> list[str]:
+def _road_number_shield_token_filter_bases(expr: object, field_name: str) -> list[str] | None:
+    if not isinstance(expr, list) or not expr:
+        return None
+    if (
+        len(expr) == 5
+        and expr[0] == "match"
+        and expr[1] == ["get", field_name]
+        and isinstance(expr[2], list)
+        and expr[3] is True
+        and expr[4] is False
+    ):
+        return sorted({str(value) for value in expr[2] if isinstance(value, str)})
+    for item in expr[1:]:
+        bases = _road_number_shield_token_filter_bases(item, field_name)
+        if bases is not None:
+            return bases
+    return None
+
+
+def _icon_image_string_outputs(expr: object, layer_filter: object = None) -> list[str]:
     if isinstance(expr, str) and expr:
+        token_match = _ROAD_NUMBER_SHIELD_ICON_TOKEN_RE.match(expr)
+        if token_match is not None:
+            field_name = token_match.group("field")
+            reflen = int(token_match.group("reflen"))
+            configured_bases = set(_ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[reflen])
+            filter_bases = _road_number_shield_token_filter_bases(layer_filter, field_name)
+            bases = filter_bases if filter_bases is not None else sorted(configured_bases)
+            return sorted(
+                f"{base}-{reflen}"
+                for base in bases
+                if base in configured_bases
+            )
         return [expr]
     return _match_expression_string_outputs(expr)
 
@@ -1213,7 +1245,7 @@ def _qfit_road_number_shield_sprite_outputs(simplified_layers: list[dict[str, ob
         layout = layer.get("layout")
         if not isinstance(layout, dict):
             continue
-        outputs.update(_icon_image_string_outputs(layout.get("icon-image")))
+        outputs.update(_icon_image_string_outputs(layout.get("icon-image"), layer.get("filter")))
     return sorted(outputs)
 
 

@@ -1689,7 +1689,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ],
         ]
 
-    def test_road_number_shield_icon_case_expands_to_reflen_sprite_matches(self):
+    def test_road_number_shield_icon_case_expands_to_reflen_tokenized_sprite_layers(self):
         shield_icon = self._road_number_shield_icon_case()
         style = {
             "layers": [
@@ -1717,19 +1717,29 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             [
                 "before",
                 "road-number-shield-2-beta-ch-motorway-icon",
-                "road-number-shield-2-beta-remaining-icons",
+                "road-number-shield-2-beta-known-icons",
+                "road-number-shield-2-beta-default-icon",
                 "road-number-shield-2-ch-motorway-icon",
-                "road-number-shield-2-remaining-icons",
+                "road-number-shield-2-known-icons",
+                "road-number-shield-2-default-icon",
                 "road-number-shield-3-beta-ch-motorway-icon",
-                "road-number-shield-3-beta-remaining-icons",
+                "road-number-shield-3-beta-known-icons",
+                "road-number-shield-3-beta-default-icon",
                 "road-number-shield-3-ch-motorway-icon",
-                "road-number-shield-3-remaining-icons",
-                "road-number-shield-4-beta",
-                "road-number-shield-4",
-                "road-number-shield-5-beta",
-                "road-number-shield-5",
-                "road-number-shield-6-beta",
-                "road-number-shield-6",
+                "road-number-shield-3-known-icons",
+                "road-number-shield-3-default-icon",
+                "road-number-shield-4-beta-known-icons",
+                "road-number-shield-4-beta-default-icon",
+                "road-number-shield-4-known-icons",
+                "road-number-shield-4-default-icon",
+                "road-number-shield-5-beta-known-icons",
+                "road-number-shield-5-beta-default-icon",
+                "road-number-shield-5-known-icons",
+                "road-number-shield-5-default-icon",
+                "road-number-shield-6-beta-known-icons",
+                "road-number-shield-6-beta-default-icon",
+                "road-number-shield-6-known-icons",
+                "road-number-shield-6-default-icon",
                 "after",
             ],
         )
@@ -1780,66 +1790,76 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(beta_layer["layout"]["icon-image"], "ch-motorway-2")
         self.assertEqual(beta_layer["paint"]["text-color"], "hsl(0, 0%, 100%)")
 
-        remaining_beta_layer = by_id["road-number-shield-2-beta-remaining-icons"]
+        known_beta_layer = by_id["road-number-shield-2-beta-known-icons"]
+        expected_known_beta_values = [
+            base for base in mapbox_config._ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[2] if base != "ch-motorway"
+        ]
         self.assertEqual(
-            remaining_beta_layer["filter"][-2:],
+            known_beta_layer["filter"][-2:],
             [
                 ["has", "shield_beta"],
-                ["match", ["get", "shield_beta"], ["ch-motorway"], False, True],
+                ["match", ["get", "shield_beta"], expected_known_beta_values, True, False],
             ],
         )
-        self.assertEqual(
-            remaining_beta_layer["layout"]["icon-image"][:2],
-            ["match", ["get", "shield_beta"]],
-        )
-        self.assertNotIn("ch-motorway", remaining_beta_layer["layout"]["icon-image"])
-        self.assertNotIn("ch-motorway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("gr-motorway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("au-national-highway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("cl-highway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("hu-main-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("md-main-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("pk-national-highway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("qa-main-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("sa-highway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("th-highway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertIn("us-highway-2", remaining_beta_layer["layout"]["icon-image"])
-        self.assertEqual(remaining_beta_layer["layout"]["icon-image"][-1], "default-2")
+        self.assertEqual(known_beta_layer["layout"]["icon-image"], "{shield_beta}-2")
+        self.assertNotIn("ch-motorway", known_beta_layer["filter"][-1][2])
+        self.assertIn("gr-motorway", known_beta_layer["filter"][-1][2])
+        self.assertIn("au-national-highway", known_beta_layer["filter"][-1][2])
+        self.assertIn("cl-highway", known_beta_layer["filter"][-1][2])
+        self.assertIn("hu-main", known_beta_layer["filter"][-1][2])
+        self.assertIn("md-main", known_beta_layer["filter"][-1][2])
+        self.assertIn("pk-national-highway", known_beta_layer["filter"][-1][2])
+        self.assertIn("qa-main", known_beta_layer["filter"][-1][2])
+        self.assertIn("sa-highway", known_beta_layer["filter"][-1][2])
+        self.assertIn("th-highway", known_beta_layer["filter"][-1][2])
+        self.assertIn("us-highway", known_beta_layer["filter"][-1][2])
 
-        shield_layer = by_id["road-number-shield-2-remaining-icons"]
+        fallback_beta_layer = by_id["road-number-shield-2-beta-default-icon"]
+        self.assertEqual(
+            fallback_beta_layer["filter"][-2:],
+            [
+                ["has", "shield_beta"],
+                [
+                    "match",
+                    ["get", "shield_beta"],
+                    list(mapbox_config._ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[2]),
+                    False,
+                    True,
+                ],
+            ],
+        )
+        self.assertEqual(fallback_beta_layer["layout"]["icon-image"], "default-2")
+
+        shield_layer = by_id["road-number-shield-2-known-icons"]
         self.assertEqual(
             shield_layer["filter"][-3:],
             [
                 ["match", ["get", "reflen"], 2, True, "2", True, False],
                 ["!", ["has", "shield_beta"]],
-                ["match", ["get", "shield"], ["ch-motorway"], False, True],
+                ["match", ["get", "shield"], expected_known_beta_values, True, False],
             ],
         )
-        self.assertEqual(shield_layer["layout"]["icon-image"][:2], ["match", ["get", "shield"]])
-        self.assertNotIn("ch-motorway", shield_layer["layout"]["icon-image"])
-        self.assertNotIn("ch-motorway-2", shield_layer["layout"]["icon-image"])
-        self.assertIn("rectangle-yellow-2", shield_layer["layout"]["icon-image"])
+        self.assertEqual(shield_layer["layout"]["icon-image"], "{shield}-2")
+        self.assertNotIn("ch-motorway", shield_layer["filter"][-1][2])
+        self.assertIn("rectangle-yellow", shield_layer["filter"][-1][2])
+        self.assertEqual(by_id["road-number-shield-2-default-icon"]["layout"]["icon-image"], "default-2")
         self.assertEqual(by_id["road-number-shield-3-ch-motorway-icon"]["layout"]["icon-image"], "ch-motorway-3")
-        self.assertNotIn(
-            "ch-motorway",
-            by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"],
-        )
-        self.assertNotIn(
-            "ch-motorway-3",
-            by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"],
-        )
-        self.assertIn("au-national-highway-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("cl-highway-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("md-main-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("pk-national-highway-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("qa-main-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("sa-highway-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("us-highway-3", by_id["road-number-shield-3-beta-remaining-icons"]["layout"]["icon-image"])
-        self.assertIn("md-main-4", by_id["road-number-shield-4-beta"]["layout"]["icon-image"])
-        self.assertIn("qa-main-4", by_id["road-number-shield-4-beta"]["layout"]["icon-image"])
-        self.assertIn("th-highway-4", by_id["road-number-shield-4-beta"]["layout"]["icon-image"])
-        self.assertIn("us-highway-4", by_id["road-number-shield-4-beta"]["layout"]["icon-image"])
-        self.assertIn("hu-main-5", by_id["road-number-shield-5-beta"]["layout"]["icon-image"])
+        self.assertEqual(by_id["road-number-shield-3-beta-known-icons"]["layout"]["icon-image"], "{shield_beta}-3")
+        self.assertNotIn("ch-motorway", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("au-national-highway", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("cl-highway", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("md-main", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("pk-national-highway", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("qa-main", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("sa-highway", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("us-highway", by_id["road-number-shield-3-beta-known-icons"]["filter"][-1][2])
+        self.assertEqual(by_id["road-number-shield-4-beta-known-icons"]["layout"]["icon-image"], "{shield_beta}-4")
+        self.assertIn("md-main", by_id["road-number-shield-4-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("qa-main", by_id["road-number-shield-4-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("th-highway", by_id["road-number-shield-4-beta-known-icons"]["filter"][-1][2])
+        self.assertIn("us-highway", by_id["road-number-shield-4-beta-known-icons"]["filter"][-1][2])
+        self.assertEqual(by_id["road-number-shield-5-beta-known-icons"]["layout"]["icon-image"], "{shield_beta}-5")
+        self.assertIn("hu-main", by_id["road-number-shield-5-beta-known-icons"]["filter"][-1][2])
         self.assertEqual(result["layers"][-1]["layout"]["icon-image"], shield_icon)
 
     def test_road_number_shield_point_layers_stay_visible_below_z11(self):
@@ -1882,7 +1902,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(len(result["layers"]), 28)
+        self.assertEqual(len(result["layers"]), 48)
         by_id = {layer["id"]: layer for layer in result["layers"]}
         low_layer = by_id["road-number-shield-2-beta-ch-motorway-icon-below-z11"]
         self.assertEqual(low_layer["maxzoom"], 11.0)
@@ -1945,14 +1965,26 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertIn(["has", "shield_beta"], high_layer["filter"])
         self.assertIn(["==", ["get", "shield_beta"], "ch-motorway"], high_layer["filter"])
-        remaining_low_layer = by_id["road-number-shield-2-beta-remaining-icons-below-z11"]
+        known_low_layer = by_id["road-number-shield-2-beta-known-icons-below-z11"]
+        expected_known_beta_values = [
+            base for base in mapbox_config._ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[2] if base != "ch-motorway"
+        ]
         self.assertIn(
-            ["match", ["get", "shield_beta"], ["ch-motorway"], False, True],
-            remaining_low_layer["filter"],
+            ["match", ["get", "shield_beta"], expected_known_beta_values, True, False],
+            known_low_layer["filter"],
         )
-        self.assertEqual(
-            remaining_low_layer["layout"]["icon-image"][:2],
-            ["match", ["get", "shield_beta"]],
+        self.assertEqual(known_low_layer["layout"]["icon-image"], "{shield_beta}-2")
+        fallback_low_layer = by_id["road-number-shield-2-beta-default-icon-below-z11"]
+        self.assertEqual(fallback_low_layer["layout"]["icon-image"], "default-2")
+        self.assertIn(
+            [
+                "match",
+                ["get", "shield_beta"],
+                list(mapbox_config._ROAD_SHIELD_SPRITE_BASES_BY_REFLEN[2]),
+                False,
+                True,
+            ],
+            fallback_low_layer["filter"],
         )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit(
