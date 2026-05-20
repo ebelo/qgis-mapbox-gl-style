@@ -1327,6 +1327,8 @@ def _road_shield_label_placement_rows(
                     "label_per_part": label_row.get("label_per_part"),
                     "merge_lines": label_row.get("merge_lines"),
                     "text_color": label_row.get("text_color"),
+                    "data_defined_property_keys": label_row.get("data_defined_property_keys"),
+                    "data_defined_property_labels": label_row.get("data_defined_property_labels"),
                 }
             )
     return sorted(
@@ -1926,15 +1928,15 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 "",
                 "Focused `road-number-shield` rows for placement, repeat-distance, and collision-priority follow-up.",
                 "",
-                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Degraded placement | Overlap handling | Label/part | Merge lines | Text color |",
-                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
+                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Degraded placement | Overlap handling | Label/part | Merge lines | Text color | Data-defined keys |",
+                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {label_per_part} | {merge_lines} | {text_color} |".format(
+            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {label_per_part} | {merge_lines} | {text_color} | {keys} |".format(
                 style=_markdown_value(row.get("style_name")),
                 source_zoom=_markdown_value(row.get("source_zoom")),
                 qfit_zoom=_markdown_value(row.get("qfit_zoom")),
@@ -1952,6 +1954,7 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 label_per_part=_markdown_value(row.get("label_per_part")),
                 merge_lines=_markdown_value(row.get("merge_lines")),
                 text_color=_markdown_value(row.get("text_color")),
+                keys=_data_defined_property_markdown_value(row),
             )
         )
     if rows:

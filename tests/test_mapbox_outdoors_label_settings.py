@@ -1091,6 +1091,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "label_per_part": False,
                     "merge_lines": True,
                     "text_color": "#1d1f25",
+                    "data_defined_property_keys": [50],
+                    "data_defined_property_labels": ["ShapeSizeX (50)"],
                 },
                 {
                     "style_name": "road-number-shield-2-remaining-icons-below-z11",
@@ -1135,6 +1137,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(z11_plus["overlap_handling"], "PreventOverlap")
         self.assertFalse(z11_plus["label_per_part"])
         self.assertTrue(z11_plus["merge_lines"])
+        self.assertEqual(z11_plus["data_defined_property_keys"], [50])
+        self.assertEqual(z11_plus["data_defined_property_labels"], ["ShapeSizeX (50)"])
 
     def test_line_center_label_conversion_summary_isolates_line_center_labels(self):
         rows = _line_center_label_conversion_rows(
@@ -1785,6 +1789,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "label_per_part": False,
                     "merge_lines": True,
                     "text_color": "#1d1f25",
+                    "data_defined_property_keys": [50],
+                    "data_defined_property_labels": ["ShapeSizeX (50)"],
                 }
             ],
             "line_label_repeat_spacing_by_base_layer": [
@@ -1958,7 +1964,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         )
         self.assertIn("## Road shield label placement detail", markdown)
         self.assertIn(
-            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | #1d1f25 |",
+            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | #1d1f25 | ShapeSizeX (50) |",
             markdown,
         )
         self.assertIn("## Line label repeat spacing by base layer", markdown)
