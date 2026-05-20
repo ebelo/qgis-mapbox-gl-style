@@ -5921,6 +5921,7 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_filter_signature_group_table(
             _summary_rows(summary, "qfit_unresolved_filter_expression_signatures_by_layer_group")
         ),
+        *_markdown_qgis_converter_probe_outcomes(qgis_converter_warnings),
         *_markdown_label_density_summary(summary),
         *_markdown_line_label_repetition_summary(summary),
         *_markdown_road_trail_hierarchy_summary(summary),
@@ -5933,6 +5934,46 @@ def _markdown_summary(summary: dict[str, object], qgis_converter_warnings: objec
         *_markdown_airport_special_landuse_summary(summary),
         *_markdown_qgis_converter_warnings(qgis_converter_warnings),
     ]
+
+
+def _markdown_qgis_converter_probe_outcomes(report: object) -> list[str]:
+    if not isinstance(report, dict):
+        return []
+
+    rows: list[tuple[str, str]] = []
+    filter_probe = report.get(_FILTER_PARSE_SUPPORT_PROBE_KEY)
+    if isinstance(filter_probe, dict):
+        tested = filter_probe.get("filter_expression_count", 0)
+        accepted = filter_probe.get("qgis_parser_supported_count", 0)
+        rejected = filter_probe.get("qgis_parser_unsupported_count", 0)
+        rows.append(("Filter parser support", f"{accepted}/{tested} accepted; {rejected} rejected"))
+
+    sprite_probe = report.get(_SPRITE_CONTEXT_PROBE_KEY)
+    if isinstance(sprite_probe, dict):
+        raw_summary = sprite_probe.get("summary")
+        summary = raw_summary if isinstance(raw_summary, dict) else {}
+        rows.append(
+            (
+                "Runtime sprite context",
+                (
+                    f"{summary.get('count', 0)} warnings; "
+                    f"{sprite_probe.get(_SPRITE_CONTEXT_DEFINITION_COUNT_KEY, 0)} definitions; "
+                    f"image loaded: {_markdown_yes_no(sprite_probe.get(_SPRITE_CONTEXT_IMAGE_LOADED_KEY))}"
+                ),
+            )
+        )
+
+    if not rows:
+        return []
+    lines = [
+        "### QGIS converter probe outcomes",
+        "",
+        "| Probe | Outcome |",
+        "| --- | --- |",
+    ]
+    lines.extend(f"| `{name}` | {outcome} |" for name, outcome in rows)
+    return [*lines, ""]
+
 
 def _markdown_source_filter(layer_obj: dict[str, object]) -> str:
     source_parts = [part for part in (layer_obj.get("source"), layer_obj.get("source_layer")) if part]

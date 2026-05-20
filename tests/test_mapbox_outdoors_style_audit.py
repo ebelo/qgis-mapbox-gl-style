@@ -3108,6 +3108,37 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
         self.assertIn("After qfit preprocessing with sprite context: 0", qgis_section)
         self.assertIn("Sprite context warning count delta from qfit preprocessing: 9", qgis_section)
 
+    def test_audit_markdown_summarizes_probe_outcomes_near_unresolved_counts(self):
+        markdown = build_audit_markdown(
+            {
+                "style": {"label": "mapbox/outdoors-v12"},
+                "generated_at": "2026-05-18T06:05:00Z",
+                "layer_count": 0,
+                "layers": [],
+                "summary": {},
+                "qgis_converter_warnings": {
+                    "filter_expression_parse_support_probe": {
+                        "filter_expression_count": 12,
+                        "qgis_parser_supported_count": 11,
+                        "qgis_parser_unsupported_count": 1,
+                    },
+                    "with_sprite_context_probe": {
+                        "sprite_definition_count": 440,
+                        "sprite_image_loaded": True,
+                        "summary": {"count": 0},
+                    },
+                },
+            }
+        )
+        summary_section = markdown.split("### Label density candidates", 1)[0]
+
+        self.assertIn("### QGIS converter probe outcomes", summary_section)
+        self.assertIn("| `Filter parser support` | 11/12 accepted; 1 rejected |", summary_section)
+        self.assertIn(
+            "| `Runtime sprite context` | 0 warnings; 440 definitions; image loaded: yes |",
+            summary_section,
+        )
+
     def test_qgis_converter_warning_report_reuses_existing_qgis_app(self):
         existing_app = object()
         fake_qgis, fake_core, fake_app, _fake_converter = _fake_qgis_modules(
