@@ -56,6 +56,18 @@ QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_EXPRESSION = (
 )
 QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_FILTER = QGIS_CONTOUR_POLYGON_LABEL_PROBE_FILTER
 QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_MIN_ZOOM = QGIS_CONTOUR_POLYGON_LABEL_PROBE_MIN_ZOOM
+QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_STYLE_NAME = (
+    "contour-label-bbox-edge-difference-source-style-probe"
+)
+QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_EXPRESSION = (
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_EXPRESSION
+)
+QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_FILTER = (
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_FILTER
+)
+QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_MIN_ZOOM = (
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_MIN_ZOOM
+)
 MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE = "metrics_available"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING = "manifest_missing"
 MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE = "manifest_unreadable"
@@ -196,6 +208,7 @@ class ComparisonConfig:
     qgis_contour_polygon_label_probe: bool = False
     qgis_contour_boundary_generator_label_probe: bool = False
     qgis_contour_bbox_edge_difference_label_probe: bool = False
+    qgis_contour_bbox_edge_difference_source_style_label_probe: bool = False
     browser: bool = True
     qgis: bool = True
     diff: bool = True
@@ -214,6 +227,7 @@ class ComparisonResult:
     qgis_contour_polygon_label_probe: bool = False
     qgis_contour_boundary_generator_label_probe: bool = False
     qgis_contour_bbox_edge_difference_label_probe: bool = False
+    qgis_contour_bbox_edge_difference_source_style_label_probe: bool = False
     image_metrics: dict[str, object] = dataclasses.field(default_factory=dict)
     style_json_path: str | None = None
 
@@ -324,6 +338,9 @@ def _redacted_manifest(
         ),
         "qgis_contour_bbox_edge_difference_label_probe": (
             result.qgis_contour_bbox_edge_difference_label_probe
+        ),
+        "qgis_contour_bbox_edge_difference_source_style_label_probe": (
+            result.qgis_contour_bbox_edge_difference_source_style_label_probe
         ),
         "captured": {
             "browser_reference": result.browser_captured,
@@ -588,6 +605,29 @@ def _label_setting_value(settings: object | None, name: str) -> object:
         return None
 
 
+def _color_name(value: object) -> object:
+    name = _method_value(value, "name")
+    return name if isinstance(name, str) else None
+
+
+def _qgis_label_format_snapshot(settings: object | None) -> dict[str, object]:
+    text_format = _method_value(settings, "format") if settings is not None else None
+    buffer = _method_value(text_format, "buffer") if text_format is not None else None
+    text_color = _method_value(text_format, "color") if text_format is not None else None
+    buffer_color = _method_value(buffer, "color") if buffer is not None else None
+    return {
+        "text_size": _method_value(text_format, "size") if text_format is not None else None,
+        "text_size_unit": _label_value(_method_value(text_format, "sizeUnit")) if text_format is not None else None,
+        "text_color": _color_name(text_color),
+        "text_opacity": _method_value(text_format, "opacity") if text_format is not None else None,
+        "buffer_enabled": _method_value(buffer, "enabled") if buffer is not None else None,
+        "buffer_size": _method_value(buffer, "size") if buffer is not None else None,
+        "buffer_size_unit": _label_value(_method_value(buffer, "sizeUnit")) if buffer is not None else None,
+        "buffer_color": _color_name(buffer_color),
+        "buffer_opacity": _method_value(buffer, "opacity") if buffer is not None else None,
+    }
+
+
 def qgis_label_styles_snapshot(layer: object) -> list[dict[str, object]]:
     """Return a token-free diagnostic snapshot of QGIS vector-tile label rules."""
 
@@ -613,6 +653,7 @@ def qgis_label_styles_snapshot(layer: object) -> list[dict[str, object]]:
                 "geometry_generator": _label_setting_value(settings, "geometryGenerator"),
                 "geometry_generator_enabled": _label_setting_value(settings, "geometryGeneratorEnabled"),
                 "geometry_generator_type": _label_setting_value(settings, "geometryGeneratorType"),
+                **_qgis_label_format_snapshot(settings),
             },
         })
     return snapshots
@@ -672,6 +713,7 @@ def _append_qgis_contour_line_generator_label_probe(
     geometry_generator: str,
     filter_expression: str,
     min_zoom: int,
+    copy_source_settings: bool = False,
 ) -> None:
     from qgis.core import (  # type: ignore[import-not-found] # noqa: PLC0415
         QgsPalLayerSettings,
@@ -691,7 +733,10 @@ def _append_qgis_contour_line_generator_label_probe(
             source_settings = _method_value(style, "labelSettings")
             break
 
-    settings = QgsPalLayerSettings()
+    if copy_source_settings and source_settings is not None:
+        settings = QgsPalLayerSettings(source_settings)
+    else:
+        settings = QgsPalLayerSettings()
     settings.fieldName = 'concat("ele", \' m\')'
     settings.isExpression = True
     settings.placement = getattr(QgsPalLayerSettings, "Curved", QgsPalLayerSettings.Line)
@@ -734,6 +779,17 @@ def _append_qgis_contour_bbox_edge_difference_label_probe(layer: object) -> None
     )
 
 
+def _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer: object) -> None:
+    _append_qgis_contour_line_generator_label_probe(
+        layer,
+        style_name=QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_STYLE_NAME,
+        geometry_generator=QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_EXPRESSION,
+        filter_expression=QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_FILTER,
+        min_zoom=QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_MIN_ZOOM,
+        copy_source_settings=True,
+    )
+
+
 def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     *,
     camera: MapboxComparisonCamera,
@@ -745,6 +801,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     qgis_contour_polygon_label_probe: bool = False,
     qgis_contour_boundary_generator_label_probe: bool = False,
     qgis_contour_bbox_edge_difference_label_probe: bool = False,
+    qgis_contour_bbox_edge_difference_source_style_label_probe: bool = False,
 ) -> None:
     _ensure_package_parent_on_path()
     _ensure_headless_qt_platform()
@@ -821,6 +878,8 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
             _append_qgis_contour_boundary_generator_label_probe(layer)
         if qgis_contour_bbox_edge_difference_label_probe:
             _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+        if qgis_contour_bbox_edge_difference_source_style_label_probe:
+            _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer)
         if qgis_label_styles_path is not None:
             write_qgis_label_styles_snapshot(layer=layer, output_path=qgis_label_styles_path, token=token)
 
@@ -951,6 +1010,9 @@ def run_comparison(
             qgis_contour_bbox_edge_difference_label_probe=(
                 config.qgis_contour_bbox_edge_difference_label_probe
             ),
+            qgis_contour_bbox_edge_difference_source_style_label_probe=(
+                config.qgis_contour_bbox_edge_difference_source_style_label_probe
+            ),
         )
         qgis_captured = True
         qgis_preprocessed_style_captured = paths.qgis_preprocessed_style_json.exists()
@@ -978,6 +1040,9 @@ def run_comparison(
         ),
         qgis_contour_bbox_edge_difference_label_probe=(
             config.qgis_contour_bbox_edge_difference_label_probe
+        ),
+        qgis_contour_bbox_edge_difference_source_style_label_probe=(
+            config.qgis_contour_bbox_edge_difference_source_style_label_probe
         ),
         image_metrics=image_metrics,
         style_json_path=str(config.style_json_path) if config.style_json_path is not None else None,
@@ -1067,6 +1132,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--qgis-contour-bbox-edge-difference-source-style-label-probe",
+        action="store_true",
+        help=(
+            "Append a diagnostic bbox-edge-difference contour-label style that copies "
+            "the converted production contour label text settings before rendering. "
+            "Use only for #949 visual probes."
+        ),
+    )
+    parser.add_argument(
         "--skip-diff",
         action="store_true",
         help="Skip diff image generation.",
@@ -1118,6 +1192,9 @@ def _comparison_config(
         qgis_contour_bbox_edge_difference_label_probe=(
             args.qgis_contour_bbox_edge_difference_label_probe
         ),
+        qgis_contour_bbox_edge_difference_source_style_label_probe=(
+            args.qgis_contour_bbox_edge_difference_source_style_label_probe
+        ),
         browser=not args.skip_browser,
         qgis=not args.skip_qgis,
         diff=not args.skip_diff,
@@ -1165,6 +1242,8 @@ def _single_camera_subprocess_command(
         command.append("--qgis-contour-boundary-generator-label-probe")
     if args.qgis_contour_bbox_edge_difference_label_probe:
         command.append("--qgis-contour-bbox-edge-difference-label-probe")
+    if args.qgis_contour_bbox_edge_difference_source_style_label_probe:
+        command.append("--qgis-contour-bbox-edge-difference-source-style-label-probe")
     if args.skip_diff:
         command.append("--skip-diff")
     command.extend(["--browser-timeout-ms", str(args.browser_timeout_ms)])

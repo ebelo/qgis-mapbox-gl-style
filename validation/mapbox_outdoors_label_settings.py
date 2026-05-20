@@ -88,6 +88,7 @@ class LabelSettingsConfig:
     style_json_path: Path | None = None
     include_sprite_context: bool = True
     qgis_contour_bbox_edge_difference_label_probe: bool = False
+    qgis_contour_bbox_edge_difference_source_style_label_probe: bool = False
     now: dt.datetime | None = None
 
 
@@ -419,6 +420,12 @@ def _postprocessed_label_records(labeling: object | None, apply_label_priority) 
     if labeling is None:
         return []
     apply_label_priority(labeling)
+    return _sorted_label_records(labeling)
+
+
+def _sorted_label_records(labeling: object | None) -> list[dict[str, object]]:
+    if labeling is None:
+        return []
     return sorted(
         _iter_label_records(labeling),
         key=lambda row: (str(row.get("base_style_layer_id") or ""), str(row.get("style_name") or "")),
@@ -450,11 +457,22 @@ def _append_qgis_contour_bbox_edge_difference_label_probe(layer: object) -> None
     append_probe(layer)
 
 
+def _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer: object) -> None:
+    from qfit.validation.mapbox_outdoors_comparison import (  # noqa: PLC0415
+        _append_qgis_contour_bbox_edge_difference_source_style_label_probe as append_probe,
+    )
+
+    append_probe(layer)
+
+
 def _apply_labeling_probes(labeling: object | None, config: LabelSettingsConfig) -> object | None:
-    if labeling is None or not config.qgis_contour_bbox_edge_difference_label_probe:
+    if labeling is None:
         return labeling
     layer = _LabelingProbeLayer(labeling)
-    _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+    if config.qgis_contour_bbox_edge_difference_label_probe:
+        _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+    if config.qgis_contour_bbox_edge_difference_source_style_label_probe:
+        _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer)
     return layer.labeling()
 
 
@@ -984,6 +1002,9 @@ def _label_settings_report(
         "qgis_contour_bbox_edge_difference_label_probe": (
             config.qgis_contour_bbox_edge_difference_label_probe
         ),
+        "qgis_contour_bbox_edge_difference_source_style_label_probe": (
+            config.qgis_contour_bbox_edge_difference_source_style_label_probe
+        ),
         "label_count": len(records),
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
@@ -1031,8 +1052,10 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             sprite_resources,
             (QgsMapBoxGlStyleConversionContext, QgsMapBoxGlStyleConverter, Qgis),
         )
+        if labeling is not None:
+            apply_mapbox_label_priority(labeling)
         labeling = _apply_labeling_probes(labeling, config)
-        records = _postprocessed_label_records(labeling, apply_mapbox_label_priority)
+        records = _sorted_label_records(labeling)
         source_label_layers = source_label_layer_records(original_style, qfit_style, records)
         return _label_settings_report(
             config=config,
@@ -1392,6 +1415,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
         f"Bbox-edge contour label probe: {_markdown_value(report.get('qgis_contour_bbox_edge_difference_label_probe'))}",
+        "Bbox-edge source-style contour label probe: "
+        f"{_markdown_value(report.get('qgis_contour_bbox_edge_difference_source_style_label_probe'))}",
         "",
     ]
     _append_label_style_summary(lines, summary_rows)
@@ -1427,6 +1452,14 @@ def build_parser() -> argparse.ArgumentParser:
             "line_merge(difference(boundary($geometry), boundary(bounds($geometry))))."
         ),
     )
+    parser.add_argument(
+        "--qgis-contour-bbox-edge-difference-source-style-label-probe",
+        action="store_true",
+        help=(
+            "Append the bbox-edge contour probe after copying the converted production "
+            "contour label text settings."
+        ),
+    )
     return parser
 
 
@@ -1441,6 +1474,9 @@ def main(argv: list[str] | None = None) -> int:
         style_json_path=args.style_json,
         include_sprite_context=not args.no_sprite_context,
         qgis_contour_bbox_edge_difference_label_probe=args.qgis_contour_bbox_edge_difference_label_probe,
+        qgis_contour_bbox_edge_difference_source_style_label_probe=(
+            args.qgis_contour_bbox_edge_difference_source_style_label_probe
+        ),
     )
     paths = build_label_settings_paths(
         build_run_directory(
