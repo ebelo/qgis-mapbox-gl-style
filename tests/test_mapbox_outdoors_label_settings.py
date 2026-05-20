@@ -17,6 +17,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe,
     _apply_labeling_probes,
     _convert_style_to_labeling,
+    _data_defined_expression_issue_rows,
     _ensure_qgis_application,
     _fetch_sprite_resources,
     _geometry_generator_markdown_value,
@@ -955,7 +956,19 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             result="success",
             sprite_loaded=True,
             sprite_count=440,
-            records=[{"style_name": "contour-label"}],
+            records=[
+                {
+                    "base_style_layer_id": "contour-label",
+                    "style_name": "contour-label",
+                    "data_defined_property_details": [
+                        {
+                            "label": "ShapeSizeX (50)",
+                            "property_type": "ExpressionBasedProperty",
+                            "expression": 'CASE WHEN "shield" IN () THEN 5 ELSE 5 END',
+                        }
+                    ],
+                }
+            ],
             source_label_layers=[{"base_style_layer_id": "contour-label"}],
         )
 
@@ -969,6 +982,19 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["label_style_summary_by_base_layer"][0]["count"], 1)
         self.assertEqual(report["line_label_repeat_spacing_by_base_layer"], [])
+        self.assertEqual(
+            report["data_defined_expression_issue_rows"],
+            [
+                {
+                    "base_style_layer_id": "contour-label",
+                    "style_name": "contour-label",
+                    "property": "ShapeSizeX (50)",
+                    "property_type": "ExpressionBasedProperty",
+                    "empty_in_clause_count": 1,
+                    "expression_length": 42,
+                }
+            ],
+        )
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["base_style_layer_id"], "contour-label")
         self.assertEqual(report["source_label_fanout_by_base_layer"][0]["converted_label_styles"], 1)
         self.assertEqual(report["source_label_control_summary_by_base_layer"][0]["base_style_layer_id"], "contour-label")
@@ -976,6 +1002,52 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(report["source_label_control_omission_summary_by_base_layer"], [])
         self.assertEqual(report["source_label_unresolved_control_summary_by_base_layer"], [])
         self.assertEqual(report["source_label_layer_count"], 1)
+
+    def test_data_defined_expression_issue_rows_count_empty_in_clauses(self):
+        empty_expression = (
+            'CASE WHEN "shield" IN () THEN 5 '
+            'WHEN "shield" in() THEN 6 '
+            'WHEN "shield" IN (   ) THEN 7 ELSE 5 END'
+        )
+        rows = _data_defined_expression_issue_rows(
+            [
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-2-remaining-icons-z11-plus",
+                    "data_defined_property_details": [
+                        {
+                            "label": "ShapeSizeX (50)",
+                            "property_type": "ExpressionBasedProperty",
+                            "expression": empty_expression,
+                        },
+                        {
+                            "label": "Priority (87)",
+                            "property_type": "ExpressionBasedProperty",
+                            "expression": 'CASE WHEN "class" IN (\'primary\') THEN 6 ELSE 3 END',
+                        },
+                    ],
+                },
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label-z15-plus",
+                    "data_defined_property_details": [{"label": "Priority (87)", "static_value": 0}],
+                },
+            ]
+        )
+
+        self.assertEqual(
+            rows,
+            [
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-2-remaining-icons-z11-plus",
+                    "property": "ShapeSizeX (50)",
+                    "property_type": "ExpressionBasedProperty",
+                    "empty_in_clause_count": 3,
+                    "expression_length": len(empty_expression),
+                }
+            ],
+        )
 
     def test_label_style_summary_groups_density_relevant_settings(self):
         rows = _label_style_summary_rows(
@@ -2087,6 +2159,16 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     ],
                 }
             ],
+            "data_defined_expression_issue_rows": [
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-2-remaining-icons-z11-plus",
+                    "property": "ShapeSizeX (50)",
+                    "property_type": "ExpressionBasedProperty",
+                    "empty_in_clause_count": 2,
+                    "expression_length": 69,
+                }
+            ],
             "line_label_repeat_spacing_by_base_layer": [
                 {
                     "base_style_layer_id": "contour-label",
@@ -2259,6 +2341,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("## Road shield label placement detail", markdown)
         self.assertIn(
             '| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, [\'zoom\'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | 2.38125 Millimeters | #1d1f25 | yes ShapeRectangle | 4.49792 x 2.64583 SizeFixed Millimeters | #ffffff 1 | #1d1f25 0.2 Millimeters | ShapeSizeX (50): ExpressionBasedProperty CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END, Priority (87): StaticProperty inactive 0 |',
+            markdown,
+        )
+        self.assertIn("## Data-defined expression issues", markdown)
+        self.assertIn(
+            "| road-number-shield | road-number-shield-2-remaining-icons-z11-plus | ShapeSizeX (50) | ExpressionBasedProperty | 2 | 69 |",
             markdown,
         )
         self.assertIn("## Line label repeat spacing by base layer", markdown)

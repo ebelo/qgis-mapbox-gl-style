@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import json
 import os
+import re
 import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-label-settings"
 DEFAULT_MAPBOX_STYLE_OWNER = "mapbox"
 DEFAULT_MAPBOX_STYLE_ID = "outdoors-v12"
 DEFAULT_QT_QPA_PLATFORM = "offscreen"
+_EMPTY_IN_CLAUSE_RE = re.compile(r"\bin\s*\(\s*\)", re.IGNORECASE)
 _BOOL_COUNT_KEY_MARKDOWN_VALUES = {"false": "no", "true": "yes"}
 _SOURCE_LABEL_LAYOUT_PROPERTIES = (
     "symbol-placement",
@@ -1527,6 +1529,44 @@ def _road_shield_label_placement_rows(
     )
 
 
+def _data_defined_expression_issue_rows(
+    label_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for record in label_records:
+        details = record.get("data_defined_property_details")
+        if not isinstance(details, list):
+            continue
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            expression = detail.get("expression")
+            empty_in_clause_count = (
+                len(_EMPTY_IN_CLAUSE_RE.findall(expression)) if isinstance(expression, str) else 0
+            )
+            if empty_in_clause_count <= 0:
+                continue
+            rows.append(
+                {
+                    "base_style_layer_id": record.get("base_style_layer_id"),
+                    "style_name": record.get("style_name"),
+                    "property": detail.get("label"),
+                    "property_type": detail.get("property_type"),
+                    "empty_in_clause_count": empty_in_clause_count,
+                    "expression_length": len(expression),
+                }
+            )
+    return sorted(
+        rows,
+        key=lambda row: (
+            -int(row["empty_in_clause_count"]),
+            _summary_key(row.get("base_style_layer_id")),
+            _summary_key(row.get("style_name")),
+            _summary_key(row.get("property")),
+        ),
+    )
+
+
 def _line_center_label_conversion_rows(
     source_label_layers: list[dict[str, object]],
     label_records: list[dict[str, object]],
@@ -1892,6 +1932,7 @@ def _label_settings_report(
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
         "road_shield_label_placement_rows": _road_shield_label_placement_rows(source_label_layer_rows, records),
+        "data_defined_expression_issue_rows": _data_defined_expression_issue_rows(records),
         "line_label_repeat_spacing_by_base_layer": _line_label_repeat_spacing_rows(source_label_layer_rows, records),
         "line_label_conversion_by_base_layer": _line_label_conversion_rows(source_label_layer_rows, records),
         "line_center_label_conversion_by_base_layer": _line_center_label_conversion_rows(
@@ -2206,6 +2247,35 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                     row.get("background_stroke_width_unit"),
                 ),
                 keys=_data_defined_property_markdown_value(row),
+            )
+        )
+    if rows:
+        lines.append("")
+
+
+def _append_data_defined_expression_issue_rows(lines: list[str], rows: list[object]) -> None:
+    if rows:
+        lines.extend(
+            [
+                "## Data-defined expression issues",
+                "",
+                "QGIS data-defined label properties whose converted expressions include empty `IN ()` clauses.",
+                "",
+                "| Base layer | Style | Property | Type | Empty IN clauses | Expression length |",
+                "| --- | --- | --- | --- | ---: | ---: |",
+            ]
+        )
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "| {base} | {style} | {prop} | {type} | {empty_count} | {length} |".format(
+                base=_markdown_value(row.get("base_style_layer_id")),
+                style=_markdown_value(row.get("style_name")),
+                prop=_markdown_value(row.get("property")),
+                type=_markdown_value(row.get("property_type")),
+                empty_count=_markdown_value(row.get("empty_in_clause_count")),
+                length=_markdown_value(row.get("expression_length")),
             )
         )
     if rows:
@@ -2538,6 +2608,11 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         road_shield_label_placement if isinstance(road_shield_label_placement, list) else []
     )
     _append_road_shield_label_placement_rows(lines, road_shield_label_placement_rows)
+    data_defined_expression_issues = report.get("data_defined_expression_issue_rows")
+    data_defined_expression_issue_rows = (
+        data_defined_expression_issues if isinstance(data_defined_expression_issues, list) else []
+    )
+    _append_data_defined_expression_issue_rows(lines, data_defined_expression_issue_rows)
     _append_line_label_repeat_spacing_summary(lines, line_repeat_rows)
     _append_line_label_conversion_summary(lines, line_conversion_rows)
     _append_line_center_label_conversion_summary(lines, line_center_conversion_rows)
