@@ -812,6 +812,8 @@ _NAME_EN_FALLBACK_TEXT_FIELD_EXPRESSION = [
 ]
 _SETTLEMENT_MAJOR_LABEL_LAYER_ID = "settlement-major-label"
 _SETTLEMENT_MINOR_LABEL_LAYER_ID = "settlement-minor-label"
+_SETTLEMENT_SUBDIVISION_LABEL_LAYER_ID = "settlement-subdivision-label"
+_SETTLEMENT_SUBDIVISION_TEXT_LETTER_SPACING = 0.05
 _SETTLEMENT_MINOR_SYMBOLRANK_FILTER_ZOOM_STEP = [
     "step",
     ["zoom"],
@@ -6194,7 +6196,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
         "water-line-label": 11.0,
         "water-point-label": 12.0,
         "airport-label": 11.0,
-        "settlement-subdivision-label": 8.0,
+        _SETTLEMENT_SUBDIVISION_LABEL_LAYER_ID: 8.0,
         "settlement-minor-label": 10.0,
         "settlement-major-label": 14.0,
         "state-label": 13.0,
@@ -6214,7 +6216,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     _SETTLEMENT_FILTERS: dict[str, object] = {
         "settlement-major-label": ["match", ["get", "type"], ["city"], True, False],
         "settlement-minor-label": ["match", ["get", "type"], ["town"], True, False],
-        "settlement-subdivision-label": None,
+        _SETTLEMENT_SUBDIVISION_LABEL_LAYER_ID: None,
     }
 
     for layer in style.get("layers", []):
@@ -6225,8 +6227,16 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
         settlement_filter = _SETTLEMENT_FILTERS.get(base_layer_id, "NOTSET")
         if settlement_filter != "NOTSET":
             if settlement_filter is None:
-                layer["layout"] = layer.get("layout", {})
-                layer["layout"]["visibility"] = "none"
+                layout = layer.get("layout")
+                if not isinstance(layout, dict):
+                    layout = {}
+                    layer["layout"] = layout
+                layout["visibility"] = "none"
+                if (
+                    base_layer_id == _SETTLEMENT_SUBDIVISION_LABEL_LAYER_ID
+                    and isinstance(layout.get("text-letter-spacing"), list)
+                ):
+                    layout["text-letter-spacing"] = _SETTLEMENT_SUBDIVISION_TEXT_LETTER_SPACING
             else:
                 existing_filter = layer.get("filter")
                 if existing_filter:

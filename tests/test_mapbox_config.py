@@ -2385,6 +2385,41 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(style["layers"][0]["filter"], major_filter)
         self.assertEqual(style["layers"][1]["filter"], minor_filter)
 
+    def test_filter_simplification_scalarizes_hidden_settlement_subdivision_letter_spacing(self):
+        letter_spacing = ["match", ["get", "type"], "suburb", 0.15, 0.05]
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-subdivision-label",
+                    "type": "symbol",
+                    "layout": {
+                        "text-letter-spacing": letter_spacing,
+                    },
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        layout = result["layers"][0]["layout"]
+        self.assertEqual(layout["visibility"], "none")
+        self.assertEqual(layout["text-letter-spacing"], 0.05)
+        self.assertEqual(style["layers"][0]["layout"]["text-letter-spacing"], letter_spacing)
+
+    def test_filter_simplification_hides_settlement_subdivision_without_layout(self):
+        style = {
+            "layers": [
+                {
+                    "id": "settlement-subdivision-label",
+                    "type": "symbol",
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"][0]["layout"], {"visibility": "none"})
+
     def _settlement_dot_icon_layout(self):
         return {
             "symbol-sort-key": ["get", "symbolrank"],
