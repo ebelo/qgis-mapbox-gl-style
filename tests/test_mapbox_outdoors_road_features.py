@@ -1226,8 +1226,13 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             markdown,
         )
         self.assertIn(f'["{path_signature}=1"] | ["{step_signature}=1"] |', markdown)
+        self.assertIn("## Road label/shield focus", markdown)
+        self.assertIn(
+            '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
+            markdown,
+        )
 
-    def test_build_all_camera_summary_markdown_omits_path_pedestrian_focus_for_zero_counts(self):
+    def test_build_all_camera_summary_markdown_omits_focus_sections_for_zero_counts(self):
         report = {
             "generated": "2026-05-18T15:40:00+00:00",
             "style_owner": "mapbox",
@@ -1248,6 +1253,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "level_crossing_candidate_count": 0,
             "road_number_shield_candidate_count": 0,
             "road_exit_shield_candidate_count": 0,
+            "road_label_candidate_count": 0,
             "cameras": [
                 {
                     "status": "decoded",
@@ -1268,6 +1274,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "level_crossing_candidate_count": 0,
                     "road_number_shield_candidate_count": 0,
                     "road_exit_shield_candidate_count": 0,
+                    "road_label_candidate_count": 0,
                 }
             ],
         }
@@ -1275,6 +1282,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         markdown = build_all_camera_summary_markdown(report)
 
         self.assertNotIn("## Path/pedestrian focus", markdown)
+        self.assertNotIn("## Road label/shield focus", markdown)
 
     def test_write_report_writes_json_and_markdown(self):
         report = {

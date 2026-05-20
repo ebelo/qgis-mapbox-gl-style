@@ -103,7 +103,7 @@ LEVEL_CROSSING_SIGNATURE_KEYS = ("class", "structure", "layer")
 ROAD_NUMBER_SHIELD_SIGNATURE_KEYS = ("class", "reflen", "shield", "shield_beta", "structure", "layer")
 ROAD_EXIT_SHIELD_SIGNATURE_KEYS = ("ref", "reflen")
 ROAD_LABEL_SIGNATURE_KEYS = ("class", "type", "structure", "layer")
-PATH_PEDESTRIAN_FOCUS_TOP_COUNT_LIMIT = 3
+FOCUS_TOP_COUNT_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -723,7 +723,7 @@ def _markdown_table_row(cells: Iterable[object]) -> str:
     return "| " + " | ".join(_markdown_value(cell) for cell in cells) + " |"
 
 
-def _top_count_labels(value: object, *, limit: int = PATH_PEDESTRIAN_FOCUS_TOP_COUNT_LIMIT) -> list[str]:
+def _top_count_labels(value: object, *, limit: int = FOCUS_TOP_COUNT_LIMIT) -> list[str]:
     if not isinstance(value, dict):
         return []
     counts = [(str(label), count) for label, count in value.items() if isinstance(count, int)]
@@ -739,6 +739,17 @@ def _has_path_pedestrian_focus(record: dict[str, object]) -> bool:
             "pedestrian_line_candidate_count",
             "path_line_candidate_count",
             "step_line_candidate_count",
+        )
+    )
+
+
+def _has_road_label_shield_focus(record: dict[str, object]) -> bool:
+    return any(
+        isinstance(record.get(key), int) and record.get(key) > 0
+        for key in (
+            "road_number_shield_candidate_count",
+            "road_exit_shield_candidate_count",
+            "road_label_candidate_count",
         )
     )
 
@@ -1152,6 +1163,39 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                         _top_count_labels(camera_report.get("step_line_duplicate_name_counts")),
                         _top_count_labels(camera_report.get("path_line_signature_counts")),
                         _top_count_labels(camera_report.get("step_line_signature_counts")),
+                    ]
+                )
+            )
+    road_focus_rows = [
+        row
+        for row in rows
+        if isinstance(row, dict) and row.get("status") == "decoded" and _has_road_label_shield_focus(row)
+    ]
+    if road_focus_rows:
+        lines.extend(
+            [
+                "",
+                "## Road label/shield focus",
+                "",
+                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Exit shield reflens | Road label classes | Duplicate road labels |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for camera_report in road_focus_rows:
+            lines.append(
+                _markdown_table_row(
+                    [
+                        camera_report.get("camera"),
+                        camera_report.get("camera_zoom"),
+                        camera_report.get("tile_zoom"),
+                        camera_report.get("road_number_shield_candidate_count"),
+                        camera_report.get("road_exit_shield_candidate_count"),
+                        camera_report.get("road_label_candidate_count"),
+                        _top_count_labels(camera_report.get("road_number_shield_class_counts")),
+                        _top_count_labels(camera_report.get("road_number_shield_reflen_counts")),
+                        _top_count_labels(camera_report.get("road_exit_shield_reflen_counts")),
+                        _top_count_labels(camera_report.get("road_label_class_counts")),
+                        _top_count_labels(camera_report.get("road_label_duplicate_name_counts")),
                     ]
                 )
             )
