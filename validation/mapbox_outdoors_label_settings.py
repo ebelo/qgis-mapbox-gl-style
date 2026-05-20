@@ -1188,6 +1188,48 @@ def _label_conversion_rows(
     )
 
 
+def _road_shield_label_placement_rows(
+    source_label_layers: list[dict[str, object]],
+    label_records: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    labels_by_style = _label_records_by_style(label_records)
+    rows: list[dict[str, object]] = []
+    for source_row in source_label_layers:
+        if not isinstance(source_row, dict) or _base_style_layer_id(source_row) != "road-number-shield":
+            continue
+        matched_labels = _matched_label_records_for_source_row(source_row, labels_by_style)
+        for label_row in matched_labels or [{}]:
+            rows.append(
+                {
+                    "style_name": source_row.get("style_name"),
+                    "qfit_style_layer_id": source_row.get("qfit_style_layer_id"),
+                    "source_zoom": _zoom_range_key(source_row.get("minzoom"), source_row.get("maxzoom")),
+                    "qfit_zoom": (
+                        _zoom_range_key(source_row.get("qfit_minzoom"), source_row.get("qfit_maxzoom"))
+                        if source_row.get("qfit_style_layer_id") is not None
+                        else None
+                    ),
+                    "source_symbol_placement": _section_control(source_row, "layout", "symbol-placement"),
+                    "qfit_symbol_placement": _section_control(source_row, "qfit_layout", "symbol-placement"),
+                    "qfit_symbol_spacing": _section_control(source_row, "qfit_layout", "symbol-spacing"),
+                    "geometry_type": label_row.get("geometry_type"),
+                    "placement": label_row.get("placement"),
+                    "priority": label_row.get("priority"),
+                    "repeat_distance": label_row.get("repeat_distance"),
+                    "obstacle": label_row.get("obstacle"),
+                    "merge_lines": label_row.get("merge_lines"),
+                    "text_color": label_row.get("text_color"),
+                }
+            )
+    return sorted(
+        rows,
+        key=lambda row: (
+            _summary_key(row.get("style_name")),
+            _summary_key(row.get("qfit_zoom")),
+        ),
+    )
+
+
 def _line_center_label_conversion_rows(
     source_label_layers: list[dict[str, object]],
     label_records: list[dict[str, object]],
@@ -1550,6 +1592,7 @@ def _label_settings_report(
         "label_count": len(records),
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
+        "road_shield_label_placement_rows": _road_shield_label_placement_rows(source_label_layer_rows, records),
         "line_label_repeat_spacing_by_base_layer": _line_label_repeat_spacing_rows(source_label_layer_rows, records),
         "line_label_conversion_by_base_layer": _line_label_conversion_rows(source_label_layer_rows, records),
         "line_center_label_conversion_by_base_layer": _line_center_label_conversion_rows(
@@ -1735,6 +1778,42 @@ def _append_line_label_repeat_spacing_summary(lines: list[str], summary_rows: li
                     styles=_count_map_markdown_value(row.get("style_names")),
                 )
             )
+        lines.append("")
+
+
+def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object]) -> None:
+    if rows:
+        lines.extend(
+            [
+                "## Road shield label placement detail",
+                "",
+                "Focused `road-number-shield` rows for placement, repeat-distance, and collision-priority follow-up.",
+                "",
+                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Obstacle | Merge lines | Text color |",
+                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- |",
+            ]
+        )
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        lines.append(
+            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {obstacle} | {merge_lines} | {text_color} |".format(
+                style=_markdown_value(row.get("style_name")),
+                source_zoom=_markdown_value(row.get("source_zoom")),
+                qfit_zoom=_markdown_value(row.get("qfit_zoom")),
+                source_placement=_markdown_value(row.get("source_symbol_placement")),
+                qfit_placement=_markdown_value(row.get("qfit_symbol_placement")),
+                qfit_spacing=_markdown_value(row.get("qfit_symbol_spacing")),
+                geometry=_markdown_value(row.get("geometry_type")),
+                placement=_markdown_value(row.get("placement")),
+                priority=_markdown_value(row.get("priority")),
+                repeat=_markdown_value(row.get("repeat_distance")),
+                obstacle=_markdown_value(row.get("obstacle")),
+                merge_lines=_markdown_value(row.get("merge_lines")),
+                text_color=_markdown_value(row.get("text_color")),
+            )
+        )
+    if rows:
         lines.append("")
 
 
@@ -2055,6 +2134,11 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         "",
     ]
     _append_label_style_summary(lines, summary_rows)
+    road_shield_label_placement = report.get("road_shield_label_placement_rows")
+    road_shield_label_placement_rows = (
+        road_shield_label_placement if isinstance(road_shield_label_placement, list) else []
+    )
+    _append_road_shield_label_placement_rows(lines, road_shield_label_placement_rows)
     _append_line_label_repeat_spacing_summary(lines, line_repeat_rows)
     _append_line_label_conversion_summary(lines, line_conversion_rows)
     _append_line_center_label_conversion_summary(lines, line_center_conversion_rows)

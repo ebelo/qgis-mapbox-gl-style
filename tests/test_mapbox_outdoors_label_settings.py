@@ -27,6 +27,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _line_label_repeat_spacing_rows,
     _load_original_style,
     _postprocessed_label_records,
+    _road_shield_label_placement_rows,
     _source_label_control_omission_summary_rows,
     _source_label_control_summary_rows,
     _source_label_fanout_summary_rows,
@@ -988,6 +989,78 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(water_row["repeat_distances"], {"0": 1})
         self.assertEqual(water_row["merge_lines"], {"false": 1})
 
+    def test_road_shield_label_placement_rows_focus_converted_shields(self):
+        rows = _road_shield_label_placement_rows(
+            [
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-2-remaining-icons-z11-plus",
+                    "qfit_style_layer_id": "road-number-shield-2-remaining-icons-z11-plus",
+                    "minzoom": 6,
+                    "qfit_minzoom": 11,
+                    "layout": {"symbol-placement": ["step", ["zoom"], "point", 11, "line"]},
+                    "qfit_layout": {"symbol-placement": "line", "symbol-spacing": 466.6666666667},
+                },
+                {
+                    "base_style_layer_id": "road-number-shield",
+                    "style_name": "road-number-shield-2-remaining-icons-below-z11",
+                    "qfit_style_layer_id": "road-number-shield-2-remaining-icons-below-z11",
+                    "minzoom": 6,
+                    "qfit_minzoom": 6,
+                    "qfit_maxzoom": 11,
+                    "layout": {"symbol-placement": ["step", ["zoom"], "point", 11, "line"]},
+                    "qfit_layout": {"symbol-placement": "point"},
+                },
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label-z15-plus",
+                    "qfit_style_layer_id": "road-label-z15-plus",
+                    "qfit_layout": {"symbol-placement": "line"},
+                },
+            ],
+            [
+                {
+                    "style_name": "road-number-shield-2-remaining-icons-z11-plus",
+                    "geometry_type": "Line",
+                    "placement": "Horizontal",
+                    "priority": 6,
+                    "repeat_distance": 123.4722222222,
+                    "obstacle": True,
+                    "merge_lines": True,
+                    "text_color": "#1d1f25",
+                },
+                {
+                    "style_name": "road-number-shield-2-remaining-icons-below-z11",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "priority": 3,
+                    "repeat_distance": 0.0,
+                    "obstacle": True,
+                    "merge_lines": False,
+                    "text_color": "#1d1f25",
+                },
+                {"style_name": "road-label-z15-plus"},
+            ],
+        )
+
+        self.assertEqual(
+            [row["style_name"] for row in rows],
+            [
+                "road-number-shield-2-remaining-icons-below-z11",
+                "road-number-shield-2-remaining-icons-z11-plus",
+            ],
+        )
+        below, z11_plus = rows
+        self.assertEqual(below["qfit_zoom"], "6 to 11")
+        self.assertEqual(below["source_zoom"], "6+")
+        self.assertEqual(below["qfit_symbol_placement"], "point")
+        self.assertEqual(below["priority"], 3)
+        self.assertEqual(z11_plus["qfit_zoom"], "11+")
+        self.assertEqual(z11_plus["qfit_symbol_placement"], "line")
+        self.assertAlmostEqual(z11_plus["qfit_symbol_spacing"], 466.6666666667)
+        self.assertEqual(z11_plus["priority"], 6)
+        self.assertTrue(z11_plus["merge_lines"])
+
     def test_line_center_label_conversion_summary_isolates_line_center_labels(self):
         rows = _line_center_label_conversion_rows(
             [
@@ -1606,6 +1679,23 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "merge_lines": {"false": 1},
                 }
             ],
+            "road_shield_label_placement_rows": [
+                {
+                    "style_name": "road-number-shield-2-remaining-icons-z11-plus",
+                    "source_zoom": "6+",
+                    "qfit_zoom": "11+",
+                    "source_symbol_placement": ["step", ["zoom"], "point", 11, "line"],
+                    "qfit_symbol_placement": "line",
+                    "qfit_symbol_spacing": 466.6666666667,
+                    "geometry_type": "Line",
+                    "placement": "Horizontal",
+                    "priority": 6,
+                    "repeat_distance": 123.4722222222,
+                    "obstacle": True,
+                    "merge_lines": True,
+                    "text_color": "#1d1f25",
+                }
+            ],
             "line_label_repeat_spacing_by_base_layer": [
                 {
                     "base_style_layer_id": "contour-label",
@@ -1764,6 +1854,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("Bbox-edge source-style high-zoom contour label probe: yes", markdown)
         self.assertIn("## Label style summary by base layer", markdown)
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
+        self.assertIn("## Road shield label placement detail", markdown)
+        self.assertIn(
+            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | yes | yes | #1d1f25 |",
+            markdown,
+        )
         self.assertIn("## Line label repeat spacing by base layer", markdown)
         self.assertIn(
             "| contour-label | 1 | 1 | 1 | (missing)=1 | (missing)=1 | 0=1 | (missing) -> 0=1 | Curved=1 | contour-label=1 |",
