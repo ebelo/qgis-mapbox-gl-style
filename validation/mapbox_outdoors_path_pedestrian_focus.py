@@ -47,6 +47,11 @@ PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
 )
 TOP_COUNT_LIMIT = 3
 SAMPLE_LAYER_LIMIT = 8
+DUPLICATE_LABEL_CATEGORY_KEYS = (
+    ("pedestrian", "top_pedestrian_line_duplicate_names"),
+    ("path", "top_path_line_duplicate_names"),
+    ("step", "top_step_line_duplicate_names"),
+)
 COMPARISON_VISUAL_OUTPUT_KEYS = ("browser_reference", "qgis_vector_render", "diff")
 COMPARISON_VISUAL_METRIC_KEYS = (
     "changed_pixel_ratio",
@@ -626,6 +631,60 @@ def _missing_qgis_label_summary() -> dict[str, object]:
     }
 
 
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
+
+
+def _duplicate_label_categories(camera: Mapping[str, object]) -> list[dict[str, object]]:
+    categories: list[dict[str, object]] = []
+    for category, key in DUPLICATE_LABEL_CATEGORY_KEYS:
+        duplicates = _string_list(camera.get(key))
+        if duplicates:
+            categories.append({"category": category, "top_duplicates": duplicates})
+    return categories
+
+
+def _visible_label_detail_rows(camera: Mapping[str, object]) -> list[Mapping[str, object]]:
+    details = camera.get("qgis_path_pedestrian_visible_label_details")
+    detail_rows = details if isinstance(details, list) else []
+    return [detail for detail in detail_rows if isinstance(detail, Mapping)]
+
+
+def _visible_merge_line_label_styles(camera: Mapping[str, object]) -> list[str]:
+    style_names: list[str] = []
+    for detail in _visible_label_detail_rows(camera):
+        style_name = str(detail.get("style_name") or "")
+        if style_name and detail.get("merge_lines") is True:
+            style_names.append(style_name)
+    return style_names
+
+
+def _visible_label_repeat_distances(camera: Mapping[str, object]) -> list[str]:
+    repeat_distances: list[str] = []
+    for detail in _visible_label_detail_rows(camera):
+        style_name = str(detail.get("style_name") or "")
+        repeat_distance = detail.get("repeat_distance")
+        if (
+            style_name
+            and isinstance(repeat_distance, (int, float))
+            and not isinstance(repeat_distance, bool)
+        ):
+            repeat_distances.append(f"{style_name}={_compact_json(repeat_distance)}")
+    return repeat_distances
+
+
+def _duplicate_label_diagnostic(camera: Mapping[str, object]) -> dict[str, object]:
+    duplicate_categories = _duplicate_label_categories(camera)
+    return {
+        "has_duplicate_feature_names": bool(duplicate_categories),
+        "duplicate_name_categories": duplicate_categories,
+        "visible_merge_line_label_styles": _visible_merge_line_label_styles(camera),
+        "visible_label_repeat_distances": _visible_label_repeat_distances(camera),
+    }
+
+
 def _camera_focus_row(
     camera_report: Mapping[str, object],
     *,
@@ -663,6 +722,7 @@ def _camera_focus_row(
         if qgis_label_styles is not None
         else _missing_qgis_label_summary()
     )
+    row["duplicate_label_diagnostic"] = _duplicate_label_diagnostic(row)
     return row
 
 
@@ -781,12 +841,6 @@ def _qgis_stroke_samples(camera: Mapping[str, object]) -> list[str]:
     if isinstance(dash_samples, list):
         samples.extend(str(sample) for sample in dash_samples[:2])
     return samples
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value if item is not None]
 
 
 def _input_artifact_markdown_lines(report: Mapping[str, object]) -> list[str]:
@@ -974,6 +1028,52 @@ def _visual_artifact_markdown_lines(cameras: Iterable[object]) -> list[str]:
     return lines
 
 
+def _duplicate_category_summaries(diagnostic: Mapping[str, object]) -> list[str]:
+    categories = diagnostic.get("duplicate_name_categories")
+    category_rows = categories if isinstance(categories, list) else []
+    summaries: list[str] = []
+    for category_row in category_rows:
+        if not isinstance(category_row, Mapping):
+            continue
+        category = str(category_row.get("category") or "")
+        duplicates = _string_list(category_row.get("top_duplicates"))
+        if category and duplicates:
+            summaries.append(f"{category}: {', '.join(duplicates)}")
+    return summaries
+
+
+def _duplicate_label_diagnostic_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        diagnostic = camera.get("duplicate_label_diagnostic")
+        if not isinstance(diagnostic, Mapping):
+            continue
+        duplicate_summaries = _duplicate_category_summaries(diagnostic)
+        if not duplicate_summaries:
+            continue
+        merge_line_styles = _string_list(diagnostic.get("visible_merge_line_label_styles"))
+        repeat_distances = _string_list(diagnostic.get("visible_label_repeat_distances"))
+        rows.append([camera.get("camera"), duplicate_summaries, merge_line_styles, repeat_distances])
+    if not rows:
+        return []
+    lines = ["", "## Duplicate label diagnostics", ""]
+    lines.extend(
+        [
+            (
+                "Connects duplicate source feature names with the visible QGIS "
+                "line-label merge/repeat controls active at each camera zoom."
+            ),
+            "",
+            "| Camera | Duplicate feature names | Visible merge-line label styles | Visible label repeat distances |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     cameras = report.get("cameras")
     rows = cameras if isinstance(cameras, list) else []
@@ -1066,6 +1166,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             )
         )
     lines.extend(_visual_artifact_markdown_lines(rows))
+    lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
     lines.extend(_visible_label_detail_markdown_lines(rows))
     return "\n".join(lines) + "\n"

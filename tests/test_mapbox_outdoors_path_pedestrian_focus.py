@@ -560,6 +560,25 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(camera["qgis_path_pedestrian_visible_layer_count"], 3)
         self.assertEqual(camera["qgis_path_pedestrian_label_style_count"], 3)
         self.assertEqual(camera["qgis_path_pedestrian_visible_label_style_count"], 2)
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["duplicate_name_categories"],
+            [
+                {"category": "pedestrian", "top_duplicates": ["Englischer Viertel=5"]},
+                {"category": "path", "top_duplicates": ["Hofmattweg=3"]},
+                {"category": "step", "top_duplicates": ["Kirchsteig=2"]},
+            ],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["visible_merge_line_label_styles"],
+            ["road-label-z12-to-z15", "path-pedestrian-label"],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["visible_label_repeat_distances"],
+            [
+                "road-label-z12-to-z15=39.6875",
+                "path-pedestrian-label=105.83333333333333",
+            ],
+        )
 
     def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
         report = build_path_pedestrian_focus_report(
@@ -683,6 +702,11 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("| road-label-z12-to-z15 | road | 12<=z<=14 |", markdown)
         self.assertIn('"repeat_distance=105.83333333333333"', markdown)
         self.assertIn("| path-pedestrian-label | road | z>=12 |", markdown)
+        self.assertIn("## Duplicate label diagnostics", markdown)
+        self.assertIn('"pedestrian: Englischer Viertel=5"', markdown)
+        self.assertIn('"path: Hofmattweg=3"', markdown)
+        self.assertIn('"road-label-z12-to-z15"', markdown)
+        self.assertIn('"path-pedestrian-label=105.83333333333333"', markdown)
         self.assertIn("## Visual comparison artifacts", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | passed | metrics_available | 0.982 | 0.0352 | 0.0761 |", markdown)
         self.assertIn("`debug/comparison/chamonix/mapbox-gl-reference.png`", markdown)
@@ -717,6 +741,29 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("`debug/comparison/chamonix/qgis-vector-render.png`", markdown)
         self.assertIn("`debug/comparison/chamonix/mapbox-gl-vs-qgis-diff.png`", markdown)
         self.assertIn("`debug/comparison/all-cameras/contact-sheet.jpg`", markdown)
+
+    def test_build_summary_markdown_omits_duplicate_label_rows_without_duplicate_names(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "now",
+                "cameras": [
+                    {
+                        "camera": "merge-line-only",
+                        "duplicate_label_diagnostic": {
+                            "has_duplicate_feature_names": False,
+                            "duplicate_name_categories": [],
+                            "visible_merge_line_label_styles": ["road-label-z15-plus"],
+                            "visible_label_repeat_distances": [
+                                "road-label-z15-plus=105.83333333333333"
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("| merge-line-only |", markdown)
+        self.assertNotIn("## Duplicate label diagnostics", markdown)
 
     def test_build_summary_markdown_handles_no_focus_rows(self):
         markdown = build_summary_markdown({"generated": "now", "cameras": []})
