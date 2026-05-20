@@ -40,6 +40,13 @@ PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
 )
 TOP_COUNT_LIMIT = 3
 SAMPLE_LAYER_LIMIT = 8
+COMPARISON_VISUAL_OUTPUT_KEYS = ("browser_reference", "qgis_vector_render", "diff")
+COMPARISON_VISUAL_METRIC_KEYS = (
+    "changed_pixel_ratio",
+    "normalized_mean_absolute_channel_delta",
+    "normalized_rms_channel_delta",
+    "ssim_status",
+)
 
 
 @dataclass(frozen=True)
@@ -82,7 +89,8 @@ def load_json_object(path: Path) -> dict[str, object]:
 def _resolve_trusted_debug_path(raw_path: str, *, base_dir: Path, trusted_root: Path) -> Path:
     path = Path(raw_path)
     candidate = path if path.is_absolute() else base_dir / path
-    resolved = candidate.resolve()
+    # Safe: the resolved candidate is rejected unless it stays beneath the trusted debug root.
+    resolved = candidate.resolve()  # NOSONAR
     if not resolved.is_relative_to(trusted_root.resolve()):
         raise ValueError(f"Comparison artifact path must stay under {trusted_root}: {resolved}")
     return resolved
@@ -137,6 +145,106 @@ def qgis_style_paths_from_comparison_summary(
             trusted_root=root,
         )
     return paths
+
+
+def _comparison_debug_root(summary_path: Path | None, trusted_root: Path | None) -> Path:
+    if trusted_root is not None:
+        return trusted_root
+    if summary_path is not None:
+        return _trusted_root_for_comparison_summary(summary_path)
+    return DEFAULT_COMPARISON_OUTPUT_ROOT
+
+
+def _comparison_summary_base_dir(summary_path: Path | None) -> Path:
+    return Path.cwd() if summary_path is None else summary_path.parent
+
+
+def _comparison_camera_rows(comparison_summary: Mapping[str, object]) -> list[object]:
+    cameras = comparison_summary.get("cameras")
+    return cameras if isinstance(cameras, list) else []
+
+
+def _comparison_contact_sheet_path(
+    comparison_summary: Mapping[str, object],
+    *,
+    base_dir: Path,
+    trusted_root: Path,
+) -> Path | None:
+    contact_sheet_value = comparison_summary.get("contact_sheet")
+    if not isinstance(contact_sheet_value, str) or not contact_sheet_value:
+        return None
+    return _resolve_trusted_debug_path(
+        contact_sheet_value,
+        base_dir=base_dir,
+        trusted_root=trusted_root,
+    )
+
+
+def _camera_status_artifacts(camera_report: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key in ("status", "artifact_status")
+        if isinstance((value := camera_report.get(key)), str)
+    }
+
+
+def _camera_metric_artifacts(camera_report: Mapping[str, object]) -> dict[str, object]:
+    metrics = camera_report.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return {}
+    return {
+        key: value
+        for key in COMPARISON_VISUAL_METRIC_KEYS
+        if isinstance((value := metrics.get(key)), (str, int, float)) and not isinstance(value, bool)
+    }
+
+
+def _camera_output_artifacts(
+    camera_report: Mapping[str, object],
+    *,
+    base_dir: Path,
+    trusted_root: Path,
+) -> dict[str, object]:
+    outputs = camera_report.get("outputs")
+    if not isinstance(outputs, Mapping):
+        return {}
+    return {
+        key: _resolve_trusted_debug_path(value, base_dir=base_dir, trusted_root=trusted_root)
+        for key in COMPARISON_VISUAL_OUTPUT_KEYS
+        if isinstance((value := outputs.get(key)), str) and value
+    }
+
+
+def comparison_visual_artifacts_from_summary(
+    comparison_summary: Mapping[str, object],
+    *,
+    summary_path: Path | None = None,
+    trusted_root: Path | None = None,
+) -> dict[str, dict[str, object]]:
+    root = _comparison_debug_root(summary_path, trusted_root)
+    base_dir = _comparison_summary_base_dir(summary_path)
+    contact_sheet_path = _comparison_contact_sheet_path(
+        comparison_summary,
+        base_dir=base_dir,
+        trusted_root=root,
+    )
+    artifacts: dict[str, dict[str, object]] = {}
+    for camera_report in _comparison_camera_rows(comparison_summary):
+        if not isinstance(camera_report, Mapping):
+            continue
+        camera_name = camera_report.get("camera")
+        if not isinstance(camera_name, str):
+            continue
+        camera_artifacts = _camera_status_artifacts(camera_report)
+        camera_artifacts.update(_camera_metric_artifacts(camera_report))
+        camera_artifacts.update(
+            _camera_output_artifacts(camera_report, base_dir=base_dir, trusted_root=root)
+        )
+        if contact_sheet_path is not None:
+            camera_artifacts["contact_sheet"] = contact_sheet_path
+        if camera_artifacts:
+            artifacts[camera_name] = camera_artifacts
+    return artifacts
 
 
 def _compact_json(value: object, *, max_length: int = 110) -> str:
@@ -418,10 +526,12 @@ def build_path_pedestrian_focus_report(
     road_feature_report: Mapping[str, object],
     *,
     qgis_styles_by_camera: Mapping[str, Mapping[str, object]] | None = None,
+    visual_artifacts_by_camera: Mapping[str, Mapping[str, object]] | None = None,
     generated_at: dt.datetime | None = None,
     input_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     qgis_styles = qgis_styles_by_camera or {}
+    visual_artifacts = visual_artifacts_by_camera or {}
     camera_reports = road_feature_report.get("cameras")
     source_rows = camera_reports if isinstance(camera_reports, list) else []
     rows = []
@@ -431,12 +541,13 @@ def build_path_pedestrian_focus_report(
         if camera_report.get("status") != "decoded" or not _has_path_pedestrian_focus(camera_report):
             continue
         camera_name = str(camera_report.get("camera") or "")
-        rows.append(
-            _camera_focus_row(
-                camera_report,
-                qgis_style=qgis_styles.get(camera_name),
-            )
+        row = _camera_focus_row(
+            camera_report,
+            qgis_style=qgis_styles.get(camera_name),
         )
+        if camera_name in visual_artifacts:
+            row["visual_artifacts"] = _json_safe_artifact_value(visual_artifacts[camera_name])
+        rows.append(row)
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
     qgis_matched_camera_count = sum(1 for row in rows if row.get("qgis_style_status") == "available")
     report = {
@@ -583,6 +694,47 @@ def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
     return lines if detail_row_count else []
 
 
+def _artifact_path_cell(value: object) -> object:
+    if isinstance(value, str) and value:
+        return f"`{value}`"
+    return value
+
+
+def _visual_artifact_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        artifacts = camera.get("visual_artifacts")
+        if not isinstance(artifacts, Mapping):
+            continue
+        rows.append(
+            [
+                camera.get("camera"),
+                artifacts.get("status"),
+                artifacts.get("artifact_status"),
+                artifacts.get("changed_pixel_ratio"),
+                artifacts.get("normalized_mean_absolute_channel_delta"),
+                artifacts.get("normalized_rms_channel_delta"),
+                _artifact_path_cell(artifacts.get("browser_reference")),
+                _artifact_path_cell(artifacts.get("qgis_vector_render")),
+                _artifact_path_cell(artifacts.get("diff")),
+                _artifact_path_cell(artifacts.get("contact_sheet")),
+            ]
+        )
+    if not rows:
+        return []
+    lines = ["", "## Visual comparison artifacts", ""]
+    lines.extend(
+        [
+            "| Camera | Status | Artifact status | Changed ratio | Mean delta | RMS delta | Mapbox GL | QGIS render | Diff | Contact sheet |",
+            "| --- | --- | --- | ---: | ---: | ---: | --- | --- | --- | --- |",
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     cameras = report.get("cameras")
     rows = cameras if isinstance(cameras, list) else []
@@ -663,6 +815,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 ]
             )
         )
+    lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
     return "\n".join(lines) + "\n"
 
@@ -744,13 +897,15 @@ def _load_cli_json_object(parser: argparse.ArgumentParser, path: Path, *, label:
     raise AssertionError("argparse error should exit")
 
 
-def _qgis_style_paths_from_cli_comparison_summary(
+def _comparison_inputs_from_cli_summary(
     parser: argparse.ArgumentParser,
     path: Path,
-) -> dict[str, Path]:
+) -> tuple[dict[str, Path], dict[str, dict[str, object]]]:
     comparison_summary = _load_cli_json_object(parser, path, label="Comparison summary JSON")
     try:
-        return qgis_style_paths_from_comparison_summary(comparison_summary, summary_path=path)
+        qgis_style_paths = qgis_style_paths_from_comparison_summary(comparison_summary, summary_path=path)
+        visual_artifacts = comparison_visual_artifacts_from_summary(comparison_summary, summary_path=path)
+        return qgis_style_paths, visual_artifacts
     except FileNotFoundError as error:
         parser.error(f"Comparison manifest not found: {error.filename}")
     except json.JSONDecodeError as error:
@@ -768,6 +923,18 @@ def _display_input_path(path: Path) -> str:
         return str(resolved)
 
 
+def _display_visual_artifacts_by_camera(
+    visual_artifacts_by_camera: Mapping[str, Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    displayed: dict[str, dict[str, object]] = {}
+    for camera, artifacts in visual_artifacts_by_camera.items():
+        displayed[camera] = {
+            str(key): _display_input_path(value) if isinstance(value, Path) else value
+            for key, value in artifacts.items()
+        }
+    return displayed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -777,10 +944,14 @@ def main(argv: list[str] | None = None) -> int:
         label="Road features JSON",
     )
     qgis_style_paths_by_camera: dict[str, Path] = {}
+    visual_artifacts_by_camera: dict[str, dict[str, object]] = {}
     for comparison_summary_path in args.comparison_summary_json:
-        qgis_style_paths_by_camera.update(
-            _qgis_style_paths_from_cli_comparison_summary(parser, comparison_summary_path)
+        qgis_style_paths, visual_artifacts = _comparison_inputs_from_cli_summary(
+            parser,
+            comparison_summary_path,
         )
+        qgis_style_paths_by_camera.update(qgis_style_paths)
+        visual_artifacts_by_camera.update(visual_artifacts)
     qgis_style_paths_by_camera.update(dict(args.qgis_style_json))
     qgis_styles_by_camera = {
         camera: _load_cli_json_object(parser, path, label=f"QGIS style JSON for {camera}")
@@ -789,6 +960,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_path_pedestrian_focus_report(
         road_feature_report,
         qgis_styles_by_camera=qgis_styles_by_camera,
+        visual_artifacts_by_camera=_display_visual_artifacts_by_camera(visual_artifacts_by_camera),
         input_artifacts={
             "road_features_json": _display_input_path(args.road_features_json),
             "comparison_summary_jsons": [_display_input_path(path) for path in args.comparison_summary_json],

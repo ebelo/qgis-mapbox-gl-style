@@ -15,6 +15,7 @@ from qfit.validation.mapbox_outdoors_path_pedestrian_focus import (
     build_path_pedestrian_focus_report,
     build_run_directory,
     build_summary_markdown,
+    comparison_visual_artifacts_from_summary,
     load_json_object,
     main,
     qgis_style_paths_from_comparison_summary,
@@ -229,6 +230,49 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     trusted_root=root,
                 )
 
+    def test_comparison_visual_artifacts_from_summary_reads_metrics_and_output_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            comparison_root = Path(tmpdir) / "comparison"
+            summary_path = comparison_root / "all-cameras" / "20260520T003504Z" / "summary.json"
+            browser_path = comparison_root / "chamonix-trails-z14-outdoors" / "run" / "mapbox-gl-reference.png"
+            qgis_path = comparison_root / "chamonix-trails-z14-outdoors" / "run" / "qgis-vector-render.png"
+            diff_path = comparison_root / "chamonix-trails-z14-outdoors" / "run" / "mapbox-gl-vs-qgis-diff.png"
+            contact_sheet_path = summary_path.parent / "contact-sheet.jpg"
+            comparison_summary = {
+                "contact_sheet": "contact-sheet.jpg",
+                "cameras": [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "status": "passed",
+                        "artifact_status": "metrics_available",
+                        "metrics": {
+                            "changed_pixel_ratio": 0.982,
+                            "normalized_mean_absolute_channel_delta": 0.0352,
+                            "normalized_rms_channel_delta": 0.0761,
+                            "ssim_status": "unavailable",
+                        },
+                        "outputs": {
+                            "browser_reference": str(browser_path),
+                            "qgis_vector_render": str(qgis_path),
+                            "diff": str(diff_path),
+                        },
+                    }
+                ],
+            }
+
+            artifacts = comparison_visual_artifacts_from_summary(
+                comparison_summary,
+                summary_path=summary_path,
+            )
+
+            camera_artifacts = artifacts["chamonix-trails-z14-outdoors"]
+            self.assertEqual(camera_artifacts["browser_reference"], browser_path.resolve())
+            self.assertEqual(camera_artifacts["qgis_vector_render"], qgis_path.resolve())
+            self.assertEqual(camera_artifacts["diff"], diff_path.resolve())
+            self.assertEqual(camera_artifacts["contact_sheet"], contact_sheet_path.resolve())
+            self.assertEqual(camera_artifacts["changed_pixel_ratio"], 0.982)
+            self.assertEqual(camera_artifacts["ssim_status"], "unavailable")
+
     def test_qgis_path_pedestrian_style_summary_counts_current_style_controls(self):
         summary = qgis_path_pedestrian_style_summary(_qgis_preprocessed_style(), camera_zoom=14.25)
 
@@ -369,6 +413,31 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(camera["qgis_path_pedestrian_layer_count"], 4)
         self.assertEqual(camera["qgis_path_pedestrian_visible_layer_count"], 3)
 
+    def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
+        report = build_path_pedestrian_focus_report(
+            _road_feature_report(),
+            qgis_styles_by_camera={"chamonix-trails-z14-outdoors": _qgis_preprocessed_style()},
+            visual_artifacts_by_camera={
+                "chamonix-trails-z14-outdoors": {
+                    "changed_pixel_ratio": 0.982,
+                    "browser_reference": Path("debug/comparison/chamonix/mapbox-gl-reference.png"),
+                },
+                "switzerland-alps-z5-outdoors": {
+                    "changed_pixel_ratio": 0.943,
+                    "browser_reference": Path("debug/comparison/switzerland/mapbox-gl-reference.png"),
+                },
+            },
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        self.assertEqual(camera["camera"], "chamonix-trails-z14-outdoors")
+        self.assertEqual(camera["visual_artifacts"]["changed_pixel_ratio"], 0.982)
+        self.assertEqual(
+            camera["visual_artifacts"]["browser_reference"],
+            "debug/comparison/chamonix/mapbox-gl-reference.png",
+        )
+
     def test_build_path_pedestrian_focus_report_marks_missing_qgis_style(self):
         report = build_path_pedestrian_focus_report(
             _road_feature_report(),
@@ -406,6 +475,19 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         report = build_path_pedestrian_focus_report(
             _road_feature_report(),
             qgis_styles_by_camera={"chamonix-trails-z14-outdoors": _qgis_preprocessed_style()},
+            visual_artifacts_by_camera={
+                "chamonix-trails-z14-outdoors": {
+                    "status": "passed",
+                    "artifact_status": "metrics_available",
+                    "changed_pixel_ratio": 0.982,
+                    "normalized_mean_absolute_channel_delta": 0.0352,
+                    "normalized_rms_channel_delta": 0.0761,
+                    "browser_reference": "debug/comparison/chamonix/mapbox-gl-reference.png",
+                    "qgis_vector_render": "debug/comparison/chamonix/qgis-vector-render.png",
+                    "diff": "debug/comparison/chamonix/mapbox-gl-vs-qgis-diff.png",
+                    "contact_sheet": "debug/comparison/all-cameras/contact-sheet.jpg",
+                },
+            },
             generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
         )
 
@@ -441,6 +523,40 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn('"line-width=1.5"', markdown)
         self.assertIn('"line-dasharray=[1,1]"', markdown)
         self.assertIn("| road-pedestrian-polygon | fill | z>=14 |", markdown)
+        self.assertIn("## Visual comparison artifacts", markdown)
+        self.assertIn("| chamonix-trails-z14-outdoors | passed | metrics_available | 0.982 | 0.0352 | 0.0761 |", markdown)
+        self.assertIn("`debug/comparison/chamonix/mapbox-gl-reference.png`", markdown)
+        self.assertIn("`debug/comparison/chamonix/qgis-vector-render.png`", markdown)
+        self.assertIn("`debug/comparison/chamonix/mapbox-gl-vs-qgis-diff.png`", markdown)
+        self.assertIn("`debug/comparison/all-cameras/contact-sheet.jpg`", markdown)
+
+    def test_build_summary_markdown_includes_visual_artifacts(self):
+        report = build_path_pedestrian_focus_report(
+            _road_feature_report(),
+            visual_artifacts_by_camera={
+                "chamonix-trails-z14-outdoors": {
+                    "status": "passed",
+                    "artifact_status": "metrics_available",
+                    "changed_pixel_ratio": 0.982,
+                    "normalized_mean_absolute_channel_delta": 0.0352,
+                    "normalized_rms_channel_delta": 0.0761,
+                    "browser_reference": "debug/comparison/chamonix/mapbox-gl-reference.png",
+                    "qgis_vector_render": "debug/comparison/chamonix/qgis-vector-render.png",
+                    "diff": "debug/comparison/chamonix/mapbox-gl-vs-qgis-diff.png",
+                    "contact_sheet": "debug/comparison/all-cameras/contact-sheet.jpg",
+                }
+            },
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        markdown = build_summary_markdown(report)
+
+        self.assertIn("## Visual comparison artifacts", markdown)
+        self.assertIn("| chamonix-trails-z14-outdoors | passed | metrics_available | 0.982 |", markdown)
+        self.assertIn("`debug/comparison/chamonix/mapbox-gl-reference.png`", markdown)
+        self.assertIn("`debug/comparison/chamonix/qgis-vector-render.png`", markdown)
+        self.assertIn("`debug/comparison/chamonix/mapbox-gl-vs-qgis-diff.png`", markdown)
+        self.assertIn("`debug/comparison/all-cameras/contact-sheet.jpg`", markdown)
 
     def test_build_summary_markdown_handles_no_focus_rows(self):
         markdown = build_summary_markdown({"generated": "now", "cameras": []})
@@ -599,8 +715,12 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             run_dir.mkdir(parents=True)
             style_path = run_dir / "qgis-preprocessed-style.json"
             manifest_path = run_dir / "manifest.json"
+            browser_path = run_dir / "mapbox-gl-reference.png"
+            qgis_path = run_dir / "qgis-vector-render.png"
+            diff_path = run_dir / "mapbox-gl-vs-qgis-diff.png"
             comparison_summary_path = root / "comparison" / "all-cameras" / "summary.json"
             comparison_summary_path.parent.mkdir(parents=True)
+            contact_sheet_path = comparison_summary_path.parent / "contact-sheet.jpg"
             road_features_path.write_text(json.dumps(_road_feature_report()), encoding="utf-8")
             style_path.write_text(json.dumps(_qgis_preprocessed_style()), encoding="utf-8")
             manifest_path.write_text(
@@ -610,10 +730,23 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             comparison_summary_path.write_text(
                 json.dumps(
                     {
+                        "contact_sheet": str(contact_sheet_path),
                         "cameras": [
                             {
                                 "camera": "chamonix-trails-z14-outdoors",
+                                "status": "passed",
+                                "artifact_status": "metrics_available",
                                 "manifest": str(manifest_path),
+                                "metrics": {
+                                    "changed_pixel_ratio": 0.982,
+                                    "normalized_mean_absolute_channel_delta": 0.0352,
+                                    "normalized_rms_channel_delta": 0.0761,
+                                },
+                                "outputs": {
+                                    "browser_reference": str(browser_path),
+                                    "qgis_vector_render": str(qgis_path),
+                                    "diff": str(diff_path),
+                                },
                             }
                         ]
                     }
@@ -626,7 +759,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             with patch(
                 "qfit.validation.mapbox_outdoors_path_pedestrian_focus.DEFAULT_OUTPUT_ROOT",
                 output_root,
-            ), redirect_stdout(stdout):
+            ), patch(
+                "qfit.validation.mapbox_outdoors_path_pedestrian_focus.load_json_object",
+                wraps=load_json_object,
+            ) as loaded_json, redirect_stdout(stdout):
                 result = main(
                     [
                         "--road-features-json",
@@ -646,6 +782,51 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                 [str(comparison_summary_path)],
             )
             self.assertEqual(report["input_artifacts"]["qgis_style_cameras"], ["chamonix-trails-z14-outdoors"])
+            [camera] = report["cameras"]
+            self.assertEqual(camera["visual_artifacts"]["browser_reference"], str(browser_path.resolve()))
+            self.assertEqual(camera["visual_artifacts"]["qgis_vector_render"], str(qgis_path.resolve()))
+            self.assertEqual(camera["visual_artifacts"]["diff"], str(diff_path.resolve()))
+            self.assertEqual(camera["visual_artifacts"]["contact_sheet"], str(contact_sheet_path.resolve()))
+            self.assertEqual(camera["visual_artifacts"]["normalized_rms_channel_delta"], 0.0761)
+            loaded_paths = [call.args[0] for call in loaded_json.call_args_list]
+            self.assertEqual(loaded_paths.count(comparison_summary_path), 1)
+
+    def test_main_reports_untrusted_visual_artifact_without_traceback(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            road_features_path = root / "road-features.json"
+            comparison_summary_path = root / "comparison" / "all-cameras" / "summary.json"
+            comparison_summary_path.parent.mkdir(parents=True)
+            road_features_path.write_text(json.dumps(_road_feature_report()), encoding="utf-8")
+            comparison_summary_path.write_text(
+                json.dumps(
+                    {
+                        "cameras": [
+                            {
+                                "camera": "chamonix-trails-z14-outdoors",
+                                "outputs": {"browser_reference": "/tmp/outside.png"},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--road-features-json",
+                        str(road_features_path),
+                        "--comparison-summary-json",
+                        str(comparison_summary_path),
+                    ]
+                )
+
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("Comparison artifact path must stay under", stderr.getvalue())
+            self.assertIn("/tmp/outside.png", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_main_reports_missing_input_without_traceback(self):
         stderr = io.StringIO()
