@@ -352,6 +352,49 @@ def _count_road_number_shield_sprite_references(features: Iterable[dict[str, obj
     return dict(sorted(counts.items()))
 
 
+def _configured_road_number_shield_sprite_names() -> set[str]:
+    return {
+        f"{base}-{reflen}"
+        for reflen, bases in mapbox_config._ROAD_SHIELD_SPRITE_BASES_BY_REFLEN.items()
+        for base in bases
+    }
+
+
+def _road_number_shield_sprite_name_from_reference(reference: object) -> str | None:
+    if not isinstance(reference, str):
+        return None
+    _field_name, separator, sprite_name = reference.partition(":")
+    normalized = sprite_name.strip()
+    if not separator or not normalized:
+        return None
+    return normalized
+
+
+def _road_number_shield_sprite_reference_coverage(reference_counts: object) -> dict[str, object]:
+    configured = _configured_road_number_shield_sprite_names()
+    observed_references = [
+        str(reference)
+        for reference, count in (reference_counts.items() if isinstance(reference_counts, dict) else ())
+        if isinstance(count, int)
+        and not isinstance(count, bool)
+        and count > 0
+        and _road_number_shield_sprite_name_from_reference(reference) is not None
+    ]
+    missing = [
+        reference
+        for reference in observed_references
+        if _road_number_shield_sprite_name_from_reference(reference) not in configured
+    ]
+    return {
+        "configured_road_number_shield_sprite_count": len(configured),
+        "observed_road_number_shield_sprite_reference_count": len(observed_references),
+        "observed_road_number_shield_sprite_reference_count_covered_by_qfit_config": (
+            len(observed_references) - len(missing)
+        ),
+        "observed_road_number_shield_sprite_references_missing_from_qfit_config": sorted(missing),
+    }
+
+
 def _duplicate_count_map(counts: object) -> dict[str, int]:
     if not isinstance(counts, dict):
         return {}
@@ -758,6 +801,39 @@ def _top_count_labels(value: object, *, limit: int = FOCUS_TOP_COUNT_LIMIT) -> l
     return [f"{label}={count}" for label, count in counts[:limit]]
 
 
+def _markdown_road_shield_sprite_reference_coverage(report: dict[str, object]) -> list[str]:
+    coverage = report.get("road_number_shield_sprite_reference_coverage")
+    if not isinstance(coverage, dict):
+        return []
+    observed_count = coverage.get("observed_road_number_shield_sprite_reference_count")
+    if not isinstance(observed_count, int) or observed_count <= 0:
+        return []
+    missing = list(coverage.get("observed_road_number_shield_sprite_references_missing_from_qfit_config") or [])
+    lines = [
+        "",
+        "## Road shield sprite reference coverage",
+        "",
+        f"- qfit configured road-number shield sprites: {coverage.get('configured_road_number_shield_sprite_count')}",
+        f"- Observed road-number shield sprite refs: {observed_count}",
+        (
+            "- Observed refs covered by qfit config: "
+            f"{coverage.get('observed_road_number_shield_sprite_reference_count_covered_by_qfit_config')}"
+        ),
+        "",
+    ]
+    if not missing:
+        return [*lines, "Observed road-number shield sprite refs missing from qfit config: none", ""]
+    return [
+        *lines,
+        "### Observed road-number shield sprite refs missing from qfit config",
+        "",
+        "| Reference |",
+        "| --- |",
+        *(f"| {_markdown_value(reference)} |" for reference in missing),
+        "",
+    ]
+
+
 def _has_path_pedestrian_focus(record: dict[str, object]) -> bool:
     return any(
         isinstance(record.get(key), int) and record.get(key) > 0
@@ -888,6 +964,7 @@ def collect_road_feature_report(
     ]
     decoded_tile_count = sum(1 for tile in tile_records if tile.get("status") == "decoded")
     generated = config.now or dt.datetime.now(dt.timezone.utc)
+    count_map_fields = _count_map_report_fields(tile_records)
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -909,7 +986,10 @@ def collect_road_feature_report(
         **_candidate_count_report_fields(tile_records),
         "road_geometry_type_counts": _combined_record_counts(tile_records, "road_geometry_type_counts"),
         "pedestrian_polygon_class_counts": _combined_record_counts(tile_records, "pedestrian_polygon_class_counts"),
-        **_count_map_report_fields(tile_records),
+        **count_map_fields,
+        "road_number_shield_sprite_reference_coverage": _road_number_shield_sprite_reference_coverage(
+            count_map_fields.get("road_number_shield_sprite_reference_counts")
+        ),
         **_sample_report_fields(tile_records),
         "tiles": tile_records,
     }
@@ -952,6 +1032,10 @@ def collect_all_camera_road_feature_report(
         camera_reports.append(_all_camera_row(report))
     status_counts = _all_camera_status_counts(camera_reports)
     name_count_fields = _combined_name_count_fields(camera_reports)
+    road_number_shield_sprite_reference_counts = _combined_record_counts(
+        camera_reports,
+        "road_number_shield_sprite_reference_counts",
+    )
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -1056,9 +1140,9 @@ def collect_all_camera_road_feature_report(
             camera_reports,
             "road_number_shield_reflen_counts",
         ),
-        "road_number_shield_sprite_reference_counts": _combined_record_counts(
-            camera_reports,
-            "road_number_shield_sprite_reference_counts",
+        "road_number_shield_sprite_reference_counts": road_number_shield_sprite_reference_counts,
+        "road_number_shield_sprite_reference_coverage": _road_number_shield_sprite_reference_coverage(
+            road_number_shield_sprite_reference_counts
         ),
         "road_number_shield_structure_counts": _combined_record_counts(
             camera_reports,
@@ -1097,6 +1181,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Tile zoom: {report.get('tile_zoom')}",
         f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
         *_feature_summary_lines(report),
+        *_markdown_road_shield_sprite_reference_coverage(report),
         "",
         *_markdown_table_header((("z", "---:"), ("x", "---:"), ("y", "---:"), ("Status", "---"))),
     ]
@@ -1128,6 +1213,7 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
         f"Camera statuses: {_markdown_value(_all_camera_status_counts(rows))}",
         f"Tiles: {report.get('decoded_tile_count')}/{report.get('tile_count')} decoded",
         *_feature_summary_lines(report),
+        *_markdown_road_shield_sprite_reference_coverage(report),
         "",
         *_markdown_table_header(
             (

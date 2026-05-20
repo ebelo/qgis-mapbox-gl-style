@@ -78,6 +78,68 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             },
         )
 
+    def test_road_number_shield_sprite_reference_coverage_flags_unconfigured_observed_refs(self):
+        configured_count = len(road_features._configured_road_number_shield_sprite_names())
+
+        coverage = road_features._road_number_shield_sprite_reference_coverage(
+            {
+                "shield:ch-motorway-2": 3,
+                "shield:rectangle-red-4": 1,
+                "shield_beta:zz-main-2": 1,
+                "invalid-reference": 2,
+                "shield:rectangle-yellow-3": True,
+            }
+        )
+
+        self.assertEqual(
+            coverage,
+            {
+                "configured_road_number_shield_sprite_count": configured_count,
+                "observed_road_number_shield_sprite_reference_count": 3,
+                "observed_road_number_shield_sprite_reference_count_covered_by_qfit_config": 2,
+                "observed_road_number_shield_sprite_references_missing_from_qfit_config": [
+                    "shield_beta:zz-main-2"
+                ],
+            },
+        )
+
+    def test_road_number_shield_sprite_reference_coverage_handles_empty_inputs(self):
+        coverage = road_features._road_number_shield_sprite_reference_coverage(None)
+
+        self.assertEqual(coverage["observed_road_number_shield_sprite_reference_count"], 0)
+        self.assertEqual(
+            coverage["observed_road_number_shield_sprite_references_missing_from_qfit_config"],
+            [],
+        )
+        self.assertIsNone(road_features._road_number_shield_sprite_name_from_reference(2))
+        self.assertEqual(road_features._markdown_road_shield_sprite_reference_coverage({}), [])
+        self.assertEqual(
+            road_features._markdown_road_shield_sprite_reference_coverage(
+                {"road_number_shield_sprite_reference_coverage": coverage}
+            ),
+            [],
+        )
+
+    def test_road_number_shield_sprite_reference_coverage_markdown_lists_missing_refs(self):
+        lines = road_features._markdown_road_shield_sprite_reference_coverage(
+            {
+                "road_number_shield_sprite_reference_coverage": {
+                    "configured_road_number_shield_sprite_count": len(
+                        road_features._configured_road_number_shield_sprite_names()
+                    ),
+                    "observed_road_number_shield_sprite_reference_count": 1,
+                    "observed_road_number_shield_sprite_reference_count_covered_by_qfit_config": 0,
+                    "observed_road_number_shield_sprite_references_missing_from_qfit_config": [
+                        "shield_beta:zz-main-2"
+                    ],
+                }
+            }
+        )
+
+        markdown = "\n".join(lines)
+        self.assertIn("### Observed road-number shield sprite refs missing from qfit config", markdown)
+        self.assertIn("| shield_beta:zz-main-2 |", markdown)
+
     def test_resolve_mapbox_token_prefers_argument_then_environment(self):
         self.assertEqual(
             resolve_mapbox_token(
@@ -648,6 +710,17 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["road_number_shield_class_counts"], {})
         self.assertEqual(report["road_number_shield_reflen_counts"], {})
         self.assertEqual(report["road_number_shield_sprite_reference_counts"], {})
+        self.assertEqual(
+            report["road_number_shield_sprite_reference_coverage"],
+            {
+                "configured_road_number_shield_sprite_count": len(
+                    road_features._configured_road_number_shield_sprite_names()
+                ),
+                "observed_road_number_shield_sprite_reference_count": 0,
+                "observed_road_number_shield_sprite_reference_count_covered_by_qfit_config": 0,
+                "observed_road_number_shield_sprite_references_missing_from_qfit_config": [],
+            },
+        )
         self.assertEqual(report["road_number_shield_structure_counts"], {})
         self.assertEqual(report["road_number_shield_layer_counts"], {})
         self.assertEqual(report["road_exit_shield_reflen_counts"], {})
@@ -950,6 +1023,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "road_number_shield_class_counts": {"primary": 1},
             "road_number_shield_reflen_counts": {"2": 1},
             "road_number_shield_sprite_reference_counts": {"shield:ch-primary-2": 1},
+            "road_number_shield_sprite_reference_coverage": {
+                "configured_road_number_shield_sprite_count": len(
+                    road_features._configured_road_number_shield_sprite_names()
+                ),
+                "observed_road_number_shield_sprite_reference_count": 1,
+                "observed_road_number_shield_sprite_reference_count_covered_by_qfit_config": 1,
+                "observed_road_number_shield_sprite_references_missing_from_qfit_config": [],
+            },
             "road_number_shield_structure_counts": {"none": 1},
             "road_number_shield_layer_counts": {"0": 1},
             "road_number_shield_signature_counts": {shield_signature: 1},
@@ -1154,6 +1235,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "road_number_shield_class_counts": {"primary": 1},
             "road_number_shield_reflen_counts": {"2": 1},
             "road_number_shield_sprite_reference_counts": {"shield:ch-primary-2": 1},
+            "road_number_shield_sprite_reference_coverage": {
+                "configured_road_number_shield_sprite_count": len(
+                    road_features._configured_road_number_shield_sprite_names()
+                ),
+                "observed_road_number_shield_sprite_reference_count": 1,
+                "observed_road_number_shield_sprite_reference_count_covered_by_qfit_config": 1,
+                "observed_road_number_shield_sprite_references_missing_from_qfit_config": [],
+            },
             "road_number_shield_structure_counts": {"none": 1},
             "road_number_shield_layer_counts": {"0": 1},
             "road_number_shield_signature_counts": {shield_signature: 1},
@@ -1246,6 +1335,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn('Step line duplicate names: {"Kirchsteig":2}', markdown)
         self.assertIn('Road label duplicate names: {"Bachstrasse":2}', markdown)
         self.assertIn(f'Road label signatures: {{"{road_label_signature}":2}}', markdown)
+        self.assertIn("## Road shield sprite reference coverage", markdown)
+        self.assertIn("- Observed road-number shield sprite refs: 1", markdown)
+        self.assertIn("Observed road-number shield sprite refs missing from qfit config: none", markdown)
         self.assertIn("## Path/pedestrian focus", markdown)
         self.assertIn(
             '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 1 | 1 | ["pedestrian=1"] | ["footway=1"] | ["bridge=1"] | ["Promenade=2"] | ["Trail=2"] | ["Kirchsteig=2"] |',
