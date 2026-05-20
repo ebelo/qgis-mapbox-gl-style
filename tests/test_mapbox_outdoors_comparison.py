@@ -28,6 +28,10 @@ from qfit.validation.mapbox_outdoors_comparison import (
     QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_FILTER,
     QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_MIN_ZOOM,
     QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_STYLE_NAME,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_EXPRESSION,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_FILTER,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_MIN_ZOOM,
+    QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_STYLE_NAME,
     QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_EXPRESSION,
     QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_FILTER,
     QGIS_CONTOUR_BOUNDARY_GENERATOR_LABEL_PROBE_MIN_ZOOM,
@@ -37,6 +41,7 @@ from qfit.validation.mapbox_outdoors_comparison import (
     QGIS_CONTOUR_POLYGON_LABEL_PROBE_STYLE_NAME,
     _append_qgis_contour_bbox_edge_difference_label_probe,
     _append_qgis_contour_bbox_edge_difference_source_style_label_probe,
+    _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe,
     _append_qgis_contour_boundary_generator_label_probe,
     _append_qgis_contour_polygon_label_probe,
     _label_setting_value,
@@ -633,6 +638,14 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                 QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_FILTER,
                 QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_MIN_ZOOM,
                 QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_LABEL_PROBE_EXPRESSION,
+                True,
+            ),
+            (
+                _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_STYLE_NAME,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_FILTER,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_MIN_ZOOM,
+                QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_SOURCE_STYLE_HIGH_ZOOM_LABEL_PROBE_EXPRESSION,
                 True,
             ),
         ]
@@ -1262,6 +1275,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             qgis_contour_boundary_generator_label_probe,
             qgis_contour_bbox_edge_difference_label_probe,
             qgis_contour_bbox_edge_difference_source_style_label_probe,
+            qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe,
             **_kwargs,
         ):
             captured["polygon_probe"] = qgis_contour_polygon_label_probe
@@ -1269,6 +1283,9 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             captured["bbox_edge_difference_probe"] = qgis_contour_bbox_edge_difference_label_probe
             captured["bbox_edge_difference_source_style_probe"] = (
                 qgis_contour_bbox_edge_difference_source_style_label_probe
+            )
+            captured["bbox_edge_difference_source_style_high_zoom_probe"] = (
+                qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe
             )
             output_path.write_bytes(PNG_PLACEHOLDER)
 
@@ -1282,6 +1299,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                     qgis_contour_boundary_generator_label_probe=True,
                     qgis_contour_bbox_edge_difference_label_probe=True,
                     qgis_contour_bbox_edge_difference_source_style_label_probe=True,
+                    qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=True,
                     browser=False,
                     diff=False,
                     now=dt.datetime(2026, 5, 10, 19, 45, tzinfo=dt.timezone.utc),
@@ -1295,14 +1313,17 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(captured["boundary_generator_probe"])
         self.assertTrue(captured["bbox_edge_difference_probe"])
         self.assertTrue(captured["bbox_edge_difference_source_style_probe"])
+        self.assertTrue(captured["bbox_edge_difference_source_style_high_zoom_probe"])
         self.assertTrue(result.qgis_contour_polygon_label_probe)
         self.assertTrue(result.qgis_contour_boundary_generator_label_probe)
         self.assertTrue(result.qgis_contour_bbox_edge_difference_label_probe)
         self.assertTrue(result.qgis_contour_bbox_edge_difference_source_style_label_probe)
+        self.assertTrue(result.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe)
         self.assertTrue(manifest["qgis_contour_polygon_label_probe"])
         self.assertTrue(manifest["qgis_contour_boundary_generator_label_probe"])
         self.assertTrue(manifest["qgis_contour_bbox_edge_difference_label_probe"])
         self.assertTrue(manifest["qgis_contour_bbox_edge_difference_source_style_label_probe"])
+        self.assertTrue(manifest["qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe"])
 
     def test_run_comparison_passes_downloaded_style_json_to_renderers(self):
         captured_style_definitions = []
@@ -1387,6 +1408,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             "--qgis-contour-boundary-generator-label-probe",
             "--qgis-contour-bbox-edge-difference-label-probe",
             "--qgis-contour-bbox-edge-difference-source-style-label-probe",
+            "--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe",
             "--browser-timeout-ms",
             "5000",
         ])
@@ -1400,6 +1422,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(args.qgis_contour_boundary_generator_label_probe)
         self.assertTrue(args.qgis_contour_bbox_edge_difference_label_probe)
         self.assertTrue(args.qgis_contour_bbox_edge_difference_source_style_label_probe)
+        self.assertTrue(args.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe)
         self.assertEqual(args.browser_timeout_ms, 5000)
 
     def test_main_all_cameras_runs_full_inspection_matrix(self):
@@ -1428,6 +1451,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                         "--qgis-contour-boundary-generator-label-probe",
                         "--qgis-contour-bbox-edge-difference-label-probe",
                         "--qgis-contour-bbox-edge-difference-source-style-label-probe",
+                        "--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe",
                         "--skip-diff",
                         "--browser-timeout-ms",
                         "5000",
@@ -1447,6 +1471,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             self.assertIn("--qgis-contour-boundary-generator-label-probe", command)
             self.assertIn("--qgis-contour-bbox-edge-difference-label-probe", command)
             self.assertIn("--qgis-contour-bbox-edge-difference-source-style-label-probe", command)
+            self.assertIn("--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe", command)
             self.assertIn("--skip-diff", command)
             self.assertEqual(kwargs["env"]["MAPBOX_ACCESS_TOKEN"], "test-mapbox-token")
             self.assertEqual(kwargs["cwd"], mapbox_outdoors_comparison.REPO_ROOT)

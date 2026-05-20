@@ -216,6 +216,16 @@ python3 validation/mapbox_outdoors_comparison.py \
 
 This renders a separate diagnostic rule named `contour-label-bbox-edge-difference-source-style-probe`. Use it when the visual question is whether the bbox-edge-difference geometry is still promising after matching the production `contour-label` text styling.
 
+To test the same source-styled probe without enabling it in the z14 cameras where it can over-label slopes, use the high-zoom variant:
+
+```bash
+python3 validation/mapbox_outdoors_comparison.py \
+  zermatt-piste-z17-outdoors \
+  --qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe
+```
+
+This renders `contour-label-bbox-edge-difference-source-style-high-zoom-probe`, with the diagnostic rule's minimum QGIS zoom raised to 17. Use it to compare a tightly gated production candidate against the broad source-style probe; it remains diagnostic output only.
+
 When QGIS capture runs, inspect `qgis-label-styles.json` beside the screenshots to confirm the converted label settings and any probe geometry-generator settings that were active for the render. Use that snapshot with the preprocessed style JSON before deciding whether a diagnostic probe is safe to promote into production styling.
 
 For a table-oriented label-settings report with the same diagnostic rule appended, run:
@@ -225,7 +235,7 @@ python3 validation/mapbox_outdoors_label_settings.py \
   --qgis-contour-bbox-edge-difference-label-probe
 ```
 
-Add `--qgis-contour-bbox-edge-difference-source-style-label-probe` to include the source-style variant in the same report.
+Add `--qgis-contour-bbox-edge-difference-source-style-label-probe` or `--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe` to include source-style variants in the same report.
 
 The report keeps the probe separate from source Mapbox layers, so the summary can distinguish converted production labels from diagnostic-only QGIS rules.
 

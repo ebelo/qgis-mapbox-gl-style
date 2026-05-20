@@ -89,6 +89,7 @@ class LabelSettingsConfig:
     include_sprite_context: bool = True
     qgis_contour_bbox_edge_difference_label_probe: bool = False
     qgis_contour_bbox_edge_difference_source_style_label_probe: bool = False
+    qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe: bool = False
     now: dt.datetime | None = None
 
 
@@ -465,6 +466,14 @@ def _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer: ob
     append_probe(layer)
 
 
+def _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe(layer: object) -> None:
+    from qfit.validation.mapbox_outdoors_comparison import (  # noqa: PLC0415
+        _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe as append_probe,
+    )
+
+    append_probe(layer)
+
+
 def _apply_labeling_probes(labeling: object | None, config: LabelSettingsConfig) -> object | None:
     if labeling is None:
         return labeling
@@ -473,6 +482,8 @@ def _apply_labeling_probes(labeling: object | None, config: LabelSettingsConfig)
         _append_qgis_contour_bbox_edge_difference_label_probe(layer)
     if config.qgis_contour_bbox_edge_difference_source_style_label_probe:
         _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer)
+    if config.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe:
+        _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe(layer)
     return layer.labeling()
 
 
@@ -1005,6 +1016,9 @@ def _label_settings_report(
         "qgis_contour_bbox_edge_difference_source_style_label_probe": (
             config.qgis_contour_bbox_edge_difference_source_style_label_probe
         ),
+        "qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe": (
+            config.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe
+        ),
         "label_count": len(records),
         "labels": records,
         "label_style_summary_by_base_layer": _label_style_summary_rows(records),
@@ -1417,6 +1431,8 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"Bbox-edge contour label probe: {_markdown_value(report.get('qgis_contour_bbox_edge_difference_label_probe'))}",
         "Bbox-edge source-style contour label probe: "
         f"{_markdown_value(report.get('qgis_contour_bbox_edge_difference_source_style_label_probe'))}",
+        "Bbox-edge source-style high-zoom contour label probe: "
+        f"{_markdown_value(report.get('qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe'))}",
         "",
     ]
     _append_label_style_summary(lines, summary_rows)
@@ -1460,6 +1476,14 @@ def build_parser() -> argparse.ArgumentParser:
             "contour label text settings."
         ),
     )
+    parser.add_argument(
+        "--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe",
+        action="store_true",
+        help=(
+            "Append the source-styled bbox-edge contour probe with the diagnostic "
+            "minimum zoom raised to 17."
+        ),
+    )
     return parser
 
 
@@ -1476,6 +1500,9 @@ def main(argv: list[str] | None = None) -> int:
         qgis_contour_bbox_edge_difference_label_probe=args.qgis_contour_bbox_edge_difference_label_probe,
         qgis_contour_bbox_edge_difference_source_style_label_probe=(
             args.qgis_contour_bbox_edge_difference_source_style_label_probe
+        ),
+        qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=(
+            args.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe
         ),
     )
     paths = build_label_settings_paths(

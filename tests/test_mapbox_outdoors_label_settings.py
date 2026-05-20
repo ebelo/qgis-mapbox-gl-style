@@ -14,6 +14,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     LabelSettingsConfig,
     _append_qgis_contour_bbox_edge_difference_label_probe,
     _append_qgis_contour_bbox_edge_difference_source_style_label_probe,
+    _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe,
     _apply_labeling_probes,
     _convert_style_to_labeling,
     _ensure_qgis_application,
@@ -447,6 +448,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         original_labeling = FakeLabeling([])
         first_updated_labeling = FakeLabeling([])
         second_updated_labeling = FakeLabeling([])
+        third_updated_labeling = FakeLabeling([])
         seen = {}
 
         def fake_append_probe(layer):
@@ -459,6 +461,10 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             seen["source_before"] = layer.labeling()
             layer.setLabeling(second_updated_labeling)
 
+        def fake_append_source_style_high_zoom_probe(layer):
+            seen["source_high_zoom_before"] = layer.labeling()
+            layer.setLabeling(third_updated_labeling)
+
         with mock.patch(
             "qfit.validation.mapbox_outdoors_label_settings._append_qgis_contour_bbox_edge_difference_label_probe",
             side_effect=fake_append_probe,
@@ -468,22 +474,30 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 "_append_qgis_contour_bbox_edge_difference_source_style_label_probe",
                 side_effect=fake_append_source_style_probe,
             ) as append_source_style_probe:
-                result = _apply_labeling_probes(
-                    original_labeling,
-                    LabelSettingsConfig(
-                        token="token",
-                        output_root=Path("/tmp"),
-                        qgis_contour_bbox_edge_difference_label_probe=True,
-                        qgis_contour_bbox_edge_difference_source_style_label_probe=True,
-                    ),
-                )
+                with mock.patch(
+                    "qfit.validation.mapbox_outdoors_label_settings."
+                    "_append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe",
+                    side_effect=fake_append_source_style_high_zoom_probe,
+                ) as append_source_style_high_zoom_probe:
+                    result = _apply_labeling_probes(
+                        original_labeling,
+                        LabelSettingsConfig(
+                            token="token",
+                            output_root=Path("/tmp"),
+                            qgis_contour_bbox_edge_difference_label_probe=True,
+                            qgis_contour_bbox_edge_difference_source_style_label_probe=True,
+                            qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=True,
+                        ),
+                    )
 
         append_probe.assert_called_once()
         append_source_style_probe.assert_called_once()
+        append_source_style_high_zoom_probe.assert_called_once()
         self.assertIs(seen["before"], original_labeling)
         self.assertIs(seen["source_before"], first_updated_labeling)
+        self.assertIs(seen["source_high_zoom_before"], second_updated_labeling)
         self.assertTrue(seen["labels_enabled_called"])
-        self.assertIs(result, second_updated_labeling)
+        self.assertIs(result, third_updated_labeling)
 
     def test_apply_labeling_probes_skips_when_disabled_or_missing_labeling(self):
         labeling = FakeLabeling([])
@@ -494,28 +508,34 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 "qfit.validation.mapbox_outdoors_label_settings."
                 "_append_qgis_contour_bbox_edge_difference_source_style_label_probe"
             ) as append_source_style_probe:
-                self.assertIs(
-                    _apply_labeling_probes(
-                        labeling,
-                        LabelSettingsConfig(token="token", output_root=Path("/tmp")),
-                    ),
-                    labeling,
-                )
-                self.assertIs(
-                    _apply_labeling_probes(
-                        None,
-                        LabelSettingsConfig(
-                            token="token",
-                            output_root=Path("/tmp"),
-                            qgis_contour_bbox_edge_difference_label_probe=True,
-                            qgis_contour_bbox_edge_difference_source_style_label_probe=True,
+                with mock.patch(
+                    "qfit.validation.mapbox_outdoors_label_settings."
+                    "_append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe"
+                ) as append_source_style_high_zoom_probe:
+                    self.assertIs(
+                        _apply_labeling_probes(
+                            labeling,
+                            LabelSettingsConfig(token="token", output_root=Path("/tmp")),
                         ),
-                    ),
-                    None,
-                )
+                        labeling,
+                    )
+                    self.assertIs(
+                        _apply_labeling_probes(
+                            None,
+                            LabelSettingsConfig(
+                                token="token",
+                                output_root=Path("/tmp"),
+                                qgis_contour_bbox_edge_difference_label_probe=True,
+                                qgis_contour_bbox_edge_difference_source_style_label_probe=True,
+                                qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=True,
+                            ),
+                        ),
+                        None,
+                    )
 
         append_probe.assert_not_called()
         append_source_style_probe.assert_not_called()
+        append_source_style_high_zoom_probe.assert_not_called()
 
     def test_append_qgis_contour_bbox_edge_difference_label_probe_delegates_to_comparison_helper(self):
         layer = object()
@@ -533,6 +553,16 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "_append_qgis_contour_bbox_edge_difference_source_style_label_probe"
         ) as append_probe:
             _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer)
+
+        append_probe.assert_called_once_with(layer)
+
+    def test_append_qgis_contour_bbox_edge_difference_source_style_high_zoom_probe_delegates_to_comparison_helper(self):
+        layer = object()
+        with mock.patch(
+            "qfit.validation.mapbox_outdoors_comparison."
+            "_append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe"
+        ) as append_probe:
+            _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe(layer)
 
         append_probe.assert_called_once_with(layer)
 
@@ -1147,6 +1177,27 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 )
             )
 
+        def fake_append_source_style_high_zoom_probe(layer):
+            class FakeProbeSettings(FakeSettings):
+                geometryGenerator = bbox_expression
+                geometryGeneratorEnabled = True
+                geometryGeneratorType = SimpleNamespace(name="Line")
+
+            styles = list(layer.labeling().styles())
+            layer.setLabeling(
+                FakeLabeling(
+                    [
+                        *styles,
+                        FakeLabelStyle(
+                            style_name="contour-label-bbox-edge-difference-source-style-high-zoom-probe",
+                            layer_name="contour",
+                            settings=FakeProbeSettings(),
+                            geometry_type=SimpleNamespace(name="Polygon"),
+                        ),
+                    ]
+                )
+            )
+
         modules = {
             **_fake_qgis_modules(),
             "qfit.visualization.infrastructure.background_map_service": _fake_background_map_service_module(),
@@ -1196,25 +1247,33 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                                 "_append_qgis_contour_bbox_edge_difference_source_style_label_probe",
                                 side_effect=fake_append_source_style_probe,
                             ) as append_source_style_probe:
-                                report = collect_label_settings(
-                                    LabelSettingsConfig(
-                                        token="token",
-                                        output_root=Path("/tmp"),
-                                        qgis_contour_bbox_edge_difference_label_probe=True,
-                                        qgis_contour_bbox_edge_difference_source_style_label_probe=True,
+                                with mock.patch(
+                                    "qfit.validation.mapbox_outdoors_label_settings."
+                                    "_append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe",
+                                    side_effect=fake_append_source_style_high_zoom_probe,
+                                ) as append_source_style_high_zoom_probe:
+                                    report = collect_label_settings(
+                                        LabelSettingsConfig(
+                                            token="token",
+                                            output_root=Path("/tmp"),
+                                            qgis_contour_bbox_edge_difference_label_probe=True,
+                                            qgis_contour_bbox_edge_difference_source_style_label_probe=True,
+                                            qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=True,
+                                        )
                                     )
-                                )
 
         fetch_style.assert_called_once_with("token", "mapbox", "outdoors-v12")
         fetch_sprites.assert_called_once()
         append_probe.assert_called_once()
         append_source_style_probe.assert_called_once()
+        append_source_style_high_zoom_probe.assert_called_once()
         self.assertEqual(report["qgis_converter_result"], "success")
         self.assertEqual(report["sprite_definition_count"], 1)
         self.assertFalse(report["sprite_context_loaded"])
         self.assertTrue(report["qgis_contour_bbox_edge_difference_label_probe"])
         self.assertTrue(report["qgis_contour_bbox_edge_difference_source_style_label_probe"])
-        self.assertEqual(report["label_count"], 3)
+        self.assertTrue(report["qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe"])
+        self.assertEqual(report["label_count"], 4)
         labels_by_style = {row["style_name"]: row for row in report["labels"]}
         self.assertEqual(labels_by_style["road-label-z15-plus"]["base_style_layer_id"], "road-label")
         self.assertEqual(
@@ -1227,6 +1286,12 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         )
         self.assertEqual(
             labels_by_style["contour-label-bbox-edge-difference-source-style-probe"]["geometry_generator"],
+            bbox_expression,
+        )
+        self.assertEqual(
+            labels_by_style["contour-label-bbox-edge-difference-source-style-high-zoom-probe"][
+                "geometry_generator"
+            ],
             bbox_expression,
         )
         self.assertEqual(report["source_label_layer_count"], 1)
@@ -1244,6 +1309,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "sprite_definition_count": 440,
             "qgis_contour_bbox_edge_difference_label_probe": True,
             "qgis_contour_bbox_edge_difference_source_style_label_probe": True,
+            "qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe": True,
             "label_count": 1,
             "label_style_summary_by_base_layer": [
                 {
@@ -1383,6 +1449,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("Sprite context loaded: yes", markdown)
         self.assertIn("Bbox-edge contour label probe: yes", markdown)
         self.assertIn("Bbox-edge source-style contour label probe: yes", markdown)
+        self.assertIn("Bbox-edge source-style high-zoom contour label probe: yes", markdown)
         self.assertIn("## Label style summary by base layer", markdown)
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
         self.assertIn("## Line label repeat spacing by base layer", markdown)
@@ -1545,6 +1612,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                         "--no-sprite-context",
                         "--qgis-contour-bbox-edge-difference-label-probe",
                         "--qgis-contour-bbox-edge-difference-source-style-label-probe",
+                        "--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe",
                     ]
                 )
 
@@ -1556,6 +1624,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             self.assertTrue(
                 collect.call_args.args[0].qgis_contour_bbox_edge_difference_source_style_label_probe
             )
+            config = collect.call_args.args[0]
+            self.assertTrue(config.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe)
             self.assertEqual(len(list(output_root.glob("mapbox-outdoors-v12/*/summary.md"))), 1)
 
 
