@@ -29,6 +29,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _postprocessed_label_records,
     _qgis_duplicate_label_controls,
     _qgis_pal_layer_property_names_by_value,
+    _qgis_text_background_enum_names_by_field,
     _road_shield_label_placement_rows,
     _source_label_control_omission_summary_rows,
     _source_label_control_summary_rows,
@@ -95,17 +96,23 @@ class FakeTextBuffer:
 
 
 class FakeTextBackground:
+    def __init__(self, *, type_value=None, size_type_value=None):
+        self._type_value = type_value if type_value is not None else SimpleNamespace(name="ShapeRectangle")
+        self._size_type_value = (
+            size_type_value if size_type_value is not None else SimpleNamespace(name="SizeFixed")
+        )
+
     def enabled(self):
         return True
 
     def type(self):
-        return SimpleNamespace(name="ShapeRectangle")
+        return self._type_value
 
     def size(self):
         return FakeSize(4.4979166667, 2.6458333333)
 
     def sizeType(self):
-        return SimpleNamespace(name="SizeFixed")
+        return self._size_type_value
 
     def sizeUnit(self):
         return SimpleNamespace(name="Millimeters")
@@ -127,6 +134,9 @@ class FakeTextBackground:
 
 
 class FakeTextFormat:
+    def __init__(self, *, background=None):
+        self._background = background if background is not None else FakeTextBackground()
+
     def size(self):
         return 2.5135416667
 
@@ -143,7 +153,7 @@ class FakeTextFormat:
         return FakeTextBuffer()
 
     def background(self):
-        return FakeTextBackground()
+        return self._background
 
 
 class FakePlacementSettings:
@@ -247,6 +257,15 @@ class FakeQgsPalLayerSettings:
     Priority = Property(87)
 
 
+class FakeQgsTextBackgroundSettings:
+    ShapeRectangle = 0
+    ShapeMarkerSymbol = 5
+    ShapeType = object()
+    SizeBuffer = 0
+    SizeFixed = 1
+    SizeType = object()
+
+
 class FakeConversionContext:
     last_instance = None
 
@@ -303,6 +322,7 @@ def _fake_qgis_modules():
     core_module.QgsMapBoxGlStyleConversionContext = FakeConversionContext
     core_module.QgsMapBoxGlStyleConverter = FakeConverter
     core_module.QgsPalLayerSettings = FakeQgsPalLayerSettings
+    core_module.QgsTextBackgroundSettings = FakeQgsTextBackgroundSettings
     core_module.Qgis = SimpleNamespace(RenderUnit=SimpleNamespace(Millimeters="millimeters"))
     qgis_module.core = core_module
     return {"qgis": qgis_module, "qgis.core": core_module}
@@ -458,6 +478,37 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(names[50], "ShapeSizeX")
         self.assertEqual(names[87], "Priority")
 
+    def test_qgis_text_background_enum_names_by_field_reports_runtime_enum_names(self):
+        names = _qgis_text_background_enum_names_by_field(FakeQgsTextBackgroundSettings)
+
+        self.assertEqual(names["type"][0], "ShapeRectangle")
+        self.assertEqual(names["type"][5], "ShapeMarkerSymbol")
+        self.assertEqual(names["size_type"][0], "SizeBuffer")
+        self.assertEqual(names["size_type"][1], "SizeFixed")
+
+    def test_label_settings_record_decodes_numeric_background_enums(self):
+        class NumericBackgroundSettings(FakeSettings):
+            def format(self):
+                return FakeTextFormat(
+                    background=FakeTextBackground(
+                        type_value=5,
+                        size_type_value=1,
+                    )
+                )
+
+        record = label_settings_record(
+            FakeStyle(style_name="road-number-shield-2-remaining-icons-z11-plus", layer_name="road"),
+            NumericBackgroundSettings(),
+            {50: "ShapeSizeX"},
+            {
+                "type": {5: "ShapeMarkerSymbol"},
+                "size_type": {1: "SizeFixed"},
+            },
+        )
+
+        self.assertEqual(record["background_type"], "ShapeMarkerSymbol")
+        self.assertEqual(record["background_size_type"], "SizeFixed")
+
     def test_load_original_style_uses_fixture_or_live_fetcher(self):
         config = LabelSettingsConfig(token=None, output_root=Path("/tmp"))
         with self.assertRaises(ValueError):
@@ -555,6 +606,32 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual([record["base_style_layer_id"] for record in records], ["road-label", "waterway-label"])
         self.assertEqual(records[0]["data_defined_property_names"], ["ShapeSizeX", "Priority"])
         self.assertEqual(_postprocessed_label_records(None, fake_apply_label_priority), [])
+
+    def test_postprocessed_label_records_forwards_background_enum_names(self):
+        class NumericBackgroundSettings(FakeSettings):
+            def format(self):
+                return FakeTextFormat(background=FakeTextBackground(type_value=5, size_type_value=1))
+
+        records = _postprocessed_label_records(
+            FakeLabeling(
+                [
+                    FakeLabelStyle(
+                        style_name="road-number-shield-2-remaining-icons-z11-plus",
+                        layer_name="road",
+                        settings=NumericBackgroundSettings(),
+                    ),
+                ]
+            ),
+            fake_apply_label_priority,
+            {50: "ShapeSizeX", 87: "Priority"},
+            {
+                "type": {5: "ShapeMarkerSymbol"},
+                "size_type": {1: "SizeFixed"},
+            },
+        )
+
+        self.assertEqual(records[0]["background_type"], "ShapeMarkerSymbol")
+        self.assertEqual(records[0]["background_size_type"], "SizeFixed")
 
     def test_apply_labeling_probes_appends_bbox_edge_probes_when_requested(self):
         original_labeling = FakeLabeling([])

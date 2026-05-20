@@ -267,11 +267,18 @@ def _method_value(obj: object, method_name: str) -> object:
         return None
 
 
-def _enum_name(value: object) -> object:
+def _enum_name(value: object, names_by_value: dict[int, str] | None = None) -> object:
     name = getattr(value, "name", None)
     if isinstance(name, str):
         return name
-    return str(value) if value is not None else None
+    if value is None:
+        return None
+    try:
+        int_value = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    mapped_name = (names_by_value or {}).get(int_value)
+    return mapped_name if mapped_name is not None else str(value)
 
 
 def _settings_value(settings: object, name: str) -> object:
@@ -295,18 +302,28 @@ def _size_dimensions(value: object) -> dict[str, object] | None:
     return {"width": width, "height": height}
 
 
-def _label_background_record(text_format: object) -> dict[str, object]:
+def _label_background_record(
+    text_format: object,
+    background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
+) -> dict[str, object]:
     background = _method_value(text_format, "background") if text_format is not None else None
     fill_color = _method_value(background, "fillColor") if background is not None else None
     stroke_color = _method_value(background, "strokeColor") if background is not None else None
+    enum_names = background_enum_names_by_field or {}
     return {
         "background_enabled": _method_value(background, "enabled") if background is not None else None,
-        "background_type": _enum_name(_method_value(background, "type")) if background is not None else None,
+        "background_type": (
+            _enum_name(_method_value(background, "type"), enum_names.get("type"))
+            if background is not None
+            else None
+        ),
         "background_size": (
             _size_dimensions(_method_value(background, "size")) if background is not None else None
         ),
         "background_size_type": (
-            _enum_name(_method_value(background, "sizeType")) if background is not None else None
+            _enum_name(_method_value(background, "sizeType"), enum_names.get("size_type"))
+            if background is not None
+            else None
         ),
         "background_size_unit": (
             _enum_name(_method_value(background, "sizeUnit")) if background is not None else None
@@ -323,7 +340,10 @@ def _label_background_record(text_format: object) -> dict[str, object]:
     }
 
 
-def _label_format_record(settings: object) -> dict[str, object]:
+def _label_format_record(
+    settings: object,
+    background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
+) -> dict[str, object]:
     text_format = _method_value(settings, "format")
     buffer = _method_value(text_format, "buffer") if text_format is not None else None
     text_color = _method_value(text_format, "color") if text_format is not None else None
@@ -338,7 +358,7 @@ def _label_format_record(settings: object) -> dict[str, object]:
         "buffer_size_unit": _enum_name(_method_value(buffer, "sizeUnit")) if buffer is not None else None,
         "buffer_color": _color_name(buffer_color),
         "buffer_opacity": _method_value(buffer, "opacity") if buffer is not None else None,
-        **_label_background_record(text_format),
+        **_label_background_record(text_format, background_enum_names_by_field),
     }
 
 
@@ -382,6 +402,34 @@ def _qgis_pal_layer_property_names_by_value(qgs_pal_layer_settings: object) -> d
     return names
 
 
+def _qgis_prefixed_enum_names_by_value(enum_owner: object, prefix: str, ignored_names: set[str]) -> dict[int, str]:
+    # QGIS enum values within one prefix are expected to be unique; collisions keep the later class attr.
+    names: dict[int, str] = {}
+    for name, value in vars(enum_owner).items():
+        if name in ignored_names or not name.startswith(prefix):
+            continue
+        try:
+            names[int(value)] = name
+        except (TypeError, ValueError):
+            continue
+    return names
+
+
+def _qgis_text_background_enum_names_by_field(qgs_text_background_settings: object) -> dict[str, dict[int, str]]:
+    return {
+        "type": _qgis_prefixed_enum_names_by_value(
+            qgs_text_background_settings,
+            "Shape",
+            {"ShapeType"},
+        ),
+        "size_type": _qgis_prefixed_enum_names_by_value(
+            qgs_text_background_settings,
+            "Size",
+            {"SizeType"},
+        ),
+    }
+
+
 def _data_defined_property_names(
     keys: list[object],
     property_names_by_value: dict[int, str] | None,
@@ -418,6 +466,7 @@ def label_settings_record(
     style: object,
     settings: object,
     property_names_by_value: dict[int, str] | None = None,
+    background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
 ) -> dict[str, object]:
     _ensure_package_parent_on_path()
     from qfit.mapbox_config import base_mapbox_style_layer_id_for_qfit
@@ -449,7 +498,7 @@ def label_settings_record(
         "max_curved_char_angle_out": _settings_value(settings, "maxCurvedCharAngleOut"),
         "overrun_distance": _settings_value(settings, "overrunDistance"),
         "overrun_distance_unit": _settings_value(settings, "overrunDistanceUnit"),
-        **_label_format_record(settings),
+        **_label_format_record(settings, background_enum_names_by_field),
         **_label_placement_record(settings),
         "data_defined_property_keys": data_defined_property_keys,
         "data_defined_property_names": _data_defined_property_names(
@@ -466,12 +515,18 @@ def label_settings_record(
 def _iter_label_records(
     labeling: object,
     property_names_by_value: dict[int, str] | None = None,
+    background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
 ) -> Iterable[dict[str, object]]:
     for style in _method_value(labeling, "styles") or []:
         settings = _method_value(style, "labelSettings")
         if settings is None:
             continue
-        yield label_settings_record(style, settings, property_names_by_value)
+        yield label_settings_record(
+            style,
+            settings,
+            property_names_by_value,
+            background_enum_names_by_field,
+        )
 
 
 def _apply_sprite_context(ctx: object, sprite_resources: object | None) -> bool:
@@ -553,21 +608,23 @@ def _postprocessed_label_records(
     labeling: object | None,
     apply_label_priority,
     property_names_by_value: dict[int, str] | None = None,
+    background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
 ) -> list[dict[str, object]]:
     if labeling is None:
         return []
     apply_label_priority(labeling)
-    return _sorted_label_records(labeling, property_names_by_value)
+    return _sorted_label_records(labeling, property_names_by_value, background_enum_names_by_field)
 
 
 def _sorted_label_records(
     labeling: object | None,
     property_names_by_value: dict[int, str] | None = None,
+    background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
 ) -> list[dict[str, object]]:
     if labeling is None:
         return []
     return sorted(
-        _iter_label_records(labeling, property_names_by_value),
+        _iter_label_records(labeling, property_names_by_value, background_enum_names_by_field),
         key=lambda row: (str(row.get("base_style_layer_id") or ""), str(row.get("style_name") or "")),
     )
 
@@ -1781,6 +1838,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             QgsMapBoxGlStyleConversionContext,
             QgsMapBoxGlStyleConverter,
             QgsPalLayerSettings,
+            QgsTextBackgroundSettings,
             Qgis,
         )
     except ImportError as exc:  # pragma: no cover - depends on optional PyQGIS runtime
@@ -1809,6 +1867,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
         records = _sorted_label_records(
             labeling,
             _qgis_pal_layer_property_names_by_value(QgsPalLayerSettings),
+            _qgis_text_background_enum_names_by_field(QgsTextBackgroundSettings),
         )
         source_label_layers = source_label_layer_records(original_style, qfit_style, records)
         return _label_settings_report(
