@@ -948,8 +948,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 {
                     "base_style_layer_id": "water-line-label",
                     "style_name": "water-line-label",
-                    "geometry_type": "Point",
-                    "placement": "OverPoint",
+                    "geometry_type": "Line",
+                    "placement": "Line",
                     "repeat_distance": 0.0,
                     "label_per_part": False,
                     "merge_lines": False,
@@ -983,9 +983,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(ferry_row["repeat_distances"], {"66.1458": 1})
         water_row = rows[2]
         self.assertEqual(water_row["source_symbol_placements"], {"line-center": 1})
-        self.assertEqual(water_row["converted_geometry_types"], {"Point": 1})
-        self.assertEqual(water_row["converted_placements"], {"OverPoint": 1})
-        self.assertEqual(water_row["repeat_distances"], {})
+        self.assertEqual(water_row["converted_geometry_types"], {"Line": 1})
+        self.assertEqual(water_row["converted_placements"], {"Line": 1})
+        self.assertEqual(water_row["repeat_distances"], {"0": 1})
         self.assertEqual(water_row["merge_lines"], {"false": 1})
 
     def test_line_center_label_conversion_summary_isolates_line_center_labels(self):
@@ -1028,8 +1028,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 {
                     "base_style_layer_id": "water-line-label",
                     "style_name": "water-line-label-ocean-name",
-                    "geometry_type": "Point",
-                    "placement": "OverPoint",
+                    "geometry_type": "Line",
+                    "placement": "Line",
                     "repeat_distance": 0.0,
                     "label_per_part": False,
                     "merge_lines": False,
@@ -1037,8 +1037,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 {
                     "base_style_layer_id": "natural-line-label",
                     "style_name": "natural-line-label",
-                    "geometry_type": "Point",
-                    "placement": "OverPoint",
+                    "geometry_type": "Line",
+                    "placement": "Line",
                     "repeat_distance": 0.0,
                     "label_per_part": False,
                     "merge_lines": False,
@@ -1072,9 +1072,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(water_row["source_layers"], {"natural_label": 1})
         self.assertEqual(water_row["source_symbol_placements"], {"line-center": 1})
         self.assertEqual(water_row["qfit_symbol_placements"], {"line-center": 1})
-        self.assertEqual(water_row["converted_geometry_types"], {"Point": 1})
-        self.assertEqual(water_row["converted_placements"], {"OverPoint": 1})
-        self.assertEqual(water_row["repeat_distances"], {})
+        self.assertEqual(water_row["converted_geometry_types"], {"Line": 1})
+        self.assertEqual(water_row["converted_placements"], {"Line": 1})
+        self.assertEqual(water_row["repeat_distances"], {"0": 1})
         self.assertEqual(water_row["merge_lines"], {"false": 1})
 
     def test_symbol_placement_line_detection_uses_expression_outputs_and_zoom_bounds(self):
@@ -1644,9 +1644,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "source_layers": {"natural_label": 1},
                     "source_symbol_placements": {"line-center": 1},
                     "qfit_symbol_placements": {"line-center": 1},
-                    "converted_geometry_types": {"Point": 1},
-                    "converted_placements": {"OverPoint": 1},
-                    "repeat_distances": {},
+                    "converted_geometry_types": {"Line": 1},
+                    "converted_placements": {"Line": 1},
+                    "repeat_distances": {"0": 1},
                     "label_per_part": {"false": 1},
                     "merge_lines": {"false": 1},
                     "style_names": {"water-line-label": 1},
@@ -1780,7 +1780,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             markdown,
         )
         self.assertIn(
-            "| water-line-label | 1 | 1 | natural_label=1 | line-center=1 | line-center=1 | Point=1 | OverPoint=1 | — | no=1 | no=1 | water-line-label=1 |",
+            "| water-line-label | 1 | 1 | natural_label=1 | line-center=1 | line-center=1 | Line=1 | Line=1 | 0=1 | no=1 | no=1 | water-line-label=1 |",
             markdown,
         )
         self.assertIn("## Source label fan-out by base layer", markdown)

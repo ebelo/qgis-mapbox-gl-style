@@ -51,6 +51,8 @@ _ROAD_LABEL_LOW_ZOOM_SYMBOL_SPACING_PX = 150.0
 _ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING_PX = 400.0
 _ROAD_NUMBER_SHIELD_Z11_PLUS_SYMBOL_SPACING_PX = 1400.0 / 3.0
 _REPEAT_DISTANCE_EPSILON_MM = 0.001
+_LINE_CENTER_ANCHOR_PERCENT = 0.5
+_LINE_CENTER_ANCHOR_PERCENT_EPSILON = 0.000001
 _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
     "ferry-aerialway-label",
     "path-pedestrian-label",
@@ -62,6 +64,7 @@ _LINE_LABEL_MERGE_LAYERS = {
     "road-label",
     "waterway-label",
 }
+_LINE_CENTER_LABEL_LAYERS = {"natural-line-label", "water-line-label"}
 # Representative-zoom values from mapbox_config's waterway-label spacing
 # expression after qfit splits it into static QGIS zoom bands.  The z17+
 # value is wider than Mapbox's raw 400 px spacing because QGIS repeats labels
@@ -185,6 +188,13 @@ def _needs_repeat_distance(settings, expected_repeat_distance: float | None = No
     )
 
 
+def _needs_line_center_anchor_percent(line_settings) -> bool:
+    line_anchor_percent = line_settings.lineAnchorPercent()
+    return not isinstance(line_anchor_percent, (int, float)) or abs(
+        line_anchor_percent - _LINE_CENTER_ANCHOR_PERCENT
+    ) > _LINE_CENTER_ANCHOR_PERCENT_EPSILON
+
+
 def _apply_settlement_label_priority(settings, qgs_property) -> None:
     dd_props = settings.dataDefinedProperties()
     dd_props.setProperty(
@@ -228,6 +238,147 @@ def _apply_label_settings(
         settings.isExpression = True
         changed = True
     return changed
+
+
+def _apply_line_center_label_placement(settings, qgs_label_line_settings, qgis) -> bool:
+    changed = False
+    if getattr(settings, "placement", None) != qgis.LabelPlacement.Line:
+        settings.placement = qgis.LabelPlacement.Line
+        changed = True
+
+    try:
+        line_settings = settings.lineSettings()
+    except (AttributeError, RuntimeError, TypeError):
+        return changed
+    if _needs_line_center_anchor_percent(line_settings):
+        line_settings.setLineAnchorPercent(_LINE_CENTER_ANCHOR_PERCENT)
+        changed = True
+    if (
+        line_settings.anchorTextPoint()
+        != qgs_label_line_settings.AnchorTextPoint.CenterOfText
+    ):
+        line_settings.setAnchorTextPoint(qgs_label_line_settings.AnchorTextPoint.CenterOfText)
+        changed = True
+    if line_settings.anchorType() != qgs_label_line_settings.AnchorType.Strict:
+        line_settings.setAnchorType(qgs_label_line_settings.AnchorType.Strict)
+        changed = True
+    if (
+        line_settings.anchorClipping()
+        != qgs_label_line_settings.AnchorClipping.UseEntireLine
+    ):
+        line_settings.setAnchorClipping(qgs_label_line_settings.AnchorClipping.UseEntireLine)
+        changed = True
+    if changed:
+        settings.setLineSettings(line_settings)
+    return changed
+
+
+def _apply_line_center_label_geometry(style, qgis) -> bool:
+    try:
+        geometry_type = style.geometryType()
+    except (AttributeError, RuntimeError, TypeError):
+        geometry_type = None
+    if geometry_type == qgis.GeometryType.Line:
+        return False
+    set_geometry_type = getattr(style, "setGeometryType", None)
+    if not callable(set_geometry_type):
+        return False
+    try:
+        set_geometry_type(qgis.GeometryType.Line)
+    except (RuntimeError, TypeError):
+        return False
+    return True
+
+
+def _has_label_postprocess(
+    *,
+    layer_name: str,
+    priority: int | None,
+    repeat_distance: float | None,
+    merge_lines: bool | None,
+    is_line_center_label: bool,
+) -> bool:
+    return (
+        priority is not None
+        or repeat_distance is not None
+        or merge_lines is not None
+        or is_line_center_label
+        or layer_name == _CONTOUR_LABEL_LAYER_ID
+    )
+
+
+def _has_label_settings_postprocess(
+    *,
+    priority: int | None,
+    repeat_distance: float | None,
+    merge_lines: bool | None,
+    field_expression: str | None,
+    is_line_center_label: bool,
+) -> bool:
+    return (
+        priority is not None
+        or repeat_distance is not None
+        or merge_lines is not None
+        or field_expression is not None
+        or is_line_center_label
+    )
+
+
+def _apply_mapbox_label_style(
+    style,
+    *,
+    qgs_label_line_settings,
+    qgs_property,
+    qgis,
+) -> bool:
+    layer_name = _label_style_mapbox_layer_id(style)
+    priority = _label_priority(layer_name, style)
+    repeat_distance = _label_repeat_distance(layer_name, style)
+    merge_lines = _label_merge_lines(layer_name, style)
+    is_line_center_label = layer_name in _LINE_CENTER_LABEL_LAYERS
+    if not _has_label_postprocess(
+        layer_name=layer_name,
+        priority=priority,
+        repeat_distance=repeat_distance,
+        merge_lines=merge_lines,
+        is_line_center_label=is_line_center_label,
+    ):
+        return False
+
+    settings = style.labelSettings()
+    if settings is None:
+        return False
+
+    field_expression = _label_field_expression(layer_name, settings)
+    if not _has_label_settings_postprocess(
+        priority=priority,
+        repeat_distance=repeat_distance,
+        merge_lines=merge_lines,
+        field_expression=field_expression,
+        is_line_center_label=is_line_center_label,
+    ):
+        return False
+
+    style_changed = _apply_label_settings(
+        settings,
+        layer_name=layer_name,
+        priority=priority,
+        repeat_distance=repeat_distance,
+        merge_lines=merge_lines,
+        field_expression=field_expression,
+        qgs_property=qgs_property,
+        qgis=qgis,
+    )
+    geometry_changed = False
+    if is_line_center_label:
+        style_changed = (
+            _apply_line_center_label_placement(settings, qgs_label_line_settings, qgis)
+            or style_changed
+        )
+        geometry_changed = _apply_line_center_label_geometry(style, qgis)
+    if style_changed:
+        style.setLabelSettings(settings)
+    return style_changed or geometry_changed
 
 
 def _append_high_zoom_contour_bbox_edge_label_style(
@@ -282,6 +433,7 @@ def _append_high_zoom_contour_bbox_edge_label_style(
 def apply_mapbox_label_priority(labeling) -> None:
     try:
         from qgis.core import (  # noqa: PLC0415
+            QgsLabelLineSettings,
             QgsPalLayerSettings,
             QgsProperty,
             QgsVectorTileBasicLabelingStyle,
@@ -291,35 +443,12 @@ def apply_mapbox_label_priority(labeling) -> None:
         styles = list(labeling.styles())
         changed = False
         for style in styles:
-            layer_name = _label_style_mapbox_layer_id(style)
-            priority = _label_priority(layer_name, style)
-            repeat_distance = _label_repeat_distance(layer_name, style)
-            merge_lines = _label_merge_lines(layer_name, style)
-            if (
-                priority is None
-                and repeat_distance is None
-                and merge_lines is None
-                and layer_name != _CONTOUR_LABEL_LAYER_ID
-            ):
-                continue
-            settings = style.labelSettings()
-            if settings is None:
-                continue
-            field_expression = _label_field_expression(layer_name, settings)
-            if priority is None and repeat_distance is None and merge_lines is None and field_expression is None:
-                continue
-            if _apply_label_settings(
-                settings,
-                layer_name=layer_name,
-                priority=priority,
-                repeat_distance=repeat_distance,
-                merge_lines=merge_lines,
-                field_expression=field_expression,
+            changed = _apply_mapbox_label_style(
+                style,
+                qgs_label_line_settings=QgsLabelLineSettings,
                 qgs_property=QgsProperty,
                 qgis=Qgis,
-            ):
-                style.setLabelSettings(settings)
-                changed = True
+            ) or changed
         if _append_high_zoom_contour_bbox_edge_label_style(
             styles,
             qgs_pal_layer_settings=QgsPalLayerSettings,
