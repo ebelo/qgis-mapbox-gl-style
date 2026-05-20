@@ -22,6 +22,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _geometry_generator_markdown_value,
     _label_settings_report,
     _label_style_summary_rows,
+    _line_center_label_conversion_rows,
     _line_label_conversion_rows,
     _line_label_repeat_spacing_rows,
     _load_original_style,
@@ -30,6 +31,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _source_label_control_summary_rows,
     _source_label_fanout_summary_rows,
     _source_label_unresolved_control_summary_rows,
+    _symbol_placement_includes_line_center,
     _symbol_placement_includes_line,
     build_label_settings_paths,
     build_run_directory,
@@ -986,6 +988,95 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(water_row["repeat_distances"], {})
         self.assertEqual(water_row["merge_lines"], {"false": 1})
 
+    def test_line_center_label_conversion_summary_isolates_line_center_labels(self):
+        rows = _line_center_label_conversion_rows(
+            [
+                {
+                    "base_style_layer_id": "water-line-label",
+                    "style_name": "water-line-label-ocean-name",
+                    "qfit_style_layer_id": "water-line-label-ocean-name",
+                    "source_layer": "natural_label",
+                    "layout": {"symbol-placement": "line-center"},
+                    "qfit_layout": {"symbol-placement": "line-center"},
+                },
+                {
+                    "base_style_layer_id": "natural-line-label",
+                    "style_name": "natural-line-label",
+                    "qfit_style_layer_id": "natural-line-label",
+                    "source_layer": "natural_label",
+                    "layout": {"symbol-placement": ["coalesce", ["literal", None], "line-center"]},
+                    "qfit_layout": {"symbol-placement": ["coalesce", ["literal", None], "line-center"]},
+                },
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label",
+                    "qfit_style_layer_id": "road-label",
+                    "source_layer": "road",
+                    "layout": {"symbol-placement": "line"},
+                    "qfit_layout": {"symbol-placement": "line"},
+                },
+                {
+                    "base_style_layer_id": "qfit-only-line-center-label",
+                    "style_name": "qfit-only-line-center-label",
+                    "qfit_style_layer_id": "qfit-only-line-center-label",
+                    "source_layer": "road",
+                    "layout": {"symbol-placement": "line"},
+                    "qfit_layout": {"symbol-placement": "line-center"},
+                },
+            ],
+            [
+                {
+                    "base_style_layer_id": "water-line-label",
+                    "style_name": "water-line-label-ocean-name",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "natural-line-label",
+                    "style_name": "natural-line-label",
+                    "geometry_type": "Point",
+                    "placement": "OverPoint",
+                    "repeat_distance": 0.0,
+                    "label_per_part": False,
+                    "merge_lines": False,
+                },
+                {
+                    "base_style_layer_id": "road-label",
+                    "style_name": "road-label",
+                    "geometry_type": "Line",
+                    "placement": "Curved",
+                    "repeat_distance": 39.6875,
+                    "label_per_part": False,
+                    "merge_lines": True,
+                },
+            ],
+        )
+
+        self.assertEqual(
+            [row["base_style_layer_id"] for row in rows],
+            ["natural-line-label", "water-line-label"],
+        )
+        natural_row = rows[0]
+        self.assertEqual(
+            natural_row["source_symbol_placements"],
+            {'["coalesce",["literal",null],"line-center"]': 1},
+        )
+        self.assertEqual(
+            natural_row["qfit_symbol_placements"],
+            {'["coalesce",["literal",null],"line-center"]': 1},
+        )
+        water_row = rows[1]
+        self.assertEqual(water_row["source_layers"], {"natural_label": 1})
+        self.assertEqual(water_row["source_symbol_placements"], {"line-center": 1})
+        self.assertEqual(water_row["qfit_symbol_placements"], {"line-center": 1})
+        self.assertEqual(water_row["converted_geometry_types"], {"Point": 1})
+        self.assertEqual(water_row["converted_placements"], {"OverPoint": 1})
+        self.assertEqual(water_row["repeat_distances"], {})
+        self.assertEqual(water_row["merge_lines"], {"false": 1})
+
     def test_symbol_placement_line_detection_uses_expression_outputs_and_zoom_bounds(self):
         self.assertTrue(_symbol_placement_includes_line(["literal", "line"]))
         self.assertTrue(
@@ -1016,6 +1107,23 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertTrue(
             _symbol_placement_includes_line(
                 ["step", ["zoom"], "point", 11, "line"], min_zoom=11
+            )
+        )
+        self.assertTrue(_symbol_placement_includes_line_center("line-center"))
+        self.assertFalse(_symbol_placement_includes_line_center("line"))
+        self.assertTrue(
+            _symbol_placement_includes_line_center(
+                ["coalesce", ["literal", None], "line-center"]
+            )
+        )
+        self.assertFalse(
+            _symbol_placement_includes_line_center(
+                ["step", ["zoom"], "point", 11, "line-center"], max_zoom=11
+            )
+        )
+        self.assertTrue(
+            _symbol_placement_includes_line_center(
+                ["step", ["zoom"], "point", 11, "line-center"], min_zoom=11
             )
         )
 
@@ -1528,6 +1636,22 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "style_names": {"contour-label": 1},
                 }
             ],
+            "line_center_label_conversion_by_base_layer": [
+                {
+                    "base_style_layer_id": "water-line-label",
+                    "source_label_rows": 1,
+                    "converted_label_styles": 1,
+                    "source_layers": {"natural_label": 1},
+                    "source_symbol_placements": {"line-center": 1},
+                    "qfit_symbol_placements": {"line-center": 1},
+                    "converted_geometry_types": {"Point": 1},
+                    "converted_placements": {"OverPoint": 1},
+                    "repeat_distances": {},
+                    "label_per_part": {"false": 1},
+                    "merge_lines": {"false": 1},
+                    "style_names": {"water-line-label": 1},
+                }
+            ],
             "source_label_fanout_by_base_layer": [
                 {
                     "base_style_layer_id": "contour-label",
@@ -1648,6 +1772,15 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("## Line-placement label conversion by base layer", markdown)
         self.assertIn(
             "| contour-label | 1 | 1 | line=1 | line=1 | Line=1 | Curved=1 | 0=1 | no=1 | yes=1 | contour-label=1 |",
+            markdown,
+        )
+        self.assertIn("## Line-center label conversion by base layer", markdown)
+        self.assertIn(
+            "Subset of the line-placement table whose original Mapbox source placement includes line-center.",
+            markdown,
+        )
+        self.assertIn(
+            "| water-line-label | 1 | 1 | natural_label=1 | line-center=1 | line-center=1 | Point=1 | OverPoint=1 | — | no=1 | no=1 | water-line-label=1 |",
             markdown,
         )
         self.assertIn("## Source label fan-out by base layer", markdown)
