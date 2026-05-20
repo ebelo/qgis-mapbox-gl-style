@@ -57,6 +57,7 @@ _LINE_LABEL_REPEAT_DISTANCE_LAYERS = {
 _LINE_LABEL_MERGE_LAYERS = {
     "path-pedestrian-label",
     "road-label",
+    "waterway-label",
 }
 # Representative-zoom values from mapbox_config's waterway-label spacing
 # expression after qfit splits it into static QGIS zoom bands.  The z17+
