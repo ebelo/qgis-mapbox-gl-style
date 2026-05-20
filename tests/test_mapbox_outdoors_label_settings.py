@@ -28,6 +28,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _load_original_style,
     _postprocessed_label_records,
     _qgis_duplicate_label_controls,
+    _qgis_pal_layer_property_names_by_value,
     _road_shield_label_placement_rows,
     _source_label_control_omission_summary_rows,
     _source_label_control_summary_rows,
@@ -192,7 +193,11 @@ class FakeQgsApplication:
 
 
 class FakeQgsPalLayerSettings:
-    pass
+    class Property(int):
+        pass
+
+    ShapeSizeX = Property(50)
+    Priority = Property(87)
 
 
 class FakeConversionContext:
@@ -319,6 +324,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         record = label_settings_record(
             FakeStyle(style_name="road-label-z15-plus", layer_name="road"),
             FakeSettings(),
+            {50: "ShapeSizeX"},
         )
 
         self.assertEqual(record["style_name"], "road-label-z15-plus")
@@ -355,6 +361,8 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertFalse(record["allow_degraded_placement"])
         self.assertEqual(record["overlap_handling"], "PreventOverlap")
         self.assertEqual(record["data_defined_property_keys"], [50, 87])
+        self.assertEqual(record["data_defined_property_names"], ["ShapeSizeX", "87"])
+        self.assertEqual(record["data_defined_property_labels"], ["ShapeSizeX (50)", "87"])
 
     def test_ensure_qgis_application_reuses_or_creates_application(self):
         existing_app = FakeQgsApplication([], False)
@@ -386,6 +394,12 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertTrue(controls["remove_duplicate_labels"])
         self.assertTrue(controls["remove_duplicate_label_distance"])
         self.assertFalse(controls["label_margin_distance"])
+
+    def test_qgis_pal_layer_property_names_by_value_reports_enum_names(self):
+        names = _qgis_pal_layer_property_names_by_value(FakeQgsPalLayerSettings)
+
+        self.assertEqual(names[50], "ShapeSizeX")
+        self.assertEqual(names[87], "Priority")
 
     def test_load_original_style_uses_fixture_or_live_fetcher(self):
         config = LabelSettingsConfig(token=None, output_root=Path("/tmp"))
@@ -476,11 +490,13 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                 ]
             ),
             fake_apply_label_priority,
+            {50: "ShapeSizeX", 87: "Priority"},
         )
 
         self.assertEqual(FakeBackgroundMapService.applied_count, 1)
         self.assertIsInstance(FakeBackgroundMapService.labeling, FakeLabeling)
         self.assertEqual([record["base_style_layer_id"] for record in records], ["road-label", "waterway-label"])
+        self.assertEqual(records[0]["data_defined_property_names"], ["ShapeSizeX", "Priority"])
         self.assertEqual(_postprocessed_label_records(None, fake_apply_label_priority), [])
 
     def test_apply_labeling_probes_appends_bbox_edge_probes_when_requested(self):
@@ -1689,6 +1705,10 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         labels_by_style = {row["style_name"]: row for row in report["labels"]}
         self.assertEqual(labels_by_style["road-label-z15-plus"]["base_style_layer_id"], "road-label")
         self.assertEqual(
+            labels_by_style["road-label-z15-plus"]["data_defined_property_labels"],
+            ["ShapeSizeX (50)", "Priority (87)"],
+        )
+        self.assertEqual(
             labels_by_style["contour-label-bbox-edge-difference-probe"]["geometry_generator"],
             bbox_expression,
         )
@@ -1894,7 +1914,9 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "buffer_size_unit": "Millimeters",
                     "buffer_color": "#dcdcd4",
                     "buffer_opacity": 0.75,
-                    "data_defined_property_keys": ["pipe|key"],
+                    "data_defined_property_keys": [50, 87],
+                    "data_defined_property_names": ["ShapeSizeX", "Priority"],
+                    "data_defined_property_labels": ["ShapeSizeX (50)", "Priority (87)"],
                 }
             ],
             "source_label_layers": [
@@ -1984,7 +2006,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("#626250", markdown)
         self.assertIn("#dcdcd4", markdown)
         self.assertIn("25/-25", markdown)
-        self.assertIn("pipe\\|key", markdown)
+        self.assertIn("ShapeSizeX (50), Priority (87)", markdown)
         self.assertIn("## Source Mapbox label controls", markdown)
         self.assertIn("Source label layers: 1", markdown)
         self.assertIn("| contour-label | contour-label | contour-label | contour | 12+", markdown)

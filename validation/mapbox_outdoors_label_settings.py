@@ -332,13 +332,63 @@ def _data_defined_property_keys(settings: object) -> list[object]:
         return list(keys)
 
 
-def label_settings_record(style: object, settings: object) -> dict[str, object]:
+def _qgis_pal_layer_property_names_by_value(qgs_pal_layer_settings: object) -> dict[int, str]:
+    property_type = getattr(qgs_pal_layer_settings, "Property", None)
+    names: dict[int, str] = {}
+    for name, value in vars(qgs_pal_layer_settings).items():
+        try:
+            if property_type is not None and not isinstance(value, property_type):
+                continue
+            names[int(value)] = name
+        except (TypeError, ValueError):
+            continue
+    return names
+
+
+def _data_defined_property_names(
+    keys: list[object],
+    property_names_by_value: dict[int, str] | None,
+) -> list[str]:
+    names: list[str] = []
+    for key in keys:
+        try:
+            int_key = int(key)
+        except (TypeError, ValueError):
+            names.append(str(key))
+            continue
+        name = (property_names_by_value or {}).get(int_key)
+        names.append(name if name is not None else str(int_key))
+    return names
+
+
+def _data_defined_property_labels(
+    keys: list[object],
+    property_names_by_value: dict[int, str] | None,
+) -> list[str]:
+    labels: list[str] = []
+    for key in keys:
+        try:
+            int_key = int(key)
+        except (TypeError, ValueError):
+            labels.append(str(key))
+            continue
+        name = (property_names_by_value or {}).get(int_key)
+        labels.append(f"{name} ({int_key})" if name is not None else str(int_key))
+    return labels
+
+
+def label_settings_record(
+    style: object,
+    settings: object,
+    property_names_by_value: dict[int, str] | None = None,
+) -> dict[str, object]:
     _ensure_package_parent_on_path()
     from qfit.mapbox_config import base_mapbox_style_layer_id_for_qfit
 
     style_name = _method_value(style, "styleName")
     layer_name = _method_value(style, "layerName")
     style_name_text = style_name if isinstance(style_name, str) else ""
+    data_defined_property_keys = _data_defined_property_keys(settings)
     return {
         "style_name": style_name_text,
         "base_style_layer_id": base_mapbox_style_layer_id_for_qfit(style_name_text),
@@ -364,16 +414,27 @@ def label_settings_record(style: object, settings: object) -> dict[str, object]:
         "overrun_distance_unit": _settings_value(settings, "overrunDistanceUnit"),
         **_label_format_record(settings),
         **_label_placement_record(settings),
-        "data_defined_property_keys": _data_defined_property_keys(settings),
+        "data_defined_property_keys": data_defined_property_keys,
+        "data_defined_property_names": _data_defined_property_names(
+            data_defined_property_keys,
+            property_names_by_value,
+        ),
+        "data_defined_property_labels": _data_defined_property_labels(
+            data_defined_property_keys,
+            property_names_by_value,
+        ),
     }
 
 
-def _iter_label_records(labeling: object) -> Iterable[dict[str, object]]:
+def _iter_label_records(
+    labeling: object,
+    property_names_by_value: dict[int, str] | None = None,
+) -> Iterable[dict[str, object]]:
     for style in _method_value(labeling, "styles") or []:
         settings = _method_value(style, "labelSettings")
         if settings is None:
             continue
-        yield label_settings_record(style, settings)
+        yield label_settings_record(style, settings, property_names_by_value)
 
 
 def _apply_sprite_context(ctx: object, sprite_resources: object | None) -> bool:
@@ -451,18 +512,25 @@ def _convert_style_to_labeling(qfit_style: dict[str, object], sprite_resources: 
     return result, converter.labeling(), sprite_loaded
 
 
-def _postprocessed_label_records(labeling: object | None, apply_label_priority) -> list[dict[str, object]]:
+def _postprocessed_label_records(
+    labeling: object | None,
+    apply_label_priority,
+    property_names_by_value: dict[int, str] | None = None,
+) -> list[dict[str, object]]:
     if labeling is None:
         return []
     apply_label_priority(labeling)
-    return _sorted_label_records(labeling)
+    return _sorted_label_records(labeling, property_names_by_value)
 
 
-def _sorted_label_records(labeling: object | None) -> list[dict[str, object]]:
+def _sorted_label_records(
+    labeling: object | None,
+    property_names_by_value: dict[int, str] | None = None,
+) -> list[dict[str, object]]:
     if labeling is None:
         return []
     return sorted(
-        _iter_label_records(labeling),
+        _iter_label_records(labeling, property_names_by_value),
         key=lambda row: (str(row.get("base_style_layer_id") or ""), str(row.get("style_name") or "")),
     )
 
@@ -1687,7 +1755,10 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
         if labeling is not None:
             apply_mapbox_label_priority(labeling)
         labeling = _apply_labeling_probes(labeling, config)
-        records = _sorted_label_records(labeling)
+        records = _sorted_label_records(
+            labeling,
+            _qgis_pal_layer_property_names_by_value(QgsPalLayerSettings),
+        )
         source_label_layers = source_label_layer_records(original_style, qfit_style, records)
         return _label_settings_report(
             config=config,
@@ -1737,6 +1808,13 @@ def _geometry_generator_markdown_value(row: dict[str, object]) -> str:
         row.get("geometry_generator_type"),
         row.get("geometry_generator"),
     )
+
+
+def _data_defined_property_markdown_value(row: dict[str, object]) -> str:
+    labels = row.get("data_defined_property_labels")
+    if isinstance(labels, list) and labels:
+        return _markdown_value(labels)
+    return _markdown_value(row.get("data_defined_property_keys"))
 
 
 def _json_markdown_value(value: object) -> str:
@@ -2114,7 +2192,7 @@ def _append_converted_label_rows(lines: list[str], rows: list[object]) -> None:
                     row.get("overrun_distance"),
                     row.get("overrun_distance_unit"),
                 ),
-                keys=_markdown_value(row.get("data_defined_property_keys")),
+                keys=_data_defined_property_markdown_value(row),
             )
         )
 
