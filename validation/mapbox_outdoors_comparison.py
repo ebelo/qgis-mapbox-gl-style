@@ -665,6 +665,8 @@ def qgis_label_styles_snapshot(layer: object) -> list[dict[str, object]]:
                 "priority": _label_setting_value(settings, "priority"),
                 "repeat_distance": _label_setting_value(settings, "repeatDistance"),
                 "repeat_distance_unit": _label_setting_value(settings, "repeatDistanceUnit"),
+                "label_per_part": _label_setting_value(settings, "labelPerPart"),
+                "merge_lines": _label_setting_value(settings, "mergeLines"),
                 "geometry_generator": _label_setting_value(settings, "geometryGenerator"),
                 "geometry_generator_enabled": _label_setting_value(settings, "geometryGeneratorEnabled"),
                 "geometry_generator_type": _label_setting_value(settings, "geometryGeneratorType"),

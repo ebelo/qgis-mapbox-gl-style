@@ -871,6 +871,8 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             priority = 6
             repeatDistance = 0.0
             repeatDistanceUnit = None
+            labelPerPart = False
+            mergeLines = True
             geometryGenerator = QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_EXPRESSION
             geometryGeneratorEnabled = True
             geometryGeneratorType = "Line"
@@ -924,6 +926,8 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                 "priority": 6,
                 "repeat_distance": 0.0,
                 "repeat_distance_unit": None,
+                "label_per_part": False,
+                "merge_lines": True,
                 "geometry_generator": QGIS_CONTOUR_BBOX_EDGE_DIFFERENCE_LABEL_PROBE_EXPRESSION,
                 "geometry_generator_enabled": True,
                 "geometry_generator_type": "Line",
