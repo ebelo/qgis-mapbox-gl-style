@@ -814,6 +814,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(waterway_row["zero_repeat_distance_count"], 0)
         self.assertEqual(waterway_row["qfit_symbol_spacings"], {"400": 1})
         self.assertEqual(waterway_row["repeat_distances"], {"66.1458": 1})
+        self.assertEqual(waterway_row["qfit_symbol_spacing_to_repeat_distances"], {"400 -> 66.1458": 1})
 
     def test_line_label_repeat_spacing_summary_deduplicates_shared_label_records(self):
         rows = _line_label_repeat_spacing_rows(
@@ -846,6 +847,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(rows[0]["source_label_rows"], 2)
         self.assertEqual(rows[0]["converted_line_label_styles"], 1)
         self.assertEqual(rows[0]["repeat_distances"], {"66.1458": 1})
+        self.assertEqual(rows[0]["qfit_symbol_spacing_to_repeat_distances"], {"(missing) -> 66.1458": 2})
 
     def test_source_label_fanout_summary_groups_qfit_style_expansion(self):
         rows = _source_label_fanout_summary_rows(
@@ -1335,6 +1337,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "source_symbol_spacings": {"(missing)": 1},
                     "qfit_symbol_spacings": {"(missing)": 1},
                     "repeat_distances": {"0": 1},
+                    "qfit_symbol_spacing_to_repeat_distances": {"(missing) -> 0": 1},
                     "placements": {"Curved": 1},
                     "style_names": {"contour-label": 1},
                     "zero_repeat_distance_count": 1,
@@ -1454,7 +1457,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertIn("| contour-label | 1 | contour=1 | Line=1 | 3=1 | Line=1 | 0=1 | no=1 | yes=1 | no=1 | no=1 |", markdown)
         self.assertIn("## Line label repeat spacing by base layer", markdown)
         self.assertIn(
-            "| contour-label | 1 | 1 | 1 | (missing)=1 | (missing)=1 | 0=1 | Curved=1 | contour-label=1 |",
+            "| contour-label | 1 | 1 | 1 | (missing)=1 | (missing)=1 | 0=1 | (missing) -> 0=1 | Curved=1 | contour-label=1 |",
             markdown,
         )
         self.assertIn("## Source label fan-out by base layer", markdown)

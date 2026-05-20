@@ -625,10 +625,23 @@ def _repeat_label_records(
     )
 
 
+def _qfit_symbol_spacing_repeat_pairs(
+    grouped_rows: list[tuple[dict[str, object], list[dict[str, object]]]],
+) -> dict[str, int]:
+    return _sorted_count_map(
+        f"{_summary_key(_section_control(row, 'qfit_layout', 'symbol-spacing'))} -> "
+        f"{_summary_key(record.get('repeat_distance'))}"
+        for row, labels in grouped_rows
+        for record in labels
+        if _line_label_record_for_repeat(record)
+    )
+
+
 def _line_label_repeat_spacing_row(
     base_layer: str,
     source_rows: list[dict[str, object]],
     line_label_rows: list[dict[str, object]],
+    grouped_rows: list[tuple[dict[str, object], list[dict[str, object]]]],
 ) -> dict[str, object]:
     return {
         "base_style_layer_id": base_layer,
@@ -646,6 +659,7 @@ def _line_label_repeat_spacing_row(
             _section_control(row, "qfit_layout", "symbol-spacing") for row in source_rows
         ),
         "repeat_distances": _sorted_count_map(row.get("repeat_distance") for row in line_label_rows),
+        "qfit_symbol_spacing_to_repeat_distances": _qfit_symbol_spacing_repeat_pairs(grouped_rows),
         "placements": _sorted_count_map(row.get("placement") for row in line_label_rows),
         "style_names": _sorted_count_map(row.get("style_name") for row in source_rows),
         "zero_repeat_distance_count": sum(1 for row in line_label_rows if row.get("repeat_distance") == 0),
@@ -660,7 +674,14 @@ def _line_label_repeat_spacing_rows(
     rows = []
     for base_layer, grouped_rows in grouped.items():
         source_rows = [row for row, _labels in grouped_rows]
-        rows.append(_line_label_repeat_spacing_row(base_layer, source_rows, _repeat_label_records(grouped_rows)))
+        rows.append(
+            _line_label_repeat_spacing_row(
+                base_layer,
+                source_rows,
+                _repeat_label_records(grouped_rows),
+                grouped_rows,
+            )
+        )
     return sorted(
         rows,
         key=lambda row: (
@@ -1182,15 +1203,15 @@ def _append_line_label_repeat_spacing_summary(lines: list[str], summary_rows: li
             [
                 "## Line label repeat spacing by base layer",
                 "",
-                "| Base layer | Source rows | Converted line styles | Missing QGIS symbol-spacing | Source symbol-spacing | QGIS symbol-spacing | QGIS repeat distances | QGIS placements | Styles |",
-                "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+                "| Base layer | Source rows | Converted line styles | Missing QGIS symbol-spacing | Source symbol-spacing | QGIS symbol-spacing | QGIS repeat distances | QGIS spacing to repeat | QGIS placements | Styles |",
+                "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for row in summary_rows:
             if not isinstance(row, dict):
                 continue
             lines.append(
-                "| {base} | {source_rows} | {converted} | {missing_spacing} | {source_spacing} | {qfit_spacing} | {repeat} | {placements} | {styles} |".format(
+                "| {base} | {source_rows} | {converted} | {missing_spacing} | {source_spacing} | {qfit_spacing} | {repeat} | {spacing_to_repeat} | {placements} | {styles} |".format(
                     base=_markdown_value(row.get("base_style_layer_id")),
                     source_rows=_markdown_value(row.get("source_label_rows")),
                     converted=_markdown_value(row.get("converted_line_label_styles")),
@@ -1198,6 +1219,7 @@ def _append_line_label_repeat_spacing_summary(lines: list[str], summary_rows: li
                     source_spacing=_count_map_markdown_value(row.get("source_symbol_spacings")),
                     qfit_spacing=_count_map_markdown_value(row.get("qfit_symbol_spacings")),
                     repeat=_count_map_markdown_value(row.get("repeat_distances")),
+                    spacing_to_repeat=_count_map_markdown_value(row.get("qfit_symbol_spacing_to_repeat_distances")),
                     placements=_count_map_markdown_value(row.get("placements")),
                     styles=_count_map_markdown_value(row.get("style_names")),
                 )
