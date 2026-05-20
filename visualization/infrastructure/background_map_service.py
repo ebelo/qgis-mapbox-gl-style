@@ -134,7 +134,9 @@ def _label_repeat_distance(layer_name: str, style) -> float | None:
     return _symbol_spacing_mm(_MAPBOX_DEFAULT_SYMBOL_SPACING_PX)
 
 
-def _label_merge_lines(layer_name: str) -> bool | None:
+def _label_merge_lines(layer_name: str, style) -> bool | None:
+    if layer_name == "road-number-shield" and "z11-plus" in _label_style_name(style):
+        return True
     if layer_name in _LINE_LABEL_MERGE_LAYERS:
         return True
     return None
@@ -289,7 +291,7 @@ def apply_mapbox_label_priority(labeling) -> None:
             layer_name = _label_style_mapbox_layer_id(style)
             priority = _label_priority(layer_name, style)
             repeat_distance = _label_repeat_distance(layer_name, style)
-            merge_lines = _label_merge_lines(layer_name)
+            merge_lines = _label_merge_lines(layer_name, style)
             if (
                 priority is None
                 and repeat_distance is None
