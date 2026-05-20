@@ -806,7 +806,7 @@ def _markdown_road_shield_sprite_reference_coverage(report: dict[str, object]) -
     if not isinstance(coverage, dict):
         return []
     observed_count = coverage.get("observed_road_number_shield_sprite_reference_count")
-    if not isinstance(observed_count, int) or observed_count <= 0:
+    if not isinstance(observed_count, int) or isinstance(observed_count, bool) or observed_count <= 0:
         return []
     missing = list(coverage.get("observed_road_number_shield_sprite_references_missing_from_qfit_config") or [])
     lines = [
@@ -822,7 +822,7 @@ def _markdown_road_shield_sprite_reference_coverage(report: dict[str, object]) -
         "",
     ]
     if not missing:
-        return [*lines, "Observed road-number shield sprite refs missing from qfit config: none", ""]
+        return [*lines, "- Observed road-number shield sprite refs missing from qfit config: none", ""]
     return [
         *lines,
         "### Observed road-number shield sprite refs missing from qfit config",

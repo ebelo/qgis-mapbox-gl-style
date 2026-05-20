@@ -119,6 +119,16 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             ),
             [],
         )
+        self.assertEqual(
+            road_features._markdown_road_shield_sprite_reference_coverage(
+                {
+                    "road_number_shield_sprite_reference_coverage": {
+                        "observed_road_number_shield_sprite_reference_count": True
+                    }
+                }
+            ),
+            [],
+        )
 
     def test_road_number_shield_sprite_reference_coverage_markdown_lists_missing_refs(self):
         lines = road_features._markdown_road_shield_sprite_reference_coverage(
@@ -1337,7 +1347,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn(f'Road label signatures: {{"{road_label_signature}":2}}', markdown)
         self.assertIn("## Road shield sprite reference coverage", markdown)
         self.assertIn("- Observed road-number shield sprite refs: 1", markdown)
-        self.assertIn("Observed road-number shield sprite refs missing from qfit config: none", markdown)
+        self.assertIn("- Observed road-number shield sprite refs missing from qfit config: none", markdown)
         self.assertIn("## Path/pedestrian focus", markdown)
         self.assertIn(
             '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 1 | 1 | ["pedestrian=1"] | ["footway=1"] | ["bridge=1"] | ["Promenade=2"] | ["Trail=2"] | ["Kirchsteig=2"] |',
