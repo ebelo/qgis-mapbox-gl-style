@@ -112,6 +112,19 @@ def _qgis_preprocessed_style():
     }
 
 
+def _qgis_thinning_settings():
+    return {
+        "limit_number_of_labels_enabled": False,
+        "maximum_number_labels": 0,
+        "minimum_feature_size": 1.25,
+        "allow_duplicate_removal": True,
+        "minimum_distance_to_duplicate": 20,
+        "minimum_distance_to_duplicate_unit": "Millimeters",
+        "label_margin_distance": 1.5,
+        "label_margin_distance_unit": "Millimeters",
+    }
+
+
 def _qgis_label_styles():
     return [
         {
@@ -134,6 +147,7 @@ def _qgis_label_styles():
                 "buffer_enabled": True,
                 "buffer_size": 0.5291666666666667,
                 "buffer_color": "#ffffff",
+                "thinning_settings": _qgis_thinning_settings(),
             },
         },
         {
@@ -178,6 +192,7 @@ def _qgis_label_styles():
                 "buffer_enabled": True,
                 "buffer_size": 0.5291666666666667,
                 "buffer_color": "#ffffff",
+                "thinning_settings": _qgis_thinning_settings(),
             },
         },
         {
@@ -530,6 +545,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(details["road-label-z15-plus"]["repeat_distance"], 105.83333333333333)
         self.assertTrue(details["road-label-z15-plus"]["merge_lines"])
         self.assertEqual(details["path-pedestrian-label"]["text_size"], 2.38125)
+        self.assertEqual(
+            details["path-pedestrian-label"]["thinning_settings"],
+            _qgis_thinning_settings(),
+        )
 
     def test_build_path_pedestrian_focus_report_cross_links_feature_counts_and_qgis_style(self):
         report = build_path_pedestrian_focus_report(
@@ -702,6 +721,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("| road-label-z12-to-z15 | road | 12<=z<=14 |", markdown)
         self.assertIn('"repeat_distance=105.83333333333333"', markdown)
         self.assertIn("| path-pedestrian-label | road | z>=12 |", markdown)
+        self.assertIn("## Visible QGIS label thinning details", markdown)
+        self.assertIn(
+            (
+                "| chamonix-trails-z14-outdoors | path-pedestrian-label | True | 20 | "
+                "Millimeters | 1.5 | Millimeters | False | 0 | 1.25 |"
+            ),
+            markdown,
+        )
         self.assertIn("## Duplicate label diagnostics", markdown)
         self.assertIn('"pedestrian: Englischer Viertel=5"', markdown)
         self.assertIn('"path: Hofmattweg=3"', markdown)

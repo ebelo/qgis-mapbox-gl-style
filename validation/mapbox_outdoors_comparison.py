@@ -25,6 +25,16 @@ DEFAULT_MAPBOX_STYLE_URL = f"mapbox://styles/{DEFAULT_MAPBOX_STYLE_OWNER}/{DEFAU
 DEFAULT_QT_QPA_PLATFORM = "offscreen"
 WEB_MERCATOR_HALF_WORLD = 20037508.342789244
 WEB_MERCATOR_TILE_SIZE = 512
+QGIS_LABEL_THINNING_SETTING_METHODS = (
+    ("limit_number_of_labels_enabled", "limitNumberOfLabelsEnabled"),
+    ("maximum_number_labels", "maximumNumberLabels"),
+    ("minimum_feature_size", "minimumFeatureSize"),
+    ("allow_duplicate_removal", "allowDuplicateRemoval"),
+    ("minimum_distance_to_duplicate", "minimumDistanceToDuplicate"),
+    ("minimum_distance_to_duplicate_unit", "minimumDistanceToDuplicateUnit"),
+    ("label_margin_distance", "labelMarginDistance"),
+    ("label_margin_distance_unit", "labelMarginDistanceUnit"),
+)
 ImageMetrics: TypeAlias = dict[str, object]
 MATRIX_SUMMARY_METRIC_KEYS = (
     "changed_pixel_ratio",
@@ -643,6 +653,18 @@ def _qgis_label_format_snapshot(settings: object | None) -> dict[str, object]:
     }
 
 
+def _qgis_label_thinning_snapshot(settings: object | None) -> dict[str, object]:
+    thinning_settings = _method_value(settings, "thinningSettings") if settings is not None else None
+    if thinning_settings is None:
+        return {}
+    return {
+        "thinning_settings": {
+            key: _label_value(_method_value(thinning_settings, method_name))
+            for key, method_name in QGIS_LABEL_THINNING_SETTING_METHODS
+        },
+    }
+
+
 def qgis_label_styles_snapshot(layer: object) -> list[dict[str, object]]:
     """Return a token-free diagnostic snapshot of QGIS vector-tile label rules."""
 
@@ -671,6 +693,7 @@ def qgis_label_styles_snapshot(layer: object) -> list[dict[str, object]]:
                 "geometry_generator_enabled": _label_setting_value(settings, "geometryGeneratorEnabled"),
                 "geometry_generator_type": _label_setting_value(settings, "geometryGeneratorType"),
                 **_qgis_label_format_snapshot(settings),
+                **_qgis_label_thinning_snapshot(settings),
             },
         })
     return snapshots

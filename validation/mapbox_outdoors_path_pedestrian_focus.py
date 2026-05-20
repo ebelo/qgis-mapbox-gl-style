@@ -587,6 +587,7 @@ def _label_detail(label_style: Mapping[str, object]) -> dict[str, object]:
         "buffer_enabled",
         "buffer_size",
         "buffer_color",
+        "thinning_settings",
     ):
         if key in settings:
             detail[key] = settings[key]
@@ -987,6 +988,42 @@ def _visible_label_detail_markdown_lines(cameras: Iterable[object]) -> list[str]
     return lines if detail_row_count else []
 
 
+def _visible_label_thinning_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        for detail in _visible_label_detail_rows(camera):
+            thinning_settings = detail.get("thinning_settings")
+            if not isinstance(thinning_settings, Mapping):
+                continue
+            rows.append(
+                [
+                    camera.get("camera"),
+                    detail.get("style_name"),
+                    thinning_settings.get("allow_duplicate_removal"),
+                    thinning_settings.get("minimum_distance_to_duplicate"),
+                    thinning_settings.get("minimum_distance_to_duplicate_unit"),
+                    thinning_settings.get("label_margin_distance"),
+                    thinning_settings.get("label_margin_distance_unit"),
+                    thinning_settings.get("limit_number_of_labels_enabled"),
+                    thinning_settings.get("maximum_number_labels"),
+                    thinning_settings.get("minimum_feature_size"),
+                ]
+            )
+    if not rows:
+        return []
+    lines = ["", "## Visible QGIS label thinning details", ""]
+    lines.extend(
+        [
+            "| Camera | Style | Duplicate removal | Duplicate distance | Duplicate distance unit | Label margin | Label margin unit | Limit labels | Max labels | Min feature size |",
+            "| --- | --- | --- | ---: | --- | ---: | --- | --- | ---: | ---: |",
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def _artifact_path_cell(value: object) -> object:
     if isinstance(value, str) and value:
         return f"`{value}`"
@@ -1168,6 +1205,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
+    lines.extend(_visible_label_thinning_markdown_lines(rows))
     lines.extend(_visible_label_detail_markdown_lines(rows))
     return "\n".join(lines) + "\n"
 

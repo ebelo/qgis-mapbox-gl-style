@@ -943,6 +943,119 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             },
         }])
 
+    def test_qgis_label_styles_snapshot_captures_label_thinning_settings(self):
+        class FakeThinningSettings:
+            def limitNumberOfLabelsEnabled(self):
+                return False
+
+            def maximumNumberLabels(self):
+                return 0
+
+            def minimumFeatureSize(self):
+                return 1.25
+
+            def allowDuplicateRemoval(self):
+                return True
+
+            def minimumDistanceToDuplicate(self):
+                return 20.0
+
+            def minimumDistanceToDuplicateUnit(self):
+                return "Millimeters"
+
+            def labelMarginDistance(self):
+                return 1.5
+
+            def labelMarginDistanceUnit(self):
+                return "Millimeters"
+
+        class FakeSettings:
+            def thinningSettings(self):
+                return FakeThinningSettings()
+
+        class FakeStyle:
+            def styleName(self):
+                return "path-pedestrian-label"
+
+            def layerName(self):
+                return "road"
+
+            def labelSettings(self):
+                return FakeSettings()
+
+        class FakeLabeling:
+            def styles(self):
+                return [FakeStyle()]
+
+        class FakeLayer:
+            def labeling(self):
+                return FakeLabeling()
+
+        [snapshot] = qgis_label_styles_snapshot(FakeLayer())
+
+        self.assertEqual(
+            snapshot["label_settings"]["thinning_settings"],
+            {
+                "limit_number_of_labels_enabled": False,
+                "maximum_number_labels": 0,
+                "minimum_feature_size": 1.25,
+                "allow_duplicate_removal": True,
+                "minimum_distance_to_duplicate": 20.0,
+                "minimum_distance_to_duplicate_unit": "Millimeters",
+                "label_margin_distance": 1.5,
+                "label_margin_distance_unit": "Millimeters",
+            },
+        )
+
+    def test_qgis_label_styles_snapshot_keeps_missing_thinning_methods_as_none(self):
+        class FakePartialThinningSettings:
+            def limitNumberOfLabelsEnabled(self):
+                return False
+
+            def maximumNumberLabels(self):
+                return 0
+
+            def minimumFeatureSize(self):
+                return 1.25
+
+        class FakeSettings:
+            def thinningSettings(self):
+                return FakePartialThinningSettings()
+
+        class FakeStyle:
+            def styleName(self):
+                return "path-pedestrian-label"
+
+            def layerName(self):
+                return "road"
+
+            def labelSettings(self):
+                return FakeSettings()
+
+        class FakeLabeling:
+            def styles(self):
+                return [FakeStyle()]
+
+        class FakeLayer:
+            def labeling(self):
+                return FakeLabeling()
+
+        [snapshot] = qgis_label_styles_snapshot(FakeLayer())
+
+        self.assertEqual(
+            snapshot["label_settings"]["thinning_settings"],
+            {
+                "limit_number_of_labels_enabled": False,
+                "maximum_number_labels": 0,
+                "minimum_feature_size": 1.25,
+                "allow_duplicate_removal": None,
+                "minimum_distance_to_duplicate": None,
+                "minimum_distance_to_duplicate_unit": None,
+                "label_margin_distance": None,
+                "label_margin_distance_unit": None,
+            },
+        )
+
     def test_label_value_normalizes_named_sequence_and_opaque_values(self):
         class NamedValue:
             name = "Line"
