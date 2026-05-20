@@ -2372,6 +2372,63 @@ class MapboxOutdoorsStyleAuditTests(unittest.TestCase):
             [{"group": "roads/trails", "raw_count": 1, "qfit_count": 0, "reduced_count": 1}],
         )
 
+    def test_warning_group_summaries_use_qfit_split_layer_groups(self):
+        warning_report = {
+            "raw": {
+                "warnings": ["road-number-shield: Skipping unsupported expression"],
+            },
+            "qfit_preprocessed": {
+                "warnings": [
+                    "road-number-shield-2-beta-remaining-icons-z11-plus: Could not retrieve sprite 'default-2'",
+                ],
+            },
+            "without_filters_probe": {
+                "summary": {
+                    "warnings": [
+                        "road-number-shield-2-beta-remaining-icons-z11-plus: Could not retrieve sprite 'default-2'",
+                    ],
+                },
+                "reduced_from_qfit": {},
+            },
+        }
+
+        mapbox_outdoors_style_audit._annotate_qgis_warning_group_summaries(
+            [{"id": "road-number-shield", "group": "roads/trails"}],
+            warning_report,
+            qfit_preprocessed_style={
+                "layers": [
+                    {
+                        "id": "road-number-shield-2-beta-remaining-icons-z11-plus",
+                        "type": "symbol",
+                        "source-layer": "road",
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(
+            warning_report["raw"]["by_layer_group"],
+            [{"group": "roads/trails", "count": 1}],
+        )
+        self.assertEqual(
+            warning_report["qfit_preprocessed"]["by_layer_group"],
+            [{"group": "roads/trails", "count": 1}],
+        )
+        self.assertEqual(
+            warning_report["qfit_preprocessed"]["by_layer_group_and_message"],
+            [
+                {
+                    "group": "roads/trails",
+                    "message": "Could not retrieve sprite 'default-2'",
+                    "count": 1,
+                }
+            ],
+        )
+        self.assertEqual(
+            warning_report["without_filters_probe"]["summary"]["by_layer_group"],
+            [{"group": "roads/trails", "count": 1}],
+        )
+
     def test_property_removal_impact_group_reductions_include_positive_deltas_only(self):
         rows = [
             {

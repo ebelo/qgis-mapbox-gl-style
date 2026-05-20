@@ -2785,16 +2785,19 @@ def _annotate_probe_remaining_warning_unresolved_properties(
 def _annotate_qgis_warning_group_summaries(
     layers: list[dict[str, object]],
     warning_report: dict[str, object],
+    *,
+    qfit_preprocessed_style: dict[str, object],
 ) -> None:
-    layer_groups = {str(layer.get("id") or ""): str(layer.get("group") or "other") for layer in layers}
+    raw_layer_groups = {str(layer.get("id") or ""): str(layer.get("group") or "other") for layer in layers}
+    qfit_layer_groups = _layer_groups_by_id(qfit_preprocessed_style)
     raw_summary = warning_report.get("raw") if isinstance(warning_report.get("raw"), dict) else {}
     qfit_summary = (
         warning_report.get("qfit_preprocessed")
         if isinstance(warning_report.get("qfit_preprocessed"), dict)
         else {}
     )
-    _annotate_warning_summary_groups(raw_summary, layer_groups)
-    _annotate_warning_summary_groups(qfit_summary, layer_groups)
+    _annotate_warning_summary_groups(raw_summary, raw_layer_groups)
+    _annotate_warning_summary_groups(qfit_summary, qfit_layer_groups)
     reduced = warning_report.setdefault("reduced_by_qfit", {})
     if isinstance(reduced, dict):
         reduced["by_layer_group"] = _warning_reduction_summary(
@@ -2807,7 +2810,7 @@ def _annotate_qgis_warning_group_summaries(
         if isinstance(warning_report.get("without_filters_probe"), dict)
         else {}
     )
-    _annotate_probe_warning_groups(filterless_probe, qfit_summary, layer_groups)
+    _annotate_probe_warning_groups(filterless_probe, qfit_summary, qfit_layer_groups)
     _annotate_probe_remaining_warning_unresolved_properties(
         filterless_probe,
         layers,
@@ -2818,19 +2821,19 @@ def _annotate_qgis_warning_group_summaries(
         if isinstance(warning_report.get("without_icon_images_probe"), dict)
         else {}
     )
-    _annotate_probe_warning_groups(icon_image_probe, qfit_summary, layer_groups)
+    _annotate_probe_warning_groups(icon_image_probe, qfit_summary, qfit_layer_groups)
     line_opacity_probe = (
         warning_report.get(_SCALAR_LINE_OPACITY_PROBE_KEY)
         if isinstance(warning_report.get(_SCALAR_LINE_OPACITY_PROBE_KEY), dict)
         else {}
     )
-    _annotate_probe_warning_groups(line_opacity_probe, qfit_summary, layer_groups)
+    _annotate_probe_warning_groups(line_opacity_probe, qfit_summary, qfit_layer_groups)
     line_dasharray_probe = (
         warning_report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY)
         if isinstance(warning_report.get(_LITERAL_LINE_DASHARRAY_PROBE_KEY), dict)
         else {}
     )
-    _annotate_probe_warning_groups(line_dasharray_probe, qfit_summary, layer_groups)
+    _annotate_probe_warning_groups(line_dasharray_probe, qfit_summary, qfit_layer_groups)
     _annotate_probe_remaining_warning_unresolved_properties(
         line_dasharray_probe,
         layers,
@@ -2841,7 +2844,7 @@ def _annotate_qgis_warning_group_summaries(
         if isinstance(warning_report.get(_SCALAR_SYMBOL_SPACING_PROBE_KEY), dict)
         else {}
     )
-    _annotate_probe_warning_groups(symbol_spacing_probe, qfit_summary, layer_groups)
+    _annotate_probe_warning_groups(symbol_spacing_probe, qfit_summary, qfit_layer_groups)
     symbol_spacing_replaced_layers = {
         str(layer_id)
         for layer_id in symbol_spacing_probe.get(_SYMBOL_SPACING_REPLACED_LAYERS_KEY, [])
@@ -2859,7 +2862,7 @@ def _annotate_qgis_warning_group_summaries(
         if isinstance(warning_report.get(_SPRITE_CONTEXT_PROBE_KEY), dict)
         else {}
     )
-    _annotate_probe_warning_groups(sprite_context_probe, qfit_summary, layer_groups)
+    _annotate_probe_warning_groups(sprite_context_probe, qfit_summary, qfit_layer_groups)
     _annotate_probe_remaining_warning_unresolved_properties(sprite_context_probe, layers)
 
 
@@ -3799,7 +3802,11 @@ def build_style_audit(
             include_property_removal_impact=resolved_config.include_qgis_property_removal_impact,
             include_filter_parse_support=resolved_config.include_qgis_filter_parse_support,
         )
-        _annotate_qgis_warning_group_summaries(layers, warning_report)
+        _annotate_qgis_warning_group_summaries(
+            layers,
+            warning_report,
+            qfit_preprocessed_style=simplified_style,
+        )
         audit["qgis_converter_warnings"] = warning_report
         _annotate_layers_with_qgis_warnings(layers, warning_report)
     return audit
