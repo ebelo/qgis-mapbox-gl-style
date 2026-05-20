@@ -1611,9 +1611,19 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         )
         self.assertIn("## Image artifacts", summary_text)
         self.assertIn("Contact sheet:", summary_text)
+        self.assertIn("Contact sheet: `contact-sheet.jpg`", summary_text)
+        self.assertIn(
+            "`../../switzerland-alps-z5-outdoors/20260512T030000Z/manifest.json`",
+            summary_text,
+        )
+        self.assertIn(
+            "`../../switzerland-alps-z5-outdoors/20260512T030000Z/mapbox-gl-reference.png`",
+            summary_text,
+        )
         self.assertIn("mapbox-gl-reference.png", summary_text)
         self.assertIn("qgis-vector-render.png", summary_text)
         self.assertIn("mapbox-gl-vs-qgis-diff.png", summary_text)
+        self.assertNotIn(str(output_root.parent), summary_text)
         self.assertNotIn("test-mapbox-token", summary_json_text)
         self.assertNotIn("test-mapbox-token", summary_text)
         for call in print_mock.call_args_list:

@@ -1438,6 +1438,24 @@ def _format_summary_metric(metrics: dict[str, object], key: str) -> str:
     return str(value)
 
 
+def _artifact_markdown_path(path_text: object, *, base_dir: Path | None) -> str:
+    if not isinstance(path_text, str) or not path_text:
+        return "—"
+    if base_dir is None:
+        return path_text
+    path = Path(path_text)
+    if not path.is_absolute():
+        return path_text
+    return os.path.relpath(path, base_dir)
+
+
+def _all_cameras_summary_markdown_base_dir(summary: dict[str, object]) -> Path | None:
+    contact_sheet = summary.get("contact_sheet")
+    if not isinstance(contact_sheet, str) or not contact_sheet:
+        return None
+    return Path(contact_sheet).parent
+
+
 def _contact_sheet_image_cell(
     *,
     label: str,
@@ -1618,6 +1636,7 @@ def build_all_cameras_contact_sheet(
 
 
 def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
+    base_dir = _all_cameras_summary_markdown_base_dir(summary)
     lines = [
         "# Mapbox Outdoors all-camera comparison summary",
         "",
@@ -1628,7 +1647,7 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
     ]
     for entry in summary["cameras"]:
         metrics = entry["metrics"] if isinstance(entry.get("metrics"), dict) else {}
-        manifest = entry.get("manifest") or "—"
+        manifest = _artifact_markdown_path(entry.get("manifest"), base_dir=base_dir)
         artifact_status = entry.get("artifact_status") or "unknown"
         lines.append(
             "| "
@@ -1647,7 +1666,7 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
             "",
             "## Image artifacts",
             "",
-            f"Contact sheet: `{summary.get('contact_sheet') or '—'}`",
+            f"Contact sheet: `{_artifact_markdown_path(summary.get('contact_sheet'), base_dir=base_dir)}`",
             "",
             "| Camera | Mapbox GL reference | QGIS vector render | Diff |",
             "| --- | --- | --- | --- |",
@@ -1658,9 +1677,9 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
         lines.append(
             "| "
             f"`{entry['camera']}` | "
-            f"`{outputs.get('browser_reference') or '—'}` | "
-            f"`{outputs.get('qgis_vector_render') or '—'}` | "
-            f"`{outputs.get('diff') or '—'}` |"
+            f"`{_artifact_markdown_path(outputs.get('browser_reference'), base_dir=base_dir)}` | "
+            f"`{_artifact_markdown_path(outputs.get('qgis_vector_render'), base_dir=base_dir)}` | "
+            f"`{_artifact_markdown_path(outputs.get('diff'), base_dir=base_dir)}` |"
         )
     lines.extend(
         [
