@@ -29,6 +29,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _postprocessed_label_records,
     _qgis_duplicate_label_controls,
     _qgis_pal_layer_property_names_by_value,
+    _qgis_property_type_names_by_value,
     _qgis_text_background_enum_names_by_field,
     _road_shield_label_placement_rows,
     _source_label_control_omission_summary_rows,
@@ -51,11 +52,47 @@ from qfit.validation.mapbox_outdoors_label_settings import (
 
 
 class FakeProperties:
-    def __init__(self, keys):
+    def __init__(self, keys, properties=None):
         self._keys = keys
+        self._properties = properties or {}
 
     def propertyKeys(self):
         return self._keys
+
+    def property(self, key):
+        return self._properties.get(key)
+
+
+class FakeProperty:
+    def __init__(
+        self,
+        *,
+        property_type,
+        active=True,
+        expression="",
+        field="",
+        static_value=None,
+    ):
+        self._property_type = property_type
+        self._active = active
+        self._expression = expression
+        self._field = field
+        self._static_value = static_value
+
+    def propertyType(self):
+        return self._property_type
+
+    def isActive(self):
+        return self._active
+
+    def expressionString(self):
+        return self._expression
+
+    def field(self):
+        return self._field
+
+    def staticValue(self):
+        return self._static_value
 
 
 class FakeColor:
@@ -218,7 +255,16 @@ class FakeSettings:
     overrunDistanceUnit = SimpleNamespace(name="Millimeters")
 
     def dataDefinedProperties(self):
-        return FakeProperties([87, 50])
+        return FakeProperties(
+            [87, 50],
+            {
+                50: FakeProperty(
+                    property_type=3,
+                    expression='CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END',
+                ),
+                87: FakeProperty(property_type=1, static_value=6),
+            },
+        )
 
     def format(self):
         return FakeTextFormat()
@@ -264,6 +310,13 @@ class FakeQgsTextBackgroundSettings:
     SizeBuffer = 0
     SizeFixed = 1
     SizeType = object()
+
+
+class FakeQgsProperty:
+    InvalidProperty = 0
+    StaticProperty = 1
+    FieldBasedProperty = 2
+    ExpressionBasedProperty = 3
 
 
 class FakeConversionContext:
@@ -322,6 +375,7 @@ def _fake_qgis_modules():
     core_module.QgsMapBoxGlStyleConversionContext = FakeConversionContext
     core_module.QgsMapBoxGlStyleConverter = FakeConverter
     core_module.QgsPalLayerSettings = FakeQgsPalLayerSettings
+    core_module.QgsProperty = FakeQgsProperty
     core_module.QgsTextBackgroundSettings = FakeQgsTextBackgroundSettings
     core_module.Qgis = SimpleNamespace(RenderUnit=SimpleNamespace(Millimeters="millimeters"))
     qgis_module.core = core_module
@@ -392,6 +446,10 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             FakeStyle(style_name="road-label-z15-plus", layer_name="road"),
             FakeSettings(),
             {50: "ShapeSizeX"},
+            property_type_names_by_value={
+                1: "StaticProperty",
+                3: "ExpressionBasedProperty",
+            },
         )
 
         self.assertEqual(record["style_name"], "road-label-z15-plus")
@@ -440,6 +498,31 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(record["data_defined_property_keys"], [50, 87])
         self.assertEqual(record["data_defined_property_names"], ["ShapeSizeX", "87"])
         self.assertEqual(record["data_defined_property_labels"], ["ShapeSizeX (50)", "87"])
+        self.assertEqual(
+            record["data_defined_property_details"],
+            [
+                {
+                    "key": 50,
+                    "name": "ShapeSizeX",
+                    "label": "ShapeSizeX (50)",
+                    "active": True,
+                    "property_type": "ExpressionBasedProperty",
+                    "expression": 'CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END',
+                    "field": None,
+                    "static_value": None,
+                },
+                {
+                    "key": 87,
+                    "name": "87",
+                    "label": "87",
+                    "active": True,
+                    "property_type": "StaticProperty",
+                    "expression": None,
+                    "field": None,
+                    "static_value": 6,
+                },
+            ],
+        )
 
     def test_ensure_qgis_application_reuses_or_creates_application(self):
         existing_app = FakeQgsApplication([], False)
@@ -485,6 +568,14 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(names["type"][5], "ShapeMarkerSymbol")
         self.assertEqual(names["size_type"][0], "SizeBuffer")
         self.assertEqual(names["size_type"][1], "SizeFixed")
+
+    def test_qgis_property_type_names_by_value_reports_enum_names(self):
+        names = _qgis_property_type_names_by_value(FakeQgsProperty)
+
+        self.assertEqual(names[0], "InvalidProperty")
+        self.assertEqual(names[1], "StaticProperty")
+        self.assertEqual(names[2], "FieldBasedProperty")
+        self.assertEqual(names[3], "ExpressionBasedProperty")
 
     def test_label_settings_record_decodes_numeric_background_enums(self):
         class NumericBackgroundSettings(FakeSettings):
@@ -1239,6 +1330,18 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "background_opacity": 1.0,
                     "data_defined_property_keys": [50],
                     "data_defined_property_labels": ["ShapeSizeX (50)"],
+                    "data_defined_property_details": [
+                        {
+                            "key": 50,
+                            "name": "ShapeSizeX",
+                            "label": "ShapeSizeX (50)",
+                            "active": True,
+                            "property_type": "ExpressionBasedProperty",
+                            "expression": 'CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END',
+                            "field": None,
+                            "static_value": None,
+                        }
+                    ],
                 },
                 {
                     "style_name": "road-number-shield-2-remaining-icons-below-z11",
@@ -1292,6 +1395,10 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(z11_plus["background_stroke_width"], 0.2)
         self.assertEqual(z11_plus["data_defined_property_keys"], [50])
         self.assertEqual(z11_plus["data_defined_property_labels"], ["ShapeSizeX (50)"])
+        self.assertEqual(
+            z11_plus["data_defined_property_details"][0]["expression"],
+            'CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END',
+        )
 
     def test_line_center_label_conversion_summary_isolates_line_center_labels(self):
         rows = _line_center_label_conversion_rows(
@@ -1954,8 +2061,30 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "background_stroke_width": 0.2,
                     "background_stroke_width_unit": "Millimeters",
                     "background_opacity": 1.0,
-                    "data_defined_property_keys": [50],
-                    "data_defined_property_labels": ["ShapeSizeX (50)"],
+                    "data_defined_property_keys": [50, 87],
+                    "data_defined_property_labels": ["ShapeSizeX (50)", "Priority (87)"],
+                    "data_defined_property_details": [
+                        {
+                            "key": 50,
+                            "name": "ShapeSizeX",
+                            "label": "ShapeSizeX (50)",
+                            "active": True,
+                            "property_type": "ExpressionBasedProperty",
+                            "expression": 'CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END',
+                            "field": None,
+                            "static_value": None,
+                        },
+                        {
+                            "key": 87,
+                            "name": "Priority",
+                            "label": "Priority (87)",
+                            "active": False,
+                            "property_type": "StaticProperty",
+                            "expression": None,
+                            "field": None,
+                            "static_value": 0,
+                        },
+                    ],
                 }
             ],
             "line_label_repeat_spacing_by_base_layer": [
@@ -2129,7 +2258,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         )
         self.assertIn("## Road shield label placement detail", markdown)
         self.assertIn(
-            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | 2.38125 Millimeters | #1d1f25 | yes ShapeRectangle | 4.49792 x 2.64583 SizeFixed Millimeters | #ffffff 1 | #1d1f25 0.2 Millimeters | ShapeSizeX (50) |",
+            '| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, [\'zoom\'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | 2.38125 Millimeters | #1d1f25 | yes ShapeRectangle | 4.49792 x 2.64583 SizeFixed Millimeters | #ffffff 1 | #1d1f25 0.2 Millimeters | ShapeSizeX (50): ExpressionBasedProperty CASE WHEN length("ref") > 3 THEN 8 ELSE 5 END, Priority (87): StaticProperty inactive 0 |',
             markdown,
         )
         self.assertIn("## Line label repeat spacing by base layer", markdown)

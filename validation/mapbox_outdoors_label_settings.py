@@ -389,6 +389,16 @@ def _data_defined_property_keys(settings: object) -> list[object]:
         return list(keys)
 
 
+def _collection_property(properties: object, key: object) -> object:
+    method = getattr(properties, "property", None)
+    if not callable(method):
+        return None
+    try:
+        return method(key)
+    except (AttributeError, RuntimeError, TypeError):
+        return None
+
+
 def _qgis_pal_layer_property_names_by_value(qgs_pal_layer_settings: object) -> dict[int, str]:
     property_type = getattr(qgs_pal_layer_settings, "Property", None)
     names: dict[int, str] = {}
@@ -430,6 +440,16 @@ def _qgis_text_background_enum_names_by_field(qgs_text_background_settings: obje
     }
 
 
+def _qgis_property_type_names_by_value(qgs_property: object) -> dict[int, str]:
+    names: dict[int, str] = {}
+    for name in ("InvalidProperty", "StaticProperty", "FieldBasedProperty", "ExpressionBasedProperty"):
+        try:
+            names[int(getattr(qgs_property, name))] = name
+        except (AttributeError, TypeError, ValueError):
+            continue
+    return names
+
+
 def _data_defined_property_names(
     keys: list[object],
     property_names_by_value: dict[int, str] | None,
@@ -462,11 +482,51 @@ def _data_defined_property_labels(
     return labels
 
 
+def _json_safe_property_value(value: object) -> object:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
+
+
+def _data_defined_property_details(
+    settings: object,
+    keys: list[object],
+    property_names_by_value: dict[int, str] | None,
+    property_type_names_by_value: dict[int, str] | None,
+) -> list[dict[str, object]]:
+    properties = _method_value(settings, "dataDefinedProperties")
+    details: list[dict[str, object]] = []
+    for key in keys:
+        detail = {
+            "key": key,
+            "name": _data_defined_property_names([key], property_names_by_value)[0],
+            "label": _data_defined_property_labels([key], property_names_by_value)[0],
+        }
+        property_value = _collection_property(properties, key) if properties is not None else None
+        if property_value is not None:
+            property_type = _method_value(property_value, "propertyType")
+            expression = _method_value(property_value, "expressionString")
+            field = _method_value(property_value, "field")
+            static_value = _method_value(property_value, "staticValue")
+            detail.update(
+                {
+                    "active": _method_value(property_value, "isActive"),
+                    "property_type": _enum_name(property_type, property_type_names_by_value),
+                    "expression": expression if isinstance(expression, str) and expression else None,
+                    "field": field if isinstance(field, str) and field else None,
+                    "static_value": _json_safe_property_value(static_value),
+                }
+            )
+        details.append(detail)
+    return details
+
+
 def label_settings_record(
     style: object,
     settings: object,
     property_names_by_value: dict[int, str] | None = None,
     background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
+    property_type_names_by_value: dict[int, str] | None = None,
 ) -> dict[str, object]:
     _ensure_package_parent_on_path()
     from qfit.mapbox_config import base_mapbox_style_layer_id_for_qfit
@@ -509,6 +569,12 @@ def label_settings_record(
             data_defined_property_keys,
             property_names_by_value,
         ),
+        "data_defined_property_details": _data_defined_property_details(
+            settings,
+            data_defined_property_keys,
+            property_names_by_value,
+            property_type_names_by_value,
+        ),
     }
 
 
@@ -516,6 +582,7 @@ def _iter_label_records(
     labeling: object,
     property_names_by_value: dict[int, str] | None = None,
     background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
+    property_type_names_by_value: dict[int, str] | None = None,
 ) -> Iterable[dict[str, object]]:
     for style in _method_value(labeling, "styles") or []:
         settings = _method_value(style, "labelSettings")
@@ -526,6 +593,7 @@ def _iter_label_records(
             settings,
             property_names_by_value,
             background_enum_names_by_field,
+            property_type_names_by_value,
         )
 
 
@@ -609,22 +677,34 @@ def _postprocessed_label_records(
     apply_label_priority,
     property_names_by_value: dict[int, str] | None = None,
     background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
+    property_type_names_by_value: dict[int, str] | None = None,
 ) -> list[dict[str, object]]:
     if labeling is None:
         return []
     apply_label_priority(labeling)
-    return _sorted_label_records(labeling, property_names_by_value, background_enum_names_by_field)
+    return _sorted_label_records(
+        labeling,
+        property_names_by_value,
+        background_enum_names_by_field,
+        property_type_names_by_value,
+    )
 
 
 def _sorted_label_records(
     labeling: object | None,
     property_names_by_value: dict[int, str] | None = None,
     background_enum_names_by_field: dict[str, dict[int, str]] | None = None,
+    property_type_names_by_value: dict[int, str] | None = None,
 ) -> list[dict[str, object]]:
     if labeling is None:
         return []
     return sorted(
-        _iter_label_records(labeling, property_names_by_value, background_enum_names_by_field),
+        _iter_label_records(
+            labeling,
+            property_names_by_value,
+            background_enum_names_by_field,
+            property_type_names_by_value,
+        ),
         key=lambda row: (str(row.get("base_style_layer_id") or ""), str(row.get("style_name") or "")),
     )
 
@@ -1435,6 +1515,7 @@ def _road_shield_label_placement_rows(
                     "background_opacity": label_row.get("background_opacity"),
                     "data_defined_property_keys": label_row.get("data_defined_property_keys"),
                     "data_defined_property_labels": label_row.get("data_defined_property_labels"),
+                    "data_defined_property_details": label_row.get("data_defined_property_details"),
                 }
             )
     return sorted(
@@ -1838,6 +1919,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             QgsMapBoxGlStyleConversionContext,
             QgsMapBoxGlStyleConverter,
             QgsPalLayerSettings,
+            QgsProperty,
             QgsTextBackgroundSettings,
             Qgis,
         )
@@ -1868,6 +1950,7 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             labeling,
             _qgis_pal_layer_property_names_by_value(QgsPalLayerSettings),
             _qgis_text_background_enum_names_by_field(QgsTextBackgroundSettings),
+            _qgis_property_type_names_by_value(QgsProperty),
         )
         source_label_layers = source_label_layer_records(original_style, qfit_style, records)
         return _label_settings_report(
@@ -1930,7 +2013,41 @@ def _geometry_generator_markdown_value(row: dict[str, object]) -> str:
     )
 
 
+def _data_defined_property_detail_value(detail: dict[str, object]) -> object:
+    expression = detail.get("expression")
+    if expression not in (None, ""):
+        return expression
+    field = detail.get("field")
+    if field not in (None, ""):
+        return field
+    return detail.get("static_value")
+
+
+def _data_defined_property_detail_markdown_value(detail: object) -> str | None:
+    if not isinstance(detail, dict):
+        return None
+    label = _markdown_value(detail.get("label"))
+    parts = [
+        _markdown_value(detail.get("property_type")),
+        "inactive" if detail.get("active") is False else "—",
+        _markdown_value(_data_defined_property_detail_value(detail)),
+    ]
+    rendered_parts = [part for part in parts if part != "—"]
+    if rendered_parts:
+        return f"{label}: {' '.join(rendered_parts)}"
+    return label
+
+
 def _data_defined_property_markdown_value(row: dict[str, object]) -> str:
+    details = row.get("data_defined_property_details")
+    if isinstance(details, list) and details:
+        rendered_details = [
+            rendered
+            for detail in details
+            if (rendered := _data_defined_property_detail_markdown_value(detail)) is not None
+        ]
+        if rendered_details:
+            return ", ".join(rendered_details)
     labels = row.get("data_defined_property_labels")
     if isinstance(labels, list) and labels:
         return _markdown_value(labels)
