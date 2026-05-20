@@ -547,6 +547,7 @@ def road_tile_record(
         ),
         "road_number_shield_class_counts": _count_by_property(road_number_shields, "class"),
         "road_number_shield_reflen_counts": _count_by_property(road_number_shields, "reflen"),
+        "road_number_shield_geometry_type_counts": _count_geometry_types(road_number_shields),
         "road_number_shield_ref_counts": road_number_shield_ref_counts,
         "road_number_shield_duplicate_ref_counts": _duplicate_count_map(road_number_shield_ref_counts),
         "road_number_shield_sprite_reference_counts": _count_road_number_shield_sprite_references(
@@ -654,6 +655,7 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("Level crossing signatures", "level_crossing_signature_counts"),
     ("Road number shield class counts", "road_number_shield_class_counts"),
     ("Road number shield reflen counts", "road_number_shield_reflen_counts"),
+    ("Road number shield geometry types", "road_number_shield_geometry_type_counts"),
     ("Road number shield duplicate refs", "road_number_shield_duplicate_ref_counts"),
     ("Road number shield sprite references", "road_number_shield_sprite_reference_counts"),
     ("Road number shield structure counts", "road_number_shield_structure_counts"),
@@ -710,6 +712,7 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Level crossing signatures", "level_crossing_signature_counts", "---"),
     ("Shield classes", "road_number_shield_class_counts", "---"),
     ("Shield reflens", "road_number_shield_reflen_counts", "---"),
+    ("Shield geometries", "road_number_shield_geometry_type_counts", "---"),
     ("Duplicate shield refs", "road_number_shield_duplicate_ref_counts", "---"),
     ("Shield sprite refs", "road_number_shield_sprite_reference_counts", "---"),
     ("Shield structures", "road_number_shield_structure_counts", "---"),
@@ -1146,6 +1149,10 @@ def collect_all_camera_road_feature_report(
             camera_reports,
             "road_number_shield_reflen_counts",
         ),
+        "road_number_shield_geometry_type_counts": _combined_record_counts(
+            camera_reports,
+            "road_number_shield_geometry_type_counts",
+        ),
         "road_number_shield_sprite_reference_counts": road_number_shield_sprite_reference_counts,
         "road_number_shield_sprite_reference_coverage": _road_number_shield_sprite_reference_coverage(
             road_number_shield_sprite_reference_counts
@@ -1300,8 +1307,8 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 "",
                 "## Road label/shield focus",
                 "",
-                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Duplicate shield refs | Shield sprite refs | Shield signatures | Exit shield reflens | Road label classes | Duplicate road labels |",
-                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Shield geometries | Duplicate shield refs | Shield sprite refs | Shield signatures | Exit shield reflens | Road label classes | Duplicate road labels |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for camera_report in road_focus_rows:
@@ -1316,6 +1323,7 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                         camera_report.get("road_label_candidate_count"),
                         _top_count_labels(camera_report.get("road_number_shield_class_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_reflen_counts")),
+                        _top_count_labels(camera_report.get("road_number_shield_geometry_type_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_duplicate_ref_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_sprite_reference_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_signature_counts")),
