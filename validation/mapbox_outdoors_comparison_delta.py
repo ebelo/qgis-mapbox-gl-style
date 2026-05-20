@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -148,12 +149,50 @@ def _direction_counts(prefix: str, directions: list[str]) -> dict[str, int]:
     return {f"{prefix}_{bucket}": directions.count(bucket) for bucket in DIRECTION_BUCKETS}
 
 
+def _report_path(path: Path, *, artifact_base_dir: Path | None) -> str:
+    if artifact_base_dir is not None:
+        try:
+            return Path(os.path.relpath(path.resolve(), artifact_base_dir.resolve())).as_posix()
+        except ValueError:
+            pass
+    return path.as_posix()
+
+
+def _input_artifact_row(
+    summary: Mapping[str, object],
+    summary_path: Path | None,
+    *,
+    artifact_base_dir: Path | None,
+) -> dict[str, str]:
+    row: dict[str, str] = {}
+    if summary_path is not None:
+        row["summary_json"] = _report_path(summary_path, artifact_base_dir=artifact_base_dir)
+        row["summary_markdown"] = _report_path(
+            summary_path.with_name("summary.md"),
+            artifact_base_dir=artifact_base_dir,
+        )
+
+    contact_sheet = summary.get("contact_sheet")
+    if isinstance(contact_sheet, str) and contact_sheet:
+        contact_sheet_path = Path(contact_sheet)
+        if not contact_sheet_path.is_absolute() and summary_path is not None:
+            contact_sheet_path = summary_path.parent / contact_sheet_path
+        row["contact_sheet"] = _report_path(
+            contact_sheet_path,
+            artifact_base_dir=artifact_base_dir,
+        )
+    return row
+
+
 def build_comparison_delta_report(
     baseline_summary: Mapping[str, object],
     candidate_summary: Mapping[str, object],
     *,
     baseline_label: str = "baseline",
     candidate_label: str = "candidate",
+    baseline_summary_path: Path | None = None,
+    candidate_summary_path: Path | None = None,
+    artifact_base_dir: Path | None = None,
     now: dt.datetime | None = None,
 ) -> dict[str, object]:
     baseline_rows = _camera_rows(baseline_summary)
@@ -206,7 +245,7 @@ def build_comparison_delta_report(
         for row in rows
         if isinstance(row.get("rms_delta_direction"), str)
     ]
-    return {
+    report: dict[str, object] = {
         "generated_at": _report_timestamp(now),
         "baseline_label": baseline_label,
         "candidate_label": candidate_label,
@@ -215,6 +254,25 @@ def build_comparison_delta_report(
         | _direction_counts("rms", rms_directions),
         "cameras": rows,
     }
+    input_artifacts = {
+        label: artifacts
+        for label, artifacts in {
+            "baseline": _input_artifact_row(
+                baseline_summary,
+                baseline_summary_path,
+                artifact_base_dir=artifact_base_dir,
+            ),
+            "candidate": _input_artifact_row(
+                candidate_summary,
+                candidate_summary_path,
+                artifact_base_dir=artifact_base_dir,
+            ),
+        }.items()
+        if artifacts
+    }
+    if input_artifacts:
+        report["input_artifacts"] = input_artifacts
+    return report
 
 
 def _format_float(value: object, *, precision: int = 9) -> str:
@@ -239,6 +297,40 @@ def _metric_delta_value(row: Mapping[str, object], key: str, field: str) -> obje
     return metric.get(field)
 
 
+def _artifact_path_cell(row: Mapping[str, object], key: str) -> str:
+    value = row.get(key)
+    return f"`{value}`" if isinstance(value, str) and value else "-"
+
+
+def _append_input_artifacts_section(lines: list[str], report: Mapping[str, object]) -> None:
+    input_artifacts = report.get("input_artifacts")
+    if not isinstance(input_artifacts, Mapping):
+        return
+    baseline = input_artifacts.get("baseline")
+    candidate = input_artifacts.get("candidate")
+    rows = (
+        ("Baseline", baseline if isinstance(baseline, Mapping) else {}),
+        ("Candidate", candidate if isinstance(candidate, Mapping) else {}),
+    )
+    lines.extend(
+        [
+            "## Inputs",
+            "",
+            "| Input | Summary JSON | Summary Markdown | Contact sheet |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
+    for label, row in rows:
+        lines.append(
+            "| "
+            f"{label} | "
+            f"{_artifact_path_cell(row, 'summary_json')} | "
+            f"{_artifact_path_cell(row, 'summary_markdown')} | "
+            f"{_artifact_path_cell(row, 'contact_sheet')} |"
+        )
+    lines.append("")
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
     lines = [
@@ -249,33 +341,38 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         f"Baseline: `{report.get('baseline_label', 'baseline')}`",
         f"Candidate: `{report.get('candidate_label', 'candidate')}`",
         "",
-        "## Summary",
-        "",
-        "| Metric | Improved | Worsened | Unchanged | Unknown |",
-        "| --- | ---: | ---: | ---: | ---: |",
-        (
-            "| Mean absolute channel delta | "
-            f"{summary.get('mean_improved', 0)} | "
-            f"{summary.get('mean_worsened', 0)} | "
-            f"{summary.get('mean_unchanged', 0)} | "
-            f"{summary.get('mean_unknown', 0)} |"
-        ),
-        (
-            "| RMS channel delta | "
-            f"{summary.get('rms_improved', 0)} | "
-            f"{summary.get('rms_worsened', 0)} | "
-            f"{summary.get('rms_unchanged', 0)} | "
-            f"{summary.get('rms_unknown', 0)} |"
-        ),
-        "",
-        "## Cameras",
-        "",
-        (
-            "| Camera | z | Mean baseline | Mean candidate | Mean delta | "
-            "RMS baseline | RMS candidate | RMS delta | Changed ratio delta | Status |"
-        ),
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
+    _append_input_artifacts_section(lines, report)
+    lines.extend(
+        [
+            "## Summary",
+            "",
+            "| Metric | Improved | Worsened | Unchanged | Unknown |",
+            "| --- | ---: | ---: | ---: | ---: |",
+            (
+                "| Mean absolute channel delta | "
+                f"{summary.get('mean_improved', 0)} | "
+                f"{summary.get('mean_worsened', 0)} | "
+                f"{summary.get('mean_unchanged', 0)} | "
+                f"{summary.get('mean_unknown', 0)} |"
+            ),
+            (
+                "| RMS channel delta | "
+                f"{summary.get('rms_improved', 0)} | "
+                f"{summary.get('rms_worsened', 0)} | "
+                f"{summary.get('rms_unchanged', 0)} | "
+                f"{summary.get('rms_unknown', 0)} |"
+            ),
+            "",
+            "## Cameras",
+            "",
+            (
+                "| Camera | z | Mean baseline | Mean candidate | Mean delta | "
+                "RMS baseline | RMS candidate | RMS delta | Changed ratio delta | Status |"
+            ),
+            "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
     cameras = report.get("cameras")
     rows = cameras if isinstance(cameras, list) else []
     for row in rows:
@@ -365,15 +462,18 @@ def main(argv: list[str] | None = None) -> int:
     baseline_summary = load_json_object(args.baseline_summary)
     candidate_summary = load_json_object(args.candidate_summary)
     now = dt.datetime.now(dt.timezone.utc)
+    paths = build_comparison_delta_paths(
+        build_run_directory(output_root=args.output_root, now=now)
+    )
     report = build_comparison_delta_report(
         baseline_summary,
         candidate_summary,
         baseline_label=args.baseline_label,
         candidate_label=args.candidate_label,
+        baseline_summary_path=args.baseline_summary,
+        candidate_summary_path=args.candidate_summary,
+        artifact_base_dir=paths.run_dir,
         now=now,
-    )
-    paths = build_comparison_delta_paths(
-        build_run_directory(output_root=args.output_root, now=now)
     )
     write_report(report, paths)
     print(f"Delta JSON: {paths.json_path}")

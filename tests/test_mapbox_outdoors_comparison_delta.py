@@ -150,6 +150,54 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
         self.assertIn("| `camera-a` | 18.00 | 0.050000000 | 0.040000000 | -0.010000000 |", markdown)
         self.assertIn("| RMS channel delta | 0 | 1 | 0 | 0 |", markdown)
 
+    def test_build_summary_markdown_links_input_artifacts_relative_to_report(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            baseline_dir = tmp_path / "baseline" / "all-cameras" / "20260520T180000Z"
+            candidate_dir = tmp_path / "candidate" / "all-cameras" / "20260520T181000Z"
+            output_dir = tmp_path / "delta" / "20260520T182000Z"
+            baseline_summary_path = baseline_dir / "summary.json"
+            candidate_summary_path = candidate_dir / "summary.json"
+            baseline = {
+                "contact_sheet": "contact-sheet.jpg",
+                "cameras": [_camera_row("camera-a", mean=0.05, rms=0.08)],
+            }
+            candidate = {
+                "contact_sheet": str(candidate_dir / "contact-sheet.jpg"),
+                "cameras": [_camera_row("camera-a", mean=0.04, rms=0.07)],
+            }
+
+            report = build_comparison_delta_report(
+                baseline,
+                candidate,
+                baseline_summary_path=baseline_summary_path,
+                candidate_summary_path=candidate_summary_path,
+                artifact_base_dir=output_dir,
+            )
+            markdown = build_summary_markdown(report)
+
+            self.assertEqual(
+                report["input_artifacts"]["baseline"]["summary_json"],
+                "../../baseline/all-cameras/20260520T180000Z/summary.json",
+            )
+            self.assertEqual(
+                report["input_artifacts"]["candidate"]["contact_sheet"],
+                "../../candidate/all-cameras/20260520T181000Z/contact-sheet.jpg",
+            )
+            self.assertIn("## Inputs", markdown)
+            self.assertIn(
+                "| Baseline | `../../baseline/all-cameras/20260520T180000Z/summary.json` | "
+                "`../../baseline/all-cameras/20260520T180000Z/summary.md` | "
+                "`../../baseline/all-cameras/20260520T180000Z/contact-sheet.jpg` |",
+                markdown,
+            )
+            self.assertIn(
+                "| Candidate | `../../candidate/all-cameras/20260520T181000Z/summary.json` | "
+                "`../../candidate/all-cameras/20260520T181000Z/summary.md` | "
+                "`../../candidate/all-cameras/20260520T181000Z/contact-sheet.jpg` |",
+                markdown,
+            )
+
     def test_write_report_outputs_json_and_markdown(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "run"
