@@ -5323,6 +5323,11 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         by_id = {layer["id"]: layer for layer in result["layers"]}
         low_width_mm = 1 * mapbox_config._MAPBOX_PIXEL_TO_MM
+        path_background_low_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(line_width, 14.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+            * mapbox_config._PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
+        )
         path_core_low_width_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(line_width, 14.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
@@ -5335,7 +5340,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(by_id["road-path-below-z16"]["paint"]["line-width"], path_core_low_width_mm)
         self.assertAlmostEqual(by_id["road-path"]["paint"]["line-width"], path_core_low_width_mm)
         self.assertAlmostEqual(by_id["road-path-z16-plus"]["paint"]["line-width"], high_width_mm)
-        self.assertAlmostEqual(by_id["road-path-bg-below-z16-outdoor"]["paint"]["line-width"], low_width_mm)
+        self.assertAlmostEqual(
+            by_id["road-path-bg-below-z16-outdoor"]["paint"]["line-width"],
+            path_background_low_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-path-bg-below-z16-outdoor"]["paint"]["line-width"],
+            path_background_low_width_mm,
+        )
         self.assertAlmostEqual(
             by_id["road-path-bg-z16-plus-outdoor"]["paint"]["line-width"],
             high_background_width_mm,
@@ -5515,6 +5527,93 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 mapbox_config._extract_zoom_scalar_size_at_zoom(trail_width, 15.0)
                 * mapbox_config._MAPBOX_PIXEL_TO_MM
             ),
+        )
+
+    def test_path_cycleway_piste_line_width_splits_high_zoom_widths(self):
+        cycleway_piste_width = ["interpolate", ["exponential", 1.5], ["zoom"], 15, 1, 18, 4]
+        style = {
+            "layers": [
+                {
+                    "id": "road-path-cycleway-piste",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": copy.deepcopy(cycleway_piste_width),
+                        "line-dasharray": [10, 0],
+                    },
+                },
+                {
+                    "id": "bridge-path-cycleway-piste",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": copy.deepcopy(cycleway_piste_width)},
+                },
+                {
+                    "id": "tunnel-path-cycleway-piste",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": copy.deepcopy(cycleway_piste_width)},
+                },
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(
+            [layer["id"] for layer in result["layers"]],
+            [
+                "road-path-cycleway-piste-below-z16",
+                "road-path-cycleway-piste-z16-plus",
+                "bridge-path-cycleway-piste-below-z16",
+                "bridge-path-cycleway-piste-z16-plus",
+                "tunnel-path-cycleway-piste-below-z16",
+                "tunnel-path-cycleway-piste-z16-plus",
+            ],
+        )
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(cycleway_piste_width, 15.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+            * mapbox_config._PATH_TRAIL_LINE_WIDTH_QGIS_SCALE
+        )
+        high_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(cycleway_piste_width, 18.0)
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+            * mapbox_config._PATH_TRAIL_LINE_WIDTH_QGIS_SCALE
+        )
+
+        self.assertAlmostEqual(
+            by_id["road-path-cycleway-piste-below-z16"]["paint"]["line-width"],
+            low_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["road-path-cycleway-piste-z16-plus"]["paint"]["line-width"],
+            high_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-path-cycleway-piste-below-z16"]["paint"]["line-width"],
+            low_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-path-cycleway-piste-z16-plus"]["paint"]["line-width"],
+            high_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["tunnel-path-cycleway-piste-below-z16"]["paint"]["line-width"],
+            low_width_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["tunnel-path-cycleway-piste-z16-plus"]["paint"]["line-width"],
+            high_width_mm,
+        )
+        self.assertEqual(by_id["road-path-cycleway-piste-below-z16"]["paint"]["line-dasharray"], [10, 0])
+        self.assertEqual(by_id["road-path-cycleway-piste-below-z16"]["maxzoom"], 16.0)
+        self.assertEqual(by_id["road-path-cycleway-piste-z16-plus"]["minzoom"], 16.0)
+        self.assertEqual(by_id["bridge-path-cycleway-piste-below-z16"]["minzoom"], 14)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-path-cycleway-piste-z16-plus"),
+            "road-path-cycleway-piste",
         )
 
     def test_pedestrian_line_width_splits_high_zoom_widths(self):

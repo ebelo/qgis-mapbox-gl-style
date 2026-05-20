@@ -649,7 +649,14 @@ _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
 )
 _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
 _PATH_LOW_ZOOM_LINE_WIDTH_LAYER_PREFIXES = ("road-path-below-z16",)
+_PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_LAYER_PREFIXES = (
+    "road-path-bg-below-z16",
+    "bridge-path-bg-below-z16",
+)
 _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 14.0
+# The z14 Chamonix comparison showed Outdoors path casings reading too faintly
+# in QGIS after px-to-mm conversion; keep this as a modest casing-only boost.
+_PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.25
 _PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.5
 _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "bridge-pedestrian",
@@ -667,15 +674,20 @@ _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("z16-plus", 16.0, None, 17.0),
 )
 _PATH_TRAIL_LINE_WIDTH_LAYER_IDS = {
+    "bridge-path-cycleway-piste",
     "bridge-path-trail",
+    "road-path-cycleway-piste",
     "road-path-trail",
+    "tunnel-path-cycleway-piste",
     "tunnel-path-trail",
 }
 _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z16", None, 16.0, 15.0),
     ("z16-plus", 16.0, None, 18.0),
 )
-_PATH_TRAIL_LINE_WIDTH_QGIS_SCALE = 1.35
+# Shared by trail and cycleway/piste overlays so outdoor route strokes remain
+# legible against contour/landcover-heavy Mapbox Outdoors scenes.
+_PATH_TRAIL_LINE_WIDTH_QGIS_SCALE = 1.6
 _ROAD_STEPS_LINE_STYLE_LAYER_IDS = {
     "road-steps",
     "road-steps-bg",
@@ -2596,10 +2608,24 @@ def _should_sample_path_low_zoom_line_width(layer_id: object, prop: str, maxzoom
     return normalized == "road-path" and layer_maxzoom is not None and layer_maxzoom <= _PATH_TYPE_FILTER_SPLIT_ZOOM
 
 
+def _should_sample_path_low_zoom_background_line_width(layer_id: object, prop: str) -> bool:
+    if prop != "line-width":
+        return False
+    normalized = str(layer_id or "")
+    return any(
+        normalized == prefix or normalized.startswith(f"{prefix}-")
+        for prefix in _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_LAYER_PREFIXES
+    )
+
+
 def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
     high_zoom_path_width = False
+    low_zoom_path_background_width = False
     if _should_sample_path_low_zoom_line_width(layer_id, prop, maxzoom):
         target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+    elif _should_sample_path_low_zoom_background_line_width(layer_id, prop):
+        target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+        low_zoom_path_background_width = True
     elif _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
         target_sample_zoom = _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
         high_zoom_path_width = True
@@ -2615,6 +2641,8 @@ def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: o
         and _path_background_line_color_base_layer_id(layer_id) is not None
     ):
         width *= _PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
+    if width is not None and low_zoom_path_background_width:
+        width *= _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
     return width
 
 
