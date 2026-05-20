@@ -317,6 +317,19 @@ def _count_by_property(features: Iterable[dict[str, object]], key: str) -> dict[
     return dict(sorted(counts.items()))
 
 
+def _count_non_empty_string_property(features: Iterable[dict[str, object]], key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for feature in features:
+        value = _feature_properties(feature).get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if not normalized:
+            continue
+        counts[normalized] = counts.get(normalized, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _duplicate_count_map(counts: object) -> dict[str, int]:
     if not isinstance(counts, dict):
         return {}
@@ -399,7 +412,10 @@ def road_tile_record(
     road_label_lines = [
         feature for feature in road_features if is_road_label_candidate(feature, tile_zoom=tile.get("z"))
     ]
-    road_label_name_counts = _count_by_property(road_label_lines, "name")
+    pedestrian_line_name_counts = _count_non_empty_string_property(pedestrian_lines, "name")
+    path_line_name_counts = _count_non_empty_string_property(path_lines, "name")
+    step_line_name_counts = _count_non_empty_string_property(step_lines, "name")
+    road_label_name_counts = _count_non_empty_string_property(road_label_lines, "name")
     return {
         **tile,
         "status": "decoded",
@@ -430,6 +446,8 @@ def road_tile_record(
         "pedestrian_line_structure_counts": _count_by_property(pedestrian_lines, "structure"),
         "pedestrian_line_layer_counts": _count_by_property(pedestrian_lines, "layer"),
         "pedestrian_line_surface_counts": _count_by_property(pedestrian_lines, "surface"),
+        "pedestrian_line_name_counts": pedestrian_line_name_counts,
+        "pedestrian_line_duplicate_name_counts": _duplicate_count_map(pedestrian_line_name_counts),
         "pedestrian_line_signature_counts": _count_property_signatures(
             pedestrian_lines,
             ROAD_FEATURE_SIGNATURE_KEYS,
@@ -438,10 +456,14 @@ def road_tile_record(
         "path_line_structure_counts": _count_by_property(path_lines, "structure"),
         "path_line_layer_counts": _count_by_property(path_lines, "layer"),
         "path_line_surface_counts": _count_by_property(path_lines, "surface"),
+        "path_line_name_counts": path_line_name_counts,
+        "path_line_duplicate_name_counts": _duplicate_count_map(path_line_name_counts),
         "path_line_signature_counts": _count_property_signatures(path_lines, ROAD_FEATURE_SIGNATURE_KEYS),
         "step_line_structure_counts": _count_by_property(step_lines, "structure"),
         "step_line_layer_counts": _count_by_property(step_lines, "layer"),
         "step_line_surface_counts": _count_by_property(step_lines, "surface"),
+        "step_line_name_counts": step_line_name_counts,
+        "step_line_duplicate_name_counts": _duplicate_count_map(step_line_name_counts),
         "step_line_signature_counts": _count_property_signatures(step_lines, ROAD_FEATURE_SIGNATURE_KEYS),
         "oneway_arrow_class_counts": _count_by_property(oneway_arrow_lines, "class"),
         "oneway_arrow_structure_counts": _count_by_property(oneway_arrow_lines, "structure"),
@@ -538,15 +560,18 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("Pedestrian line structure counts", "pedestrian_line_structure_counts"),
     ("Pedestrian line layer counts", "pedestrian_line_layer_counts"),
     ("Pedestrian line surface counts", "pedestrian_line_surface_counts"),
+    ("Pedestrian line duplicate names", "pedestrian_line_duplicate_name_counts"),
     ("Pedestrian line signatures", "pedestrian_line_signature_counts"),
     ("Path line type counts", "path_line_type_counts"),
     ("Path line structure counts", "path_line_structure_counts"),
     ("Path line layer counts", "path_line_layer_counts"),
     ("Path line surface counts", "path_line_surface_counts"),
+    ("Path line duplicate names", "path_line_duplicate_name_counts"),
     ("Path line signatures", "path_line_signature_counts"),
     ("Step line structure counts", "step_line_structure_counts"),
     ("Step line layer counts", "step_line_layer_counts"),
     ("Step line surface counts", "step_line_surface_counts"),
+    ("Step line duplicate names", "step_line_duplicate_name_counts"),
     ("Step line signatures", "step_line_signature_counts"),
     ("One-way arrow class counts", "oneway_arrow_class_counts"),
     ("One-way arrow structure counts", "oneway_arrow_structure_counts"),
@@ -589,15 +614,18 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Pedestrian line structures", "pedestrian_line_structure_counts", "---"),
     ("Pedestrian line layers", "pedestrian_line_layer_counts", "---"),
     ("Pedestrian line surfaces", "pedestrian_line_surface_counts", "---"),
+    ("Duplicate pedestrian line labels", "pedestrian_line_duplicate_name_counts", "---"),
     ("Pedestrian line signatures", "pedestrian_line_signature_counts", "---"),
     ("Path line types", "path_line_type_counts", "---"),
     ("Path line structures", "path_line_structure_counts", "---"),
     ("Path line layers", "path_line_layer_counts", "---"),
     ("Path line surfaces", "path_line_surface_counts", "---"),
+    ("Duplicate path line labels", "path_line_duplicate_name_counts", "---"),
     ("Path line signatures", "path_line_signature_counts", "---"),
     ("Step structures", "step_line_structure_counts", "---"),
     ("Step layers", "step_line_layer_counts", "---"),
     ("Step surfaces", "step_line_surface_counts", "---"),
+    ("Duplicate step line labels", "step_line_duplicate_name_counts", "---"),
     ("Step signatures", "step_line_signature_counts", "---"),
     ("One-way arrow classes", "oneway_arrow_class_counts", "---"),
     ("One-way arrow structures", "oneway_arrow_structure_counts", "---"),
@@ -631,6 +659,13 @@ _SAMPLE_FEATURE_SECTIONS = (
     ("Sample road label candidates", "sample_road_label_candidates"),
 )
 _SAMPLE_FEATURE_KEYS = tuple(key for _heading, key in _SAMPLE_FEATURE_SECTIONS)
+_NAME_COUNT_FIELD_PAIRS = (
+    ("pedestrian_line_name_counts", "pedestrian_line_duplicate_name_counts"),
+    ("path_line_name_counts", "path_line_duplicate_name_counts"),
+    ("step_line_name_counts", "step_line_duplicate_name_counts"),
+    ("road_label_name_counts", "road_label_duplicate_name_counts"),
+)
+_DUPLICATE_NAME_COUNT_FIELDS = frozenset(duplicate_key for _name_key, duplicate_key in _NAME_COUNT_FIELD_PAIRS)
 
 
 def _candidate_count_report_fields(records: Iterable[dict[str, object]]) -> dict[str, int]:
@@ -639,14 +674,22 @@ def _candidate_count_report_fields(records: Iterable[dict[str, object]]) -> dict
 
 def _count_map_report_fields(records: Iterable[dict[str, object]]) -> dict[str, object]:
     record_list = list(records)
-    road_label_name_counts = _combined_record_counts(record_list, "road_label_name_counts")
     fields = {
         key: _combined_record_counts(record_list, key)
         for _label, key in _SUMMARY_COUNT_MAP_FIELDS
-        if key != "road_label_duplicate_name_counts"
+        if key not in _DUPLICATE_NAME_COUNT_FIELDS
     }
-    fields["road_label_name_counts"] = road_label_name_counts
-    fields["road_label_duplicate_name_counts"] = _duplicate_count_map(road_label_name_counts)
+    fields.update(_combined_name_count_fields(record_list))
+    return fields
+
+
+def _combined_name_count_fields(records: Iterable[dict[str, object]]) -> dict[str, object]:
+    record_list = list(records)
+    fields: dict[str, object] = {}
+    for name_key, duplicate_key in _NAME_COUNT_FIELD_PAIRS:
+        name_counts = _combined_record_counts(record_list, name_key)
+        fields[name_key] = name_counts
+        fields[duplicate_key] = _duplicate_count_map(name_counts)
     return fields
 
 
@@ -767,7 +810,8 @@ def _all_camera_row(report: dict[str, object]) -> dict[str, object]:
     }
     for _label, key, _alignment in _ROAD_FEATURE_TABLE_FIELDS:
         row[key] = report.get(key)
-    row["road_label_name_counts"] = report.get("road_label_name_counts")
+    for name_key, _duplicate_key in _NAME_COUNT_FIELD_PAIRS:
+        row[name_key] = report.get(name_key)
     return row
 
 
@@ -869,7 +913,7 @@ def collect_all_camera_road_feature_report(
             continue
         camera_reports.append(_all_camera_row(report))
     status_counts = _all_camera_status_counts(camera_reports)
-    road_label_name_counts = _combined_record_counts(camera_reports, "road_label_name_counts")
+    name_count_fields = _combined_name_count_fields(camera_reports)
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
@@ -995,8 +1039,7 @@ def collect_all_camera_road_feature_report(
             "road_exit_shield_signature_counts",
         ),
         "road_label_class_counts": _combined_record_counts(camera_reports, "road_label_class_counts"),
-        "road_label_name_counts": road_label_name_counts,
-        "road_label_duplicate_name_counts": _duplicate_count_map(road_label_name_counts),
+        **name_count_fields,
         "road_label_signature_counts": _combined_record_counts(camera_reports, "road_label_signature_counts"),
         "cameras": camera_reports,
     }
@@ -1086,8 +1129,8 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 "",
                 "## Path/pedestrian focus",
                 "",
-                "| Camera | Camera zoom | Tile zoom | Pedestrian/path polygons | Pedestrian lines | Path lines | Steps | Pedestrian line types | Path line types | Step structures | Path signatures | Step signatures |",
-                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+                "| Camera | Camera zoom | Tile zoom | Pedestrian/path polygons | Pedestrian lines | Path lines | Steps | Pedestrian line types | Path line types | Step structures | Duplicate pedestrian labels | Duplicate path labels | Duplicate step labels | Path signatures | Step signatures |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for camera_report in focus_rows:
@@ -1104,6 +1147,9 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                         _top_count_labels(camera_report.get("pedestrian_line_type_counts")),
                         _top_count_labels(camera_report.get("path_line_type_counts")),
                         _top_count_labels(camera_report.get("step_line_structure_counts")),
+                        _top_count_labels(camera_report.get("pedestrian_line_duplicate_name_counts")),
+                        _top_count_labels(camera_report.get("path_line_duplicate_name_counts")),
+                        _top_count_labels(camera_report.get("step_line_duplicate_name_counts")),
                         _top_count_labels(camera_report.get("path_line_signature_counts")),
                         _top_count_labels(camera_report.get("step_line_signature_counts")),
                     ]

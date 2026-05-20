@@ -399,6 +399,36 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(record["sample_road_exit_shields"][0]["properties"]["ref"], "12")
         self.assertEqual(record["sample_road_label_candidates"][0]["properties"]["name"], "Bachstrasse")
 
+    def test_road_tile_record_counts_duplicate_non_empty_path_pedestrian_names(self):
+        road_features = [
+            _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "name": " Plaza "}),
+            _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "name": "Plaza"}),
+            _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "name": None}),
+            _feature("LineString", {"class": "path", "type": "footway", "structure": "none", "name": "Trail"}),
+            _feature("LineString", {"class": "path", "type": "footway", "structure": "none", "name": "Trail"}),
+            _feature("LineString", {"class": "path", "type": "footway", "structure": "none", "name": "   "}),
+            _feature("LineString", {"class": "path", "type": "steps", "structure": "none", "name": "Steps"}),
+            _feature("LineString", {"class": "path", "type": "steps", "structure": "none", "name": "Steps"}),
+            _feature("LineString", {"class": "street", "name": "Main Road"}),
+            _feature("LineString", {"class": "street", "name": "Main Road"}),
+        ]
+
+        record = road_tile_record(
+            tile={"z": 18, "x": 136712, "y": 93238},
+            tile_url_template="https://example.test/{z}/{x}/{y}.mvt",
+            tile_fetcher=lambda _url: gzip.compress(b"tile"),
+            tile_decoder=lambda _payload: {"road": {"features": road_features}},
+        )
+
+        self.assertEqual(record["pedestrian_line_name_counts"], {"Plaza": 2})
+        self.assertEqual(record["pedestrian_line_duplicate_name_counts"], {"Plaza": 2})
+        self.assertEqual(record["path_line_name_counts"], {"Trail": 2})
+        self.assertEqual(record["path_line_duplicate_name_counts"], {"Trail": 2})
+        self.assertEqual(record["step_line_name_counts"], {"Steps": 2})
+        self.assertEqual(record["step_line_duplicate_name_counts"], {"Steps": 2})
+        self.assertEqual(record["road_label_name_counts"], {"Main Road": 2})
+        self.assertEqual(record["road_label_duplicate_name_counts"], {"Main Road": 2})
+
     def test_road_tile_record_accepts_flat_layer_lists_and_summarizes_irregular_features(self):
         road_features = [
             {
@@ -489,15 +519,34 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                         ),
                         _feature(
                             "LineString",
-                            {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": 0, "surface": "paved"},
+                            {
+                                "class": "pedestrian",
+                                "type": "pedestrian",
+                                "structure": "none",
+                                "layer": 0,
+                                "surface": "paved",
+                                "name": "Promenade",
+                            },
                         ),
                         _feature(
                             "LineString",
-                            {"class": "path", "type": "footway", "structure": "none", "surface": "unpaved"},
+                            {
+                                "class": "path",
+                                "type": "footway",
+                                "structure": "none",
+                                "surface": "unpaved",
+                                "name": "Trail",
+                            },
                         ),
                         _feature(
                             "LineString",
-                            {"class": "path", "type": "steps", "structure": "bridge", "surface": "paved"},
+                            {
+                                "class": "path",
+                                "type": "steps",
+                                "structure": "bridge",
+                                "surface": "paved",
+                                "name": "Kirchsteig",
+                            },
                         ),
                         _feature(
                             "LineString",
@@ -544,6 +593,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         )
         self.assertEqual(report["pedestrian_line_structure_counts"], {"none": 1})
         self.assertEqual(report["pedestrian_line_layer_counts"], {"0": 1})
+        self.assertEqual(report["pedestrian_line_name_counts"], {"Promenade": 1})
+        self.assertEqual(report["pedestrian_line_duplicate_name_counts"], {})
         self.assertEqual(
             report["pedestrian_line_signature_counts"],
             {"class=pedestrian; type=pedestrian; surface=paved; structure=none; layer=0": 1},
@@ -552,6 +603,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["path_line_structure_counts"], {"none": 1})
         self.assertEqual(report["path_line_layer_counts"], {"(missing)": 1})
         self.assertEqual(report["path_line_surface_counts"], {"unpaved": 1})
+        self.assertEqual(report["path_line_name_counts"], {"Trail": 1})
+        self.assertEqual(report["path_line_duplicate_name_counts"], {})
         self.assertEqual(
             report["path_line_signature_counts"],
             {"class=path; type=footway; surface=unpaved; structure=none; layer=(missing)": 1},
@@ -559,6 +612,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["step_line_structure_counts"], {"bridge": 1})
         self.assertEqual(report["step_line_layer_counts"], {"(missing)": 1})
         self.assertEqual(report["step_line_surface_counts"], {"paved": 1})
+        self.assertEqual(report["step_line_name_counts"], {"Kirchsteig": 1})
+        self.assertEqual(report["step_line_duplicate_name_counts"], {})
         self.assertEqual(
             report["step_line_signature_counts"],
             {"class=path; type=steps; surface=paved; structure=bridge; layer=(missing)": 1},
@@ -664,15 +719,34 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     ),
                     _feature(
                         "LineString",
-                        {"class": "pedestrian", "type": "pedestrian", "structure": "none", "layer": 0, "surface": "paved"},
+                        {
+                            "class": "pedestrian",
+                            "type": "pedestrian",
+                            "structure": "none",
+                            "layer": 0,
+                            "surface": "paved",
+                            "name": "Promenade",
+                        },
                     ),
                     _feature(
                         "LineString",
-                        {"class": "path", "type": "footway", "structure": "none", "surface": "unpaved"},
+                        {
+                            "class": "path",
+                            "type": "footway",
+                            "structure": "none",
+                            "surface": "unpaved",
+                            "name": "Trail",
+                        },
                     ),
                     _feature(
                         "LineString",
-                        {"class": "path", "type": "steps", "structure": "tunnel", "surface": "paved"},
+                        {
+                            "class": "path",
+                            "type": "steps",
+                            "structure": "tunnel",
+                            "surface": "paved",
+                            "name": "Kirchsteig",
+                        },
                     ),
                     _feature(
                         "LineString",
@@ -722,6 +796,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["pedestrian_line_structure_counts"], {"none": 2})
         self.assertEqual(report["pedestrian_line_layer_counts"], {"0": 2})
         self.assertEqual(report["pedestrian_line_surface_counts"], {"paved": 2})
+        self.assertEqual(report["pedestrian_line_name_counts"], {"Promenade": 2})
+        self.assertEqual(report["pedestrian_line_duplicate_name_counts"], {"Promenade": 2})
         self.assertEqual(
             report["pedestrian_line_signature_counts"],
             {"class=pedestrian; type=pedestrian; surface=paved; structure=none; layer=0": 2},
@@ -730,6 +806,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["path_line_structure_counts"], {"none": 2})
         self.assertEqual(report["path_line_layer_counts"], {"(missing)": 2})
         self.assertEqual(report["path_line_surface_counts"], {"unpaved": 2})
+        self.assertEqual(report["path_line_name_counts"], {"Trail": 2})
+        self.assertEqual(report["path_line_duplicate_name_counts"], {"Trail": 2})
         self.assertEqual(
             report["path_line_signature_counts"],
             {"class=path; type=footway; surface=unpaved; structure=none; layer=(missing)": 2},
@@ -737,6 +815,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["step_line_structure_counts"], {"tunnel": 2})
         self.assertEqual(report["step_line_layer_counts"], {"(missing)": 2})
         self.assertEqual(report["step_line_surface_counts"], {"paved": 2})
+        self.assertEqual(report["step_line_name_counts"], {"Kirchsteig": 2})
+        self.assertEqual(report["step_line_duplicate_name_counts"], {"Kirchsteig": 2})
         self.assertEqual(
             report["step_line_signature_counts"],
             {"class=path; type=steps; surface=paved; structure=tunnel; layer=(missing)": 2},
@@ -825,15 +905,18 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "pedestrian_line_structure_counts": {"none": 1},
             "pedestrian_line_layer_counts": {"0": 1},
             "pedestrian_line_surface_counts": {"paved": 1},
+            "pedestrian_line_duplicate_name_counts": {"Promenade": 2},
             "pedestrian_line_signature_counts": {pedestrian_signature: 1},
             "path_line_type_counts": {"footway": 1},
             "path_line_structure_counts": {"none": 1},
             "path_line_layer_counts": {"(missing)": 1},
             "path_line_surface_counts": {"unpaved": 1},
+            "path_line_duplicate_name_counts": {"Trail": 2},
             "path_line_signature_counts": {path_signature: 1},
             "step_line_structure_counts": {"none": 1},
             "step_line_layer_counts": {"0": 1},
             "step_line_surface_counts": {"paved": 1},
+            "step_line_duplicate_name_counts": {"Kirchsteig": 2},
             "step_line_signature_counts": {step_signature: 1},
             "oneway_arrow_class_counts": {"street": 1},
             "oneway_arrow_structure_counts": {"none": 1},
@@ -944,14 +1027,17 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn('Pedestrian line structure counts: {"none":1}', markdown)
         self.assertIn('Pedestrian line layer counts: {"0":1}', markdown)
         self.assertIn('Pedestrian line surface counts: {"paved":1}', markdown)
+        self.assertIn('Pedestrian line duplicate names: {"Promenade":2}', markdown)
         self.assertIn(f'Pedestrian line signatures: {{"{pedestrian_signature}":1}}', markdown)
         self.assertIn('Path line structure counts: {"none":1}', markdown)
         self.assertIn('Path line layer counts: {"(missing)":1}', markdown)
         self.assertIn('Path line surface counts: {"unpaved":1}', markdown)
+        self.assertIn('Path line duplicate names: {"Trail":2}', markdown)
         self.assertIn(f'Path line signatures: {{"{path_signature}":1}}', markdown)
         self.assertIn('Step line structure counts: {"none":1}', markdown)
         self.assertIn('Step line layer counts: {"0":1}', markdown)
         self.assertIn('Step line surface counts: {"paved":1}', markdown)
+        self.assertIn('Step line duplicate names: {"Kirchsteig":2}', markdown)
         self.assertIn(f'Step line signatures: {{"{step_signature}":1}}', markdown)
         self.assertIn('One-way arrow class counts: {"street":1}', markdown)
         self.assertIn('One-way arrow structure counts: {"none":1}', markdown)
@@ -1020,15 +1106,18 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "pedestrian_line_structure_counts": {"none": 1},
             "pedestrian_line_layer_counts": {"0": 1},
             "pedestrian_line_surface_counts": {"paved": 1},
+            "pedestrian_line_duplicate_name_counts": {"Promenade": 2},
             "pedestrian_line_signature_counts": {pedestrian_signature: 1},
             "path_line_type_counts": {"footway": 1},
             "path_line_structure_counts": {"none": 1},
             "path_line_layer_counts": {"(missing)": 1},
             "path_line_surface_counts": {"unpaved": 1},
+            "path_line_duplicate_name_counts": {"Trail": 2},
             "path_line_signature_counts": {path_signature: 1},
             "step_line_structure_counts": {"bridge": 1},
             "step_line_layer_counts": {"(missing)": 1},
             "step_line_surface_counts": {"paved": 1},
+            "step_line_duplicate_name_counts": {"Kirchsteig": 2},
             "step_line_signature_counts": {step_signature: 1},
             "oneway_arrow_class_counts": {"street": 1},
             "oneway_arrow_structure_counts": {"none": 1},
@@ -1079,15 +1168,18 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "pedestrian_line_structure_counts": {"none": 1},
                     "pedestrian_line_layer_counts": {"0": 1},
                     "pedestrian_line_surface_counts": {"paved": 1},
+                    "pedestrian_line_duplicate_name_counts": {"Promenade": 2},
                     "pedestrian_line_signature_counts": {pedestrian_signature: 1},
                     "path_line_type_counts": {"footway": 1},
                     "path_line_structure_counts": {"none": 1},
                     "path_line_layer_counts": {"(missing)": 1},
                     "path_line_surface_counts": {"unpaved": 1},
+                    "path_line_duplicate_name_counts": {"Trail": 2},
                     "path_line_signature_counts": {path_signature: 1},
                     "step_line_structure_counts": {"bridge": 1},
                     "step_line_layer_counts": {"(missing)": 1},
                     "step_line_surface_counts": {"paved": 1},
+                    "step_line_duplicate_name_counts": {"Kirchsteig": 2},
                     "step_line_signature_counts": {step_signature: 1},
                     "oneway_arrow_class_counts": {"street": 1},
                     "oneway_arrow_structure_counts": {"none": 1},
@@ -1123,11 +1215,14 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         )
         self.assertIn(f'Path line signatures: {{"{path_signature}":1}}', markdown)
         self.assertIn(f'Road exit shield signatures: {{"{exit_shield_signature}":1}}', markdown)
+        self.assertIn('Pedestrian line duplicate names: {"Promenade":2}', markdown)
+        self.assertIn('Path line duplicate names: {"Trail":2}', markdown)
+        self.assertIn('Step line duplicate names: {"Kirchsteig":2}', markdown)
         self.assertIn('Road label duplicate names: {"Bachstrasse":2}', markdown)
         self.assertIn(f'Road label signatures: {{"{road_label_signature}":2}}', markdown)
         self.assertIn("## Path/pedestrian focus", markdown)
         self.assertIn(
-            '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 1 | 1 | ["pedestrian=1"] | ["footway=1"] | ["bridge=1"] |',
+            '| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 1 | 1 | ["pedestrian=1"] | ["footway=1"] | ["bridge=1"] | ["Promenade=2"] | ["Trail=2"] | ["Kirchsteig=2"] |',
             markdown,
         )
         self.assertIn(f'["{path_signature}=1"] | ["{step_signature}=1"] |', markdown)

@@ -381,6 +381,11 @@ def _camera_focus_row(
         "top_pedestrian_line_types": _top_count_labels(camera_report.get("pedestrian_line_type_counts")),
         "top_path_line_types": _top_count_labels(camera_report.get("path_line_type_counts")),
         "top_step_structures": _top_count_labels(camera_report.get("step_line_structure_counts")),
+        "top_pedestrian_line_duplicate_names": _top_count_labels(
+            camera_report.get("pedestrian_line_duplicate_name_counts")
+        ),
+        "top_path_line_duplicate_names": _top_count_labels(camera_report.get("path_line_duplicate_name_counts")),
+        "top_step_line_duplicate_names": _top_count_labels(camera_report.get("step_line_duplicate_name_counts")),
         "top_path_signatures": _top_count_labels(camera_report.get("path_line_signature_counts")),
         "top_step_signatures": _top_count_labels(camera_report.get("step_line_signature_counts")),
     }
@@ -616,8 +621,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         return "\n".join(lines) + "\n"
     lines.extend(
         [
-            "| Camera | Camera zoom | Tile zoom | Feature counts | Top pedestrian types | Top path types | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample visible QGIS strokes | Sample visible QGIS colors | Sample visible QGIS layer ids |",
-            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| Camera | Camera zoom | Tile zoom | Feature counts | Top pedestrian types | Top path types | Duplicate pedestrian labels | Duplicate path labels | Duplicate step labels | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample visible QGIS strokes | Sample visible QGIS colors | Sample visible QGIS layer ids |",
+            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for camera in rows:
@@ -645,6 +650,9 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     feature_counts,
                     camera.get("top_pedestrian_line_types"),
                     camera.get("top_path_line_types"),
+                    camera.get("top_pedestrian_line_duplicate_names"),
+                    camera.get("top_path_line_duplicate_names"),
+                    camera.get("top_step_line_duplicate_names"),
                     camera.get("top_path_signatures"),
                     camera.get("top_step_signatures"),
                     qgis_layers,

@@ -43,6 +43,9 @@ def _road_feature_report():
                 "pedestrian_line_type_counts": {"pedestrian": 115},
                 "path_line_type_counts": {"trail": 69, "footway": 56, "piste": 48, "path": 4},
                 "step_line_structure_counts": {"none": 16, "tunnel": 2, "bridge": 1},
+                "pedestrian_line_duplicate_name_counts": {"Englischer Viertel": 5},
+                "path_line_duplicate_name_counts": {"Hofmattweg": 3},
+                "step_line_duplicate_name_counts": {"Kirchsteig": 2},
                 "path_line_signature_counts": {path_signature: 55, "class=path; type=piste": 46},
                 "step_line_signature_counts": {step_signature: 3},
             },
@@ -360,6 +363,9 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(camera["step_line_count"], 19)
         self.assertEqual(camera["top_path_line_types"], ["trail=69", "footway=56", "piste=48"])
         self.assertEqual(camera["top_step_structures"], ["none=16", "tunnel=2", "bridge=1"])
+        self.assertEqual(camera["top_pedestrian_line_duplicate_names"], ["Englischer Viertel=5"])
+        self.assertEqual(camera["top_path_line_duplicate_names"], ["Hofmattweg=3"])
+        self.assertEqual(camera["top_step_line_duplicate_names"], ["Kirchsteig=2"])
         self.assertEqual(camera["qgis_path_pedestrian_layer_count"], 4)
         self.assertEqual(camera["qgis_path_pedestrian_visible_layer_count"], 3)
 
@@ -409,10 +415,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("Focused cameras: 1", markdown)
         self.assertIn("QGIS preprocessed style cameras: 1/1 matched", markdown)
         self.assertIn("Top pedestrian types", markdown)
+        self.assertIn("Duplicate pedestrian labels", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | 14.25 | 14 |", markdown)
         self.assertIn('"path_lines=236"', markdown)
         self.assertIn('"pedestrian=115"', markdown)
         self.assertIn('"trail=69"', markdown)
+        self.assertIn('"Englischer Viertel=5"', markdown)
+        self.assertIn('"Hofmattweg=3"', markdown)
+        self.assertIn('"Kirchsteig=2"', markdown)
         self.assertIn('"status=available"', markdown)
         self.assertIn('"total=4"', markdown)
         self.assertIn('"visible=3"', markdown)
