@@ -61,8 +61,17 @@ _WATERWAY_LABEL_REPEAT_DISTANCE_PX_BY_STYLE_MARKER = {
     "z15-to-z17": 325.0,
     "z17-plus": 600.0,
 }
+_CONTOUR_LABEL_LAYER_ID = "contour-label"
 _CONTOUR_LABEL_ELEVATION_FIELD_EXPRESSION = '"ele"'
 _CONTOUR_LABEL_EXPRESSION = "concat(\"ele\", ' m')"
+_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_STYLE_NAME = (
+    "contour-label-bbox-edge-difference-z17-plus"
+)
+_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_EXPRESSION = (
+    "line_merge(difference(boundary($geometry), boundary(bounds($geometry))))"
+)
+_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_FILTER = '("index" = 5 OR "index" = 10)'
+_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_MIN_ZOOM = 17
 
 
 def _label_style_mapbox_layer_id(style) -> str:
@@ -116,12 +125,26 @@ def _label_repeat_distance(layer_name: str, style) -> float | None:
 
 def _label_field_expression(layer_name: str, settings) -> str | None:
     if (
-        layer_name == "contour-label"
+        layer_name == _CONTOUR_LABEL_LAYER_ID
         and getattr(settings, "fieldName", "") == _CONTOUR_LABEL_ELEVATION_FIELD_EXPRESSION
         and getattr(settings, "isExpression", False)
     ):
         return _CONTOUR_LABEL_EXPRESSION
     return None
+
+
+def _is_contour_elevation_label(settings) -> bool:
+    field_name = getattr(settings, "fieldName", "")
+    return bool(
+        getattr(settings, "isExpression", False)
+        and field_name
+        in {_CONTOUR_LABEL_ELEVATION_FIELD_EXPRESSION, _CONTOUR_LABEL_EXPRESSION}
+    )
+
+
+def _settings_priority(settings) -> int:
+    priority = getattr(settings, "priority", 0)
+    return int(priority) if isinstance(priority, (int, float)) else 0
 
 
 def _needs_repeat_distance(settings) -> bool:
@@ -170,9 +193,63 @@ def _apply_label_settings(
     return changed
 
 
+def _append_high_zoom_contour_bbox_edge_label_style(
+    styles: list,
+    *,
+    qgs_pal_layer_settings,
+    qgs_vector_tile_labeling_style,
+    qgis,
+) -> bool:
+    if any(
+        _label_style_name(style) == _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_STYLE_NAME
+        for style in styles
+    ):
+        return False
+
+    source_settings = None
+    for style in styles:
+        if _label_style_mapbox_layer_id(style) != _CONTOUR_LABEL_LAYER_ID:
+            continue
+        source_settings = style.labelSettings()
+        break
+    if source_settings is None or not _is_contour_elevation_label(source_settings):
+        return False
+
+    try:
+        settings = qgs_pal_layer_settings(source_settings)
+    except (RuntimeError, TypeError):
+        return False
+    settings.fieldName = _CONTOUR_LABEL_EXPRESSION
+    settings.isExpression = True
+    settings.placement = getattr(
+        qgs_pal_layer_settings,
+        "Curved",
+        getattr(qgs_pal_layer_settings, "Line", None),
+    )
+    settings.priority = max(3, _settings_priority(source_settings))
+    settings.geometryGenerator = _CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_EXPRESSION
+    settings.geometryGeneratorEnabled = True
+    settings.geometryGeneratorType = qgis.GeometryType.Line
+
+    style = qgs_vector_tile_labeling_style()
+    style.setStyleName(_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_STYLE_NAME)
+    style.setLayerName("contour")
+    style.setGeometryType(qgis.GeometryType.Polygon)
+    style.setFilterExpression(_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_FILTER)
+    style.setMinZoomLevel(_CONTOUR_LABEL_BBOX_EDGE_DIFFERENCE_MIN_ZOOM)
+    style.setLabelSettings(settings)
+    styles.append(style)
+    return True
+
+
 def apply_mapbox_label_priority(labeling) -> None:
     try:
-        from qgis.core import QgsProperty, Qgis  # noqa: PLC0415
+        from qgis.core import (  # noqa: PLC0415
+            QgsPalLayerSettings,
+            QgsProperty,
+            QgsVectorTileBasicLabelingStyle,
+            Qgis,
+        )
 
         styles = list(labeling.styles())
         changed = False
@@ -180,7 +257,11 @@ def apply_mapbox_label_priority(labeling) -> None:
             layer_name = _label_style_mapbox_layer_id(style)
             priority = _label_priority(layer_name, style)
             repeat_distance = _label_repeat_distance(layer_name, style)
-            if priority is None and repeat_distance is None and layer_name != "contour-label":
+            if (
+                priority is None
+                and repeat_distance is None
+                and layer_name != _CONTOUR_LABEL_LAYER_ID
+            ):
                 continue
             settings = style.labelSettings()
             if settings is None:
@@ -199,6 +280,13 @@ def apply_mapbox_label_priority(labeling) -> None:
             ):
                 style.setLabelSettings(settings)
                 changed = True
+        if _append_high_zoom_contour_bbox_edge_label_style(
+            styles,
+            qgs_pal_layer_settings=QgsPalLayerSettings,
+            qgs_vector_tile_labeling_style=QgsVectorTileBasicLabelingStyle,
+            qgis=Qgis,
+        ):
+            changed = True
         if changed:
             labeling.setStyles(styles)
     except (RuntimeError, AttributeError):
