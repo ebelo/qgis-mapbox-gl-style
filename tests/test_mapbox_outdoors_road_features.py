@@ -60,6 +60,24 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
 
         self.assertEqual(labels, ["path=4", "footway=3", "trail=2"])
 
+    def test_road_number_shield_sprite_references_prefer_beta_then_shield(self):
+        counts = road_features._count_road_number_shield_sprite_references(
+            [
+                _feature("LineString", {"shield_beta": "it-motorway", "shield": "default", "reflen": 2}),
+                _feature("LineString", {"shield": "rectangle-red", "reflen": "4"}),
+                _feature("LineString", {"shield": "  ", "reflen": 3}),
+                _feature("LineString", {"shield": "rectangle-yellow"}),
+            ]
+        )
+
+        self.assertEqual(
+            counts,
+            {
+                "shield:rectangle-red-4": 1,
+                "shield_beta:it-motorway-2": 1,
+            },
+        )
+
     def test_resolve_mapbox_token_prefers_argument_then_environment(self):
         self.assertEqual(
             resolve_mapbox_token(
@@ -372,6 +390,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         )
         self.assertEqual(record["road_number_shield_class_counts"], {"primary": 1})
         self.assertEqual(record["road_number_shield_reflen_counts"], {"2": 1})
+        self.assertEqual(record["road_number_shield_sprite_reference_counts"], {"shield:ch-primary-2": 1})
         self.assertEqual(record["road_number_shield_structure_counts"], {"none": 1})
         self.assertEqual(record["road_number_shield_layer_counts"], {"0": 1})
         self.assertEqual(
@@ -628,6 +647,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["level_crossing_signature_counts"], {})
         self.assertEqual(report["road_number_shield_class_counts"], {})
         self.assertEqual(report["road_number_shield_reflen_counts"], {})
+        self.assertEqual(report["road_number_shield_sprite_reference_counts"], {})
         self.assertEqual(report["road_number_shield_structure_counts"], {})
         self.assertEqual(report["road_number_shield_layer_counts"], {})
         self.assertEqual(report["road_exit_shield_reflen_counts"], {})
@@ -831,6 +851,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(report["level_crossing_signature_counts"], {})
         self.assertEqual(report["road_number_shield_class_counts"], {})
         self.assertEqual(report["road_number_shield_reflen_counts"], {})
+        self.assertEqual(report["road_number_shield_sprite_reference_counts"], {})
         self.assertEqual(report["road_number_shield_structure_counts"], {})
         self.assertEqual(report["road_number_shield_layer_counts"], {})
         self.assertEqual(report["road_exit_shield_reflen_counts"], {})
@@ -928,6 +949,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "level_crossing_signature_counts": {level_crossing_signature: 1},
             "road_number_shield_class_counts": {"primary": 1},
             "road_number_shield_reflen_counts": {"2": 1},
+            "road_number_shield_sprite_reference_counts": {"shield:ch-primary-2": 1},
             "road_number_shield_structure_counts": {"none": 1},
             "road_number_shield_layer_counts": {"0": 1},
             "road_number_shield_signature_counts": {shield_signature: 1},
@@ -995,6 +1017,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "level_crossing_signature_counts": {level_crossing_signature: 1},
                     "road_number_shield_class_counts": {"primary": 1},
                     "road_number_shield_reflen_counts": {"2": 1},
+                    "road_number_shield_sprite_reference_counts": {"shield:ch-primary-2": 1},
                     "road_number_shield_structure_counts": {"none": 1},
                     "road_number_shield_layer_counts": {"0": 1},
                     "road_number_shield_signature_counts": {shield_signature: 1},
@@ -1049,6 +1072,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn(f'Level crossing signatures: {{"{level_crossing_signature}":1}}', markdown)
         self.assertIn('Road number shield class counts: {"primary":1}', markdown)
         self.assertIn('Road number shield reflen counts: {"2":1}', markdown)
+        self.assertIn('Road number shield sprite references: {"shield:ch-primary-2":1}', markdown)
         self.assertIn('Road number shield structure counts: {"none":1}', markdown)
         self.assertIn('Road number shield layer counts: {"0":1}', markdown)
         self.assertIn(f'Road number shield signatures: {{"{shield_signature}":1}}', markdown)
@@ -1129,6 +1153,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             "level_crossing_signature_counts": {level_crossing_signature: 1},
             "road_number_shield_class_counts": {"primary": 1},
             "road_number_shield_reflen_counts": {"2": 1},
+            "road_number_shield_sprite_reference_counts": {"shield:ch-primary-2": 1},
             "road_number_shield_structure_counts": {"none": 1},
             "road_number_shield_layer_counts": {"0": 1},
             "road_number_shield_signature_counts": {shield_signature: 1},
@@ -1191,6 +1216,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                     "level_crossing_signature_counts": {level_crossing_signature: 1},
                     "road_number_shield_class_counts": {"primary": 1},
                     "road_number_shield_reflen_counts": {"2": 1},
+                    "road_number_shield_sprite_reference_counts": {"shield:ch-primary-2": 1},
                     "road_number_shield_structure_counts": {"none": 1},
                     "road_number_shield_layer_counts": {"0": 1},
                     "road_number_shield_signature_counts": {shield_signature: 1},
@@ -1228,7 +1254,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn(f'["{path_signature}=1"] | ["{step_signature}=1"] |', markdown)
         self.assertIn("## Road label/shield focus", markdown)
         self.assertIn(
-            f'| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | ["{shield_signature}=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
+            f'| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | ["shield:ch-primary-2=1"] | ["{shield_signature}=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
             markdown,
         )
 
