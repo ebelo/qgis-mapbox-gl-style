@@ -479,6 +479,62 @@ def _qgis_stroke_samples(camera: Mapping[str, object]) -> list[str]:
     return samples
 
 
+def _detail_zoom_band(detail: Mapping[str, object]) -> str:
+    minzoom = detail.get("minzoom")
+    maxzoom = detail.get("maxzoom")
+    if minzoom is None and maxzoom is None:
+        return "all"
+    if minzoom is None:
+        return f"z<{maxzoom}"
+    if maxzoom is None:
+        return f"z>={minzoom}"
+    return f"{minzoom}<=z<{maxzoom}"
+
+
+def _detail_paint_controls(detail: Mapping[str, object]) -> list[str]:
+    return [
+        f"{key}={_compact_json(detail.get(key))}"
+        for key in PATH_PEDESTRIAN_DETAIL_PAINT_KEYS
+        if key in detail
+    ]
+
+
+def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    lines = ["", "## Visible QGIS layer details", ""]
+    detail_row_count = 0
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        details = camera.get("qgis_path_pedestrian_visible_layer_details")
+        detail_rows = details if isinstance(details, list) else []
+        mapping_rows = [detail for detail in detail_rows if isinstance(detail, Mapping)]
+        if not mapping_rows:
+            continue
+        detail_row_count += len(mapping_rows)
+        lines.extend(
+            [
+                f"### {camera.get('camera')}",
+                "",
+                "| Layer | Type | Zoom band | Paint controls | Filter |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for detail in mapping_rows:
+            lines.append(
+                _markdown_table_row(
+                    [
+                        detail.get("id"),
+                        detail.get("type"),
+                        _detail_zoom_band(detail),
+                        _detail_paint_controls(detail),
+                        detail.get("filter"),
+                    ]
+                )
+            )
+        lines.append("")
+    return lines if detail_row_count else []
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     cameras = report.get("cameras")
     rows = cameras if isinstance(cameras, list) else []
@@ -548,6 +604,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 ]
             )
         )
+    lines.extend(_visible_detail_markdown_lines(rows))
     return "\n".join(lines) + "\n"
 
 
