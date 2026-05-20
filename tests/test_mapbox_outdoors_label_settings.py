@@ -65,6 +65,18 @@ class FakeColor:
         return self._name
 
 
+class FakeSize:
+    def __init__(self, width, height):
+        self._width = width
+        self._height = height
+
+    def width(self):
+        return self._width
+
+    def height(self):
+        return self._height
+
+
 class FakeTextBuffer:
     def enabled(self):
         return True
@@ -82,6 +94,38 @@ class FakeTextBuffer:
         return 0.75
 
 
+class FakeTextBackground:
+    def enabled(self):
+        return True
+
+    def type(self):
+        return SimpleNamespace(name="ShapeRectangle")
+
+    def size(self):
+        return FakeSize(4.4979166667, 2.6458333333)
+
+    def sizeType(self):
+        return SimpleNamespace(name="SizeFixed")
+
+    def sizeUnit(self):
+        return SimpleNamespace(name="Millimeters")
+
+    def fillColor(self):
+        return FakeColor("#ffffff")
+
+    def strokeColor(self):
+        return FakeColor("#1d1f25")
+
+    def strokeWidth(self):
+        return 0.2
+
+    def strokeWidthUnit(self):
+        return SimpleNamespace(name="Millimeters")
+
+    def opacity(self):
+        return 1.0
+
+
 class FakeTextFormat:
     def size(self):
         return 2.5135416667
@@ -97,6 +141,9 @@ class FakeTextFormat:
 
     def buffer(self):
         return FakeTextBuffer()
+
+    def background(self):
+        return FakeTextBackground()
 
 
 class FakePlacementSettings:
@@ -358,6 +405,16 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(record["buffer_size_unit"], "Millimeters")
         self.assertEqual(record["buffer_color"], "#dcdcd4")
         self.assertEqual(record["buffer_opacity"], 0.75)
+        self.assertTrue(record["background_enabled"])
+        self.assertEqual(record["background_type"], "ShapeRectangle")
+        self.assertEqual(record["background_size"], {"width": 4.4979166667, "height": 2.6458333333})
+        self.assertEqual(record["background_size_type"], "SizeFixed")
+        self.assertEqual(record["background_size_unit"], "Millimeters")
+        self.assertEqual(record["background_fill_color"], "#ffffff")
+        self.assertEqual(record["background_stroke_color"], "#1d1f25")
+        self.assertEqual(record["background_stroke_width"], 0.2)
+        self.assertEqual(record["background_stroke_width_unit"], "Millimeters")
+        self.assertEqual(record["background_opacity"], 1.0)
         self.assertFalse(record["allow_degraded_placement"])
         self.assertEqual(record["overlap_handling"], "PreventOverlap")
         self.assertEqual(record["data_defined_property_keys"], [50, 87])
@@ -1090,7 +1147,19 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": True,
+                    "text_size": 2.38125,
+                    "text_size_unit": "Millimeters",
                     "text_color": "#1d1f25",
+                    "background_enabled": True,
+                    "background_type": "ShapeRectangle",
+                    "background_size": {"width": 4.4979166667, "height": 2.6458333333},
+                    "background_size_type": "SizeFixed",
+                    "background_size_unit": "Millimeters",
+                    "background_fill_color": "#ffffff",
+                    "background_stroke_color": "#1d1f25",
+                    "background_stroke_width": 0.2,
+                    "background_stroke_width_unit": "Millimeters",
+                    "background_opacity": 1.0,
                     "data_defined_property_keys": [50],
                     "data_defined_property_labels": ["ShapeSizeX (50)"],
                 },
@@ -1137,6 +1206,13 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertEqual(z11_plus["overlap_handling"], "PreventOverlap")
         self.assertFalse(z11_plus["label_per_part"])
         self.assertTrue(z11_plus["merge_lines"])
+        self.assertAlmostEqual(z11_plus["text_size"], 2.38125)
+        self.assertEqual(z11_plus["text_size_unit"], "Millimeters")
+        self.assertEqual(z11_plus["background_type"], "ShapeRectangle")
+        self.assertEqual(z11_plus["background_size"], {"width": 4.4979166667, "height": 2.6458333333})
+        self.assertEqual(z11_plus["background_fill_color"], "#ffffff")
+        self.assertEqual(z11_plus["background_stroke_color"], "#1d1f25")
+        self.assertEqual(z11_plus["background_stroke_width"], 0.2)
         self.assertEqual(z11_plus["data_defined_property_keys"], [50])
         self.assertEqual(z11_plus["data_defined_property_labels"], ["ShapeSizeX (50)"])
 
@@ -1788,7 +1864,19 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
                     "overlap_handling": "PreventOverlap",
                     "label_per_part": False,
                     "merge_lines": True,
+                    "text_size": 2.38125,
+                    "text_size_unit": "Millimeters",
                     "text_color": "#1d1f25",
+                    "background_enabled": True,
+                    "background_type": "ShapeRectangle",
+                    "background_size": {"width": 4.4979166667, "height": 2.6458333333},
+                    "background_size_type": "SizeFixed",
+                    "background_size_unit": "Millimeters",
+                    "background_fill_color": "#ffffff",
+                    "background_stroke_color": "#1d1f25",
+                    "background_stroke_width": 0.2,
+                    "background_stroke_width_unit": "Millimeters",
+                    "background_opacity": 1.0,
                     "data_defined_property_keys": [50],
                     "data_defined_property_labels": ["ShapeSizeX (50)"],
                 }
@@ -1964,7 +2052,7 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         )
         self.assertIn("## Road shield label placement detail", markdown)
         self.assertIn(
-            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | #1d1f25 | ShapeSizeX (50) |",
+            "| road-number-shield-2-remaining-icons-z11-plus | 6+ | 11+ | step, ['zoom'], point, 11, line | line | 466.667 | Line | Horizontal | 6 | 123.472 | no | yes | no | PreventOverlap | no | yes | 2.38125 Millimeters | #1d1f25 | yes ShapeRectangle | 4.49792 x 2.64583 SizeFixed Millimeters | #ffffff 1 | #1d1f25 0.2 Millimeters | ShapeSizeX (50) |",
             markdown,
         )
         self.assertIn("## Line label repeat spacing by base layer", markdown)

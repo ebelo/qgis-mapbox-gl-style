@@ -287,6 +287,42 @@ def _color_name(value: object) -> object:
     return name if isinstance(name, str) else None
 
 
+def _size_dimensions(value: object) -> dict[str, object] | None:
+    width = _method_value(value, "width")
+    height = _method_value(value, "height")
+    if width is None and height is None:
+        return None
+    return {"width": width, "height": height}
+
+
+def _label_background_record(text_format: object) -> dict[str, object]:
+    background = _method_value(text_format, "background") if text_format is not None else None
+    fill_color = _method_value(background, "fillColor") if background is not None else None
+    stroke_color = _method_value(background, "strokeColor") if background is not None else None
+    return {
+        "background_enabled": _method_value(background, "enabled") if background is not None else None,
+        "background_type": _enum_name(_method_value(background, "type")) if background is not None else None,
+        "background_size": (
+            _size_dimensions(_method_value(background, "size")) if background is not None else None
+        ),
+        "background_size_type": (
+            _enum_name(_method_value(background, "sizeType")) if background is not None else None
+        ),
+        "background_size_unit": (
+            _enum_name(_method_value(background, "sizeUnit")) if background is not None else None
+        ),
+        "background_fill_color": _color_name(fill_color),
+        "background_stroke_color": _color_name(stroke_color),
+        "background_stroke_width": (
+            _method_value(background, "strokeWidth") if background is not None else None
+        ),
+        "background_stroke_width_unit": (
+            _enum_name(_method_value(background, "strokeWidthUnit")) if background is not None else None
+        ),
+        "background_opacity": _method_value(background, "opacity") if background is not None else None,
+    }
+
+
 def _label_format_record(settings: object) -> dict[str, object]:
     text_format = _method_value(settings, "format")
     buffer = _method_value(text_format, "buffer") if text_format is not None else None
@@ -302,6 +338,7 @@ def _label_format_record(settings: object) -> dict[str, object]:
         "buffer_size_unit": _enum_name(_method_value(buffer, "sizeUnit")) if buffer is not None else None,
         "buffer_color": _color_name(buffer_color),
         "buffer_opacity": _method_value(buffer, "opacity") if buffer is not None else None,
+        **_label_background_record(text_format),
     }
 
 
@@ -1326,7 +1363,19 @@ def _road_shield_label_placement_rows(
                     "overlap_handling": label_row.get("overlap_handling"),
                     "label_per_part": label_row.get("label_per_part"),
                     "merge_lines": label_row.get("merge_lines"),
+                    "text_size": label_row.get("text_size"),
+                    "text_size_unit": label_row.get("text_size_unit"),
                     "text_color": label_row.get("text_color"),
+                    "background_enabled": label_row.get("background_enabled"),
+                    "background_type": label_row.get("background_type"),
+                    "background_size": label_row.get("background_size"),
+                    "background_size_type": label_row.get("background_size_type"),
+                    "background_size_unit": label_row.get("background_size_unit"),
+                    "background_fill_color": label_row.get("background_fill_color"),
+                    "background_stroke_color": label_row.get("background_stroke_color"),
+                    "background_stroke_width": label_row.get("background_stroke_width"),
+                    "background_stroke_width_unit": label_row.get("background_stroke_width_unit"),
+                    "background_opacity": label_row.get("background_opacity"),
                     "data_defined_property_keys": label_row.get("data_defined_property_keys"),
                     "data_defined_property_labels": label_row.get("data_defined_property_labels"),
                 }
@@ -1795,6 +1844,16 @@ def _compound_markdown_value(*values: object, separator: str = " ") -> str:
     return separator.join(rendered_values)
 
 
+def _size_markdown_value(size: object, *context: object) -> str:
+    if not isinstance(size, dict):
+        return _compound_markdown_value(size, *context)
+    width = size.get("width")
+    height = size.get("height")
+    if width is None and height is None:
+        return _compound_markdown_value(None, *context)
+    return _compound_markdown_value(f"{_markdown_value(width)} x {_markdown_value(height)}", *context)
+
+
 def _geometry_generator_markdown_value(row: dict[str, object]) -> str:
     if row.get("geometry_generator_enabled") is False:
         return "no"
@@ -1928,15 +1987,15 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 "",
                 "Focused `road-number-shield` rows for placement, repeat-distance, and collision-priority follow-up.",
                 "",
-                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Degraded placement | Overlap handling | Label/part | Merge lines | Text color | Data-defined keys |",
-                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "| Style | Source zoom | QGIS zoom | Source placement | QGIS style placement | QGIS symbol spacing | Geometry | Converted placement | Priority | Repeat distance | Display all | Obstacle | Degraded placement | Overlap handling | Label/part | Merge lines | Text size | Text color | Background | Background size | Background fill / opacity | Background stroke | Data-defined keys |",
+                "| --- | --- | --- | --- | --- | ---: | --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {label_per_part} | {merge_lines} | {text_color} | {keys} |".format(
+            "| {style} | {source_zoom} | {qfit_zoom} | {source_placement} | {qfit_placement} | {qfit_spacing} | {geometry} | {placement} | {priority} | {repeat} | {display_all} | {obstacle} | {allow_degraded} | {overlap} | {label_per_part} | {merge_lines} | {text_size} | {text_color} | {background} | {background_size} | {background_fill} | {background_stroke} | {keys} |".format(
                 style=_markdown_value(row.get("style_name")),
                 source_zoom=_markdown_value(row.get("source_zoom")),
                 qfit_zoom=_markdown_value(row.get("qfit_zoom")),
@@ -1953,7 +2012,23 @@ def _append_road_shield_label_placement_rows(lines: list[str], rows: list[object
                 overlap=_markdown_value(row.get("overlap_handling")),
                 label_per_part=_markdown_value(row.get("label_per_part")),
                 merge_lines=_markdown_value(row.get("merge_lines")),
+                text_size=_compound_markdown_value(row.get("text_size"), row.get("text_size_unit")),
                 text_color=_markdown_value(row.get("text_color")),
+                background=_compound_markdown_value(row.get("background_enabled"), row.get("background_type")),
+                background_size=_size_markdown_value(
+                    row.get("background_size"),
+                    row.get("background_size_type"),
+                    row.get("background_size_unit"),
+                ),
+                background_fill=_compound_markdown_value(
+                    row.get("background_fill_color"),
+                    row.get("background_opacity"),
+                ),
+                background_stroke=_compound_markdown_value(
+                    row.get("background_stroke_color"),
+                    row.get("background_stroke_width"),
+                    row.get("background_stroke_width_unit"),
+                ),
                 keys=_data_defined_property_markdown_value(row),
             )
         )
