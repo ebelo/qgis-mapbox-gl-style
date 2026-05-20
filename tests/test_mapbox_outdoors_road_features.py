@@ -373,6 +373,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
                 "LineString",
                 {
                     "class": "primary",
+                    "ref": "A1",
                     "reflen": "2",
                     "shield": "ch-primary",
                     "structure": "none",
@@ -462,6 +463,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         )
         self.assertEqual(record["road_number_shield_class_counts"], {"primary": 1})
         self.assertEqual(record["road_number_shield_reflen_counts"], {"2": 1})
+        self.assertEqual(record["road_number_shield_ref_counts"], {"A1": 1})
+        self.assertEqual(record["road_number_shield_duplicate_ref_counts"], {})
         self.assertEqual(record["road_number_shield_sprite_reference_counts"], {"shield:ch-primary-2": 1})
         self.assertEqual(record["road_number_shield_structure_counts"], {"none": 1})
         self.assertEqual(record["road_number_shield_layer_counts"], {"0": 1})
@@ -490,7 +493,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(record["sample_road_exit_shields"][0]["properties"]["ref"], "12")
         self.assertEqual(record["sample_road_label_candidates"][0]["properties"]["name"], "Bachstrasse")
 
-    def test_road_tile_record_counts_duplicate_non_empty_path_pedestrian_names(self):
+    def test_road_tile_record_counts_duplicate_non_empty_label_values(self):
         road_features = [
             _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "name": " Plaza "}),
             _feature("LineString", {"class": "pedestrian", "type": "pedestrian", "structure": "none", "name": "Plaza"}),
@@ -502,6 +505,9 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
             _feature("LineString", {"class": "path", "type": "steps", "structure": "none", "name": "Steps"}),
             _feature("LineString", {"class": "street", "name": "Main Road"}),
             _feature("LineString", {"class": "street", "name": "Main Road"}),
+            _feature("LineString", {"class": "primary", "ref": "D 1005", "reflen": 5, "shield": "rectangle-yellow", "len": 3000}),
+            _feature("LineString", {"class": "primary", "ref": " D 1005 ", "reflen": 5, "shield": "rectangle-yellow", "len": 3500}),
+            _feature("LineString", {"class": "primary", "ref": "   ", "reflen": 5, "shield": "rectangle-yellow", "len": 4000}),
         ]
 
         record = road_tile_record(
@@ -517,6 +523,8 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertEqual(record["path_line_duplicate_name_counts"], {"Trail": 2})
         self.assertEqual(record["step_line_name_counts"], {"Steps": 2})
         self.assertEqual(record["step_line_duplicate_name_counts"], {"Steps": 2})
+        self.assertEqual(record["road_number_shield_ref_counts"], {"D 1005": 2})
+        self.assertEqual(record["road_number_shield_duplicate_ref_counts"], {"D 1005": 2})
         self.assertEqual(record["road_label_name_counts"], {"Main Road": 2})
         self.assertEqual(record["road_label_duplicate_name_counts"], {"Main Road": 2})
 
@@ -1356,7 +1364,7 @@ class MapboxOutdoorsRoadFeatureTests(unittest.TestCase):
         self.assertIn(f'["{path_signature}=1"] | ["{step_signature}=1"] |', markdown)
         self.assertIn("## Road label/shield focus", markdown)
         self.assertIn(
-            f'| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | ["shield:ch-primary-2=1"] | ["{shield_signature}=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
+            f'| zermatt-trails-z18-outdoors | 18.0 | 18 | 1 | 1 | 2 | ["primary=1"] | ["2=1"] | [] | ["shield:ch-primary-2=1"] | ["{shield_signature}=1"] | ["2=1"] | ["street=2"] | ["Bachstrasse=2"] |',
             markdown,
         )
 

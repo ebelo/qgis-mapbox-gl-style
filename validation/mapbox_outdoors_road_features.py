@@ -480,6 +480,7 @@ def road_tile_record(
     pedestrian_line_name_counts = _count_non_empty_string_property(pedestrian_lines, "name")
     path_line_name_counts = _count_non_empty_string_property(path_lines, "name")
     step_line_name_counts = _count_non_empty_string_property(step_lines, "name")
+    road_number_shield_ref_counts = _count_non_empty_string_property(road_number_shields, "ref")
     road_label_name_counts = _count_non_empty_string_property(road_label_lines, "name")
     return {
         **tile,
@@ -546,6 +547,8 @@ def road_tile_record(
         ),
         "road_number_shield_class_counts": _count_by_property(road_number_shields, "class"),
         "road_number_shield_reflen_counts": _count_by_property(road_number_shields, "reflen"),
+        "road_number_shield_ref_counts": road_number_shield_ref_counts,
+        "road_number_shield_duplicate_ref_counts": _duplicate_count_map(road_number_shield_ref_counts),
         "road_number_shield_sprite_reference_counts": _count_road_number_shield_sprite_references(
             road_number_shields
         ),
@@ -651,6 +654,7 @@ _SUMMARY_COUNT_MAP_FIELDS = (
     ("Level crossing signatures", "level_crossing_signature_counts"),
     ("Road number shield class counts", "road_number_shield_class_counts"),
     ("Road number shield reflen counts", "road_number_shield_reflen_counts"),
+    ("Road number shield duplicate refs", "road_number_shield_duplicate_ref_counts"),
     ("Road number shield sprite references", "road_number_shield_sprite_reference_counts"),
     ("Road number shield structure counts", "road_number_shield_structure_counts"),
     ("Road number shield layer counts", "road_number_shield_layer_counts"),
@@ -706,6 +710,7 @@ _ROAD_FEATURE_TABLE_FIELDS = (
     ("Level crossing signatures", "level_crossing_signature_counts", "---"),
     ("Shield classes", "road_number_shield_class_counts", "---"),
     ("Shield reflens", "road_number_shield_reflen_counts", "---"),
+    ("Duplicate shield refs", "road_number_shield_duplicate_ref_counts", "---"),
     ("Shield sprite refs", "road_number_shield_sprite_reference_counts", "---"),
     ("Shield structures", "road_number_shield_structure_counts", "---"),
     ("Shield layers", "road_number_shield_layer_counts", "---"),
@@ -733,6 +738,7 @@ _NAME_COUNT_FIELD_PAIRS = (
     ("pedestrian_line_name_counts", "pedestrian_line_duplicate_name_counts"),
     ("path_line_name_counts", "path_line_duplicate_name_counts"),
     ("step_line_name_counts", "step_line_duplicate_name_counts"),
+    ("road_number_shield_ref_counts", "road_number_shield_duplicate_ref_counts"),
     ("road_label_name_counts", "road_label_duplicate_name_counts"),
 )
 _DUPLICATE_NAME_COUNT_FIELDS = frozenset(duplicate_key for _name_key, duplicate_key in _NAME_COUNT_FIELD_PAIRS)
@@ -1294,8 +1300,8 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                 "",
                 "## Road label/shield focus",
                 "",
-                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Shield sprite refs | Shield signatures | Exit shield reflens | Road label classes | Duplicate road labels |",
-                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
+                "| Camera | Camera zoom | Tile zoom | Road number shields | Road exit shields | Road labels | Shield classes | Shield reflens | Duplicate shield refs | Shield sprite refs | Shield signatures | Exit shield reflens | Road label classes | Duplicate road labels |",
+                "| --- | ---: | ---: | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
             ]
         )
         for camera_report in road_focus_rows:
@@ -1310,6 +1316,7 @@ def build_all_camera_summary_markdown(report: dict[str, object]) -> str:
                         camera_report.get("road_label_candidate_count"),
                         _top_count_labels(camera_report.get("road_number_shield_class_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_reflen_counts")),
+                        _top_count_labels(camera_report.get("road_number_shield_duplicate_ref_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_sprite_reference_counts")),
                         _top_count_labels(camera_report.get("road_number_shield_signature_counts")),
                         _top_count_labels(camera_report.get("road_exit_shield_reflen_counts")),
