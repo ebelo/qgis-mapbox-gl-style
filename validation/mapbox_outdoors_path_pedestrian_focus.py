@@ -30,6 +30,13 @@ PATH_PEDESTRIAN_LAYER_ID_MARKERS = (
     "road-steps",
 )
 PATH_PEDESTRIAN_STYLE_TYPES = {"fill", "line"}
+PATH_PEDESTRIAN_LABEL_STYLE_IDS = {
+    "path-pedestrian-label",
+    "road-label",
+    "road-label-below-z12",
+    "road-label-z12-to-z15",
+    "road-label-z15-plus",
+}
 PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
     "line-width",
     "line-color",
@@ -47,6 +54,7 @@ COMPARISON_VISUAL_METRIC_KEYS = (
     "normalized_rms_channel_delta",
     "ssim_status",
 )
+ARGPARSE_EXIT_SENTINEL = "argparse error should exit"
 
 
 @dataclass(frozen=True)
@@ -86,6 +94,14 @@ def load_json_object(path: Path) -> dict[str, object]:
     return loaded
 
 
+def load_json_list(path: Path) -> list[object]:
+    with path.open("r", encoding="utf-8") as handle:
+        loaded = json.load(handle)
+    if not isinstance(loaded, list):
+        raise ValueError(f"Expected JSON list in {path}")
+    return loaded
+
+
 def _resolve_trusted_debug_path(raw_path: str, *, base_dir: Path, trusted_root: Path) -> Path:
     path = Path(raw_path)
     candidate = path if path.is_absolute() else base_dir / path
@@ -104,9 +120,10 @@ def _trusted_root_for_comparison_summary(summary_path: Path) -> Path:
     return DEFAULT_COMPARISON_OUTPUT_ROOT
 
 
-def qgis_style_paths_from_comparison_summary(
+def _qgis_output_paths_from_comparison_summary(
     comparison_summary: Mapping[str, object],
     *,
+    output_key: str,
     summary_path: Path | None = None,
     trusted_root: Path | None = None,
 ) -> dict[str, Path]:
@@ -136,7 +153,7 @@ def qgis_style_paths_from_comparison_summary(
         outputs = manifest.get("outputs")
         if not isinstance(outputs, Mapping):
             continue
-        style_value = outputs.get("qgis_preprocessed_style")
+        style_value = outputs.get(output_key)
         if not isinstance(style_value, str):
             continue
         paths[camera_name] = _resolve_trusted_debug_path(
@@ -145,6 +162,34 @@ def qgis_style_paths_from_comparison_summary(
             trusted_root=root,
         )
     return paths
+
+
+def qgis_style_paths_from_comparison_summary(
+    comparison_summary: Mapping[str, object],
+    *,
+    summary_path: Path | None = None,
+    trusted_root: Path | None = None,
+) -> dict[str, Path]:
+    return _qgis_output_paths_from_comparison_summary(
+        comparison_summary,
+        output_key="qgis_preprocessed_style",
+        summary_path=summary_path,
+        trusted_root=trusted_root,
+    )
+
+
+def qgis_label_style_paths_from_comparison_summary(
+    comparison_summary: Mapping[str, object],
+    *,
+    summary_path: Path | None = None,
+    trusted_root: Path | None = None,
+) -> dict[str, Path]:
+    return _qgis_output_paths_from_comparison_summary(
+        comparison_summary,
+        output_key="qgis_label_styles",
+        summary_path=summary_path,
+        trusted_root=trusted_root,
+    )
 
 
 def _comparison_debug_root(summary_path: Path | None, trusted_root: Path | None) -> Path:
@@ -472,10 +517,120 @@ def _missing_qgis_style_summary() -> dict[str, object]:
     }
 
 
+def _label_style_rows(label_styles: Iterable[object]) -> list[dict[str, object]]:
+    return [style for style in label_styles if isinstance(style, dict)]
+
+
+def _is_path_pedestrian_label_style(label_style: Mapping[str, object]) -> bool:
+    style_name = label_style.get("style_name")
+    return isinstance(style_name, str) and style_name in PATH_PEDESTRIAN_LABEL_STYLE_IDS
+
+
+def _label_zoom_level(camera_zoom: float | None) -> int | None:
+    if camera_zoom is None:
+        return None
+    return int(camera_zoom)
+
+
+def _label_zoom_bound(value: object, *, max_bound: bool = False) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        if max_bound and value < 0:
+            return None
+        return float(value)
+    return None
+
+
+def _label_is_visible_at_zoom(label_style: Mapping[str, object], camera_zoom: float | None) -> bool:
+    zoom_level = _label_zoom_level(camera_zoom)
+    if zoom_level is None:
+        return True
+    minzoom = _label_zoom_bound(label_style.get("min_zoom_level"))
+    maxzoom = _label_zoom_bound(label_style.get("max_zoom_level"), max_bound=True)
+    if minzoom is not None and zoom_level < minzoom:
+        return False
+    return not (maxzoom is not None and zoom_level > maxzoom)
+
+
+def _label_settings(label_style: Mapping[str, object]) -> Mapping[str, object]:
+    settings = label_style.get("label_settings")
+    return settings if isinstance(settings, Mapping) else {}
+
+
+def _label_detail(label_style: Mapping[str, object]) -> dict[str, object]:
+    detail = {
+        "style_name": str(label_style.get("style_name") or ""),
+        "layer_name": label_style.get("layer_name"),
+        "geometry_type": label_style.get("geometry_type"),
+    }
+    for key in ("min_zoom_level", "max_zoom_level", "filter_expression"):
+        value = label_style.get(key)
+        if value not in (None, ""):
+            detail[key] = value
+    settings = _label_settings(label_style)
+    for key in (
+        "field_name",
+        "placement",
+        "priority",
+        "repeat_distance",
+        "repeat_distance_unit",
+        "label_per_part",
+        "merge_lines",
+        "text_size",
+        "text_color",
+        "buffer_enabled",
+        "buffer_size",
+        "buffer_color",
+    ):
+        if key in settings:
+            detail[key] = settings[key]
+    return detail
+
+
+def qgis_path_pedestrian_label_summary(
+    label_styles: Iterable[object],
+    *,
+    camera_zoom: float | None = None,
+) -> dict[str, object]:
+    label_rows = [
+        label_style
+        for label_style in _label_style_rows(label_styles)
+        if _is_path_pedestrian_label_style(label_style)
+    ]
+    visible_rows = [row for row in label_rows if _label_is_visible_at_zoom(row, camera_zoom)]
+    return {
+        "qgis_label_style_status": "available",
+        "qgis_path_pedestrian_label_style_count": len(label_rows),
+        "qgis_path_pedestrian_visible_label_style_count": len(visible_rows),
+        "qgis_path_pedestrian_label_style_names": [
+            str(row.get("style_name") or "") for row in label_rows
+        ],
+        "qgis_path_pedestrian_visible_label_style_names": [
+            str(row.get("style_name") or "") for row in visible_rows
+        ],
+        "qgis_path_pedestrian_label_details": [_label_detail(row) for row in label_rows],
+        "qgis_path_pedestrian_visible_label_details": [_label_detail(row) for row in visible_rows],
+    }
+
+
+def _missing_qgis_label_summary() -> dict[str, object]:
+    return {
+        "qgis_label_style_status": "missing",
+        "qgis_path_pedestrian_label_style_count": 0,
+        "qgis_path_pedestrian_visible_label_style_count": 0,
+        "qgis_path_pedestrian_label_style_names": [],
+        "qgis_path_pedestrian_visible_label_style_names": [],
+        "qgis_path_pedestrian_label_details": [],
+        "qgis_path_pedestrian_visible_label_details": [],
+    }
+
+
 def _camera_focus_row(
     camera_report: Mapping[str, object],
     *,
     qgis_style: Mapping[str, object] | None,
+    qgis_label_styles: Iterable[object] | None,
 ) -> dict[str, object]:
     row = {
         "camera": camera_report.get("camera"),
@@ -503,6 +658,11 @@ def _camera_focus_row(
         if qgis_style is not None
         else _missing_qgis_style_summary()
     )
+    row.update(
+        qgis_path_pedestrian_label_summary(qgis_label_styles, camera_zoom=camera_zoom)
+        if qgis_label_styles is not None
+        else _missing_qgis_label_summary()
+    )
     return row
 
 
@@ -526,11 +686,13 @@ def build_path_pedestrian_focus_report(
     road_feature_report: Mapping[str, object],
     *,
     qgis_styles_by_camera: Mapping[str, Mapping[str, object]] | None = None,
+    qgis_label_styles_by_camera: Mapping[str, Iterable[object]] | None = None,
     visual_artifacts_by_camera: Mapping[str, Mapping[str, object]] | None = None,
     generated_at: dt.datetime | None = None,
     input_artifacts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     qgis_styles = qgis_styles_by_camera or {}
+    qgis_label_styles = qgis_label_styles_by_camera or {}
     visual_artifacts = visual_artifacts_by_camera or {}
     camera_reports = road_feature_report.get("cameras")
     source_rows = camera_reports if isinstance(camera_reports, list) else []
@@ -544,12 +706,16 @@ def build_path_pedestrian_focus_report(
         row = _camera_focus_row(
             camera_report,
             qgis_style=qgis_styles.get(camera_name),
+            qgis_label_styles=qgis_label_styles.get(camera_name),
         )
         if camera_name in visual_artifacts:
             row["visual_artifacts"] = _json_safe_artifact_value(visual_artifacts[camera_name])
         rows.append(row)
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
     qgis_matched_camera_count = sum(1 for row in rows if row.get("qgis_style_status") == "available")
+    qgis_label_matched_camera_count = sum(
+        1 for row in rows if row.get("qgis_label_style_status") == "available"
+    )
     report = {
         "generated": generated.astimezone(dt.timezone.utc).isoformat(),
         "road_feature_generated": road_feature_report.get("generated"),
@@ -558,6 +724,8 @@ def build_path_pedestrian_focus_report(
         "camera_count": len(rows),
         "qgis_style_camera_count": qgis_matched_camera_count,
         "qgis_style_input_count": len(qgis_styles),
+        "qgis_label_style_camera_count": qgis_label_matched_camera_count,
+        "qgis_label_style_input_count": len(qgis_label_styles),
         "cameras": rows,
     }
     if input_artifacts is not None:
@@ -635,6 +803,9 @@ def _input_artifact_markdown_lines(report: Mapping[str, object]) -> list[str]:
     qgis_style_cameras = _string_list(input_artifacts.get("qgis_style_cameras"))
     if qgis_style_cameras:
         lines.append(f"QGIS style input cameras: `{', '.join(qgis_style_cameras)}`")
+    qgis_label_style_cameras = _string_list(input_artifacts.get("qgis_label_style_cameras"))
+    if qgis_label_style_cameras:
+        lines.append(f"QGIS label style input cameras: `{', '.join(qgis_label_style_cameras)}`")
     return lines
 
 
@@ -687,6 +858,74 @@ def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
                         _detail_zoom_band(detail),
                         _detail_paint_controls(detail),
                         detail.get("filter"),
+                    ]
+                )
+            )
+        lines.append("")
+    return lines if detail_row_count else []
+
+
+def _label_detail_zoom_band(detail: Mapping[str, object]) -> str:
+    minzoom = detail.get("min_zoom_level")
+    maxzoom = detail.get("max_zoom_level")
+    if isinstance(maxzoom, (int, float)) and not isinstance(maxzoom, bool) and maxzoom < 0:
+        maxzoom = None
+    if minzoom is None and maxzoom is None:
+        return "all"
+    if minzoom is None:
+        return f"z<={maxzoom}"
+    if maxzoom is None:
+        return f"z>={minzoom}"
+    return f"{minzoom}<=z<={maxzoom}"
+
+
+def _label_controls(detail: Mapping[str, object]) -> list[str]:
+    return [
+        f"{key}={_compact_json(detail.get(key))}"
+        for key in (
+            "field_name",
+            "placement",
+            "priority",
+            "repeat_distance",
+            "label_per_part",
+            "merge_lines",
+            "text_size",
+            "text_color",
+            "buffer_size",
+        )
+        if key in detail
+    ]
+
+
+def _visible_label_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    lines = ["", "## Visible QGIS label details", ""]
+    detail_row_count = 0
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        details = camera.get("qgis_path_pedestrian_visible_label_details")
+        detail_rows = details if isinstance(details, list) else []
+        mapping_rows = [detail for detail in detail_rows if isinstance(detail, Mapping)]
+        if not mapping_rows:
+            continue
+        detail_row_count += len(mapping_rows)
+        lines.extend(
+            [
+                f"### {camera.get('camera')}",
+                "",
+                "| Style | Layer | Zoom band | Controls | Filter |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for detail in mapping_rows:
+            lines.append(
+                _markdown_table_row(
+                    [
+                        detail.get("style_name"),
+                        detail.get("layer_name"),
+                        _label_detail_zoom_band(detail),
+                        _label_controls(detail),
+                        detail.get("filter_expression"),
                     ]
                 )
             )
@@ -749,6 +988,10 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "QGIS preprocessed style cameras: "
             f"{report.get('qgis_style_camera_count')}/{report.get('qgis_style_input_count', 0)} matched"
         ),
+        (
+            "QGIS label style cameras: "
+            f"{report.get('qgis_label_style_camera_count')}/{report.get('qgis_label_style_input_count', 0)} matched"
+        ),
         "",
     ]
     input_lines = _input_artifact_markdown_lines(report)
@@ -773,8 +1016,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         return "\n".join(lines) + "\n"
     lines.extend(
         [
-            "| Camera | Camera zoom | Tile zoom | Feature counts | Top pedestrian types | Top path types | Duplicate pedestrian labels | Duplicate path labels | Duplicate step labels | Top path signatures | Top step signatures | QGIS layers | QGIS controls | Sample visible QGIS strokes | Sample visible QGIS colors | Sample visible QGIS layer ids |",
-            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+            "| Camera | Camera zoom | Tile zoom | Feature counts | Top pedestrian types | Top path types | Duplicate pedestrian labels | Duplicate path labels | Duplicate step labels | Top path signatures | Top step signatures | QGIS layers | QGIS labels | QGIS controls | Sample visible QGIS strokes | Sample visible QGIS colors | Sample visible QGIS layer ids | Visible QGIS label styles |",
+            "| --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for camera in rows:
@@ -793,6 +1036,11 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             f"line={camera.get('qgis_path_pedestrian_line_layer_count', 0)}",
             f"fill={camera.get('qgis_path_pedestrian_fill_layer_count', 0)}",
         ]
+        qgis_labels = [
+            f"status={camera.get('qgis_label_style_status')}",
+            f"total={camera.get('qgis_path_pedestrian_label_style_count', 0)}",
+            f"visible={camera.get('qgis_path_pedestrian_visible_label_style_count', 0)}",
+        ]
         lines.append(
             _markdown_table_row(
                 [
@@ -808,15 +1056,18 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     camera.get("top_path_signatures"),
                     camera.get("top_step_signatures"),
                     qgis_layers,
+                    qgis_labels,
                     _qgis_control_summary(camera),
                     _qgis_stroke_samples(camera),
                     _qgis_color_samples(camera),
                     camera.get("qgis_path_pedestrian_visible_layer_ids"),
+                    camera.get("qgis_path_pedestrian_visible_label_style_names"),
                 ]
             )
         )
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
+    lines.extend(_visible_label_detail_markdown_lines(rows))
     return "\n".join(lines) + "\n"
 
 
@@ -873,6 +1124,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Camera-specific qgis-preprocessed-style.json. May be repeated.",
     )
     parser.add_argument(
+        "--qgis-label-styles-json",
+        action="append",
+        default=[],
+        type=_parse_qgis_style_json,
+        metavar="CAMERA=PATH",
+        help="Camera-specific qgis-label-styles.json. May be repeated.",
+    )
+    parser.add_argument(
         "--comparison-summary-json",
         action="append",
         default=[],
@@ -894,25 +1153,41 @@ def _load_cli_json_object(parser: argparse.ArgumentParser, path: Path, *, label:
         parser.error(f"{label} is not valid JSON: {path}: {error.msg}")
     except ValueError as error:
         parser.error(str(error))
-    raise AssertionError("argparse error should exit")
+    raise AssertionError(ARGPARSE_EXIT_SENTINEL)
+
+
+def _load_cli_json_list(parser: argparse.ArgumentParser, path: Path, *, label: str) -> list[object]:
+    try:
+        return load_json_list(path)
+    except FileNotFoundError:
+        parser.error(f"{label} not found: {path}")
+    except json.JSONDecodeError as error:
+        parser.error(f"{label} is not valid JSON: {path}: {error.msg}")
+    except ValueError as error:
+        parser.error(str(error))
+    raise AssertionError(ARGPARSE_EXIT_SENTINEL)
 
 
 def _comparison_inputs_from_cli_summary(
     parser: argparse.ArgumentParser,
     path: Path,
-) -> tuple[dict[str, Path], dict[str, dict[str, object]]]:
+) -> tuple[dict[str, Path], dict[str, Path], dict[str, dict[str, object]]]:
     comparison_summary = _load_cli_json_object(parser, path, label="Comparison summary JSON")
     try:
         qgis_style_paths = qgis_style_paths_from_comparison_summary(comparison_summary, summary_path=path)
+        qgis_label_style_paths = qgis_label_style_paths_from_comparison_summary(
+            comparison_summary,
+            summary_path=path,
+        )
         visual_artifacts = comparison_visual_artifacts_from_summary(comparison_summary, summary_path=path)
-        return qgis_style_paths, visual_artifacts
+        return qgis_style_paths, qgis_label_style_paths, visual_artifacts
     except FileNotFoundError as error:
         parser.error(f"Comparison manifest not found: {error.filename}")
     except json.JSONDecodeError as error:
         parser.error(f"Comparison manifest is not valid JSON: {error.msg}")
     except ValueError as error:
         parser.error(str(error))
-    raise AssertionError("argparse error should exit")
+    raise AssertionError(ARGPARSE_EXIT_SENTINEL)
 
 
 def _display_input_path(path: Path) -> str:
@@ -944,27 +1219,36 @@ def main(argv: list[str] | None = None) -> int:
         label="Road features JSON",
     )
     qgis_style_paths_by_camera: dict[str, Path] = {}
+    qgis_label_style_paths_by_camera: dict[str, Path] = {}
     visual_artifacts_by_camera: dict[str, dict[str, object]] = {}
     for comparison_summary_path in args.comparison_summary_json:
-        qgis_style_paths, visual_artifacts = _comparison_inputs_from_cli_summary(
+        qgis_style_paths, qgis_label_style_paths, visual_artifacts = _comparison_inputs_from_cli_summary(
             parser,
             comparison_summary_path,
         )
         qgis_style_paths_by_camera.update(qgis_style_paths)
+        qgis_label_style_paths_by_camera.update(qgis_label_style_paths)
         visual_artifacts_by_camera.update(visual_artifacts)
     qgis_style_paths_by_camera.update(dict(args.qgis_style_json))
+    qgis_label_style_paths_by_camera.update(dict(args.qgis_label_styles_json))
     qgis_styles_by_camera = {
         camera: _load_cli_json_object(parser, path, label=f"QGIS style JSON for {camera}")
         for camera, path in qgis_style_paths_by_camera.items()
     }
+    qgis_label_styles_by_camera = {
+        camera: _load_cli_json_list(parser, path, label=f"QGIS label styles JSON for {camera}")
+        for camera, path in qgis_label_style_paths_by_camera.items()
+    }
     report = build_path_pedestrian_focus_report(
         road_feature_report,
         qgis_styles_by_camera=qgis_styles_by_camera,
+        qgis_label_styles_by_camera=qgis_label_styles_by_camera,
         visual_artifacts_by_camera=_display_visual_artifacts_by_camera(visual_artifacts_by_camera),
         input_artifacts={
             "road_features_json": _display_input_path(args.road_features_json),
             "comparison_summary_jsons": [_display_input_path(path) for path in args.comparison_summary_json],
             "qgis_style_cameras": sorted(qgis_style_paths_by_camera),
+            "qgis_label_style_cameras": sorted(qgis_label_style_paths_by_camera),
         },
     )
     paths = build_path_pedestrian_focus_paths(build_run_directory())
