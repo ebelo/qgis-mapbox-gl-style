@@ -32,6 +32,8 @@ PATH_PEDESTRIAN_LAYER_ID_MARKERS = (
 PATH_PEDESTRIAN_STYLE_TYPES = {"fill", "line"}
 PATH_PEDESTRIAN_LABEL_STYLE_IDS = {
     "path-pedestrian-label",
+    "path-pedestrian-label-below-z15",
+    "path-pedestrian-label-z15-plus",
     "road-label",
     "road-label-below-z12",
     "road-label-z12-to-z15",

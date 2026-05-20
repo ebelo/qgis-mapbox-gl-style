@@ -547,9 +547,10 @@ _FULL_OPACITY = 1.0
 _FULL_OPACITY_EPSILON = 1e-9
 _FULL_OPACITY_PROPS = {"fill-opacity", "line-opacity"}
 _ROAD_LABEL_LAYER_ID = "road-label"
+_PATH_PEDESTRIAN_LABEL_LAYER_ID = "path-pedestrian-label"
 _ZOOM_NORMALIZED_SYMBOL_FILTER_LAYER_IDS = {
     "bridge-oneway-arrow-blue",
-    "path-pedestrian-label",
+    _PATH_PEDESTRIAN_LABEL_LAYER_ID,
     "road-label",
     "road-number-shield",
     "road-oneway-arrow-blue",
@@ -752,6 +753,48 @@ _ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS = {
 _ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING = 400.0
 _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR = "hsl(0, 0%, 38%)"
 _ROAD_LABEL_MID_ZOOM_TEXT_COLOR = _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR
+_PATH_PEDESTRIAN_LABEL_LOW_ZOOM_CLASS_FILTER = [
+    "match",
+    ["get", "class"],
+    ["pedestrian"],
+    True,
+    False,
+]
+_PATH_PEDESTRIAN_LABEL_HIGH_ZOOM_CLASS_FILTER = [
+    "match",
+    ["get", "class"],
+    ["path", "pedestrian"],
+    True,
+    False,
+]
+_PATH_PEDESTRIAN_LABEL_FILTER_SPLIT_ZOOM = 15.0
+_PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_STEP_ENTRIES: tuple[tuple[int, object], ...] = (
+    (0, "step"),
+    (1, ["zoom"]),
+    (2, _PATH_PEDESTRIAN_LABEL_LOW_ZOOM_CLASS_FILTER),
+    (4, _PATH_PEDESTRIAN_LABEL_HIGH_ZOOM_CLASS_FILTER),
+)
+_PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_BANDS: tuple[
+    tuple[str, float | None, float | None, object],
+    ...,
+] = (
+    (
+        "below-z15",
+        None,
+        _PATH_PEDESTRIAN_LABEL_FILTER_SPLIT_ZOOM,
+        _PATH_PEDESTRIAN_LABEL_LOW_ZOOM_CLASS_FILTER,
+    ),
+    (
+        "z15-plus",
+        _PATH_PEDESTRIAN_LABEL_FILTER_SPLIT_ZOOM,
+        None,
+        _PATH_PEDESTRIAN_LABEL_HIGH_ZOOM_CLASS_FILTER,
+    ),
+)
+_PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_VARIANT_IDS = {
+    f"{_PATH_PEDESTRIAN_LABEL_LAYER_ID}-{suffix}"
+    for suffix, _band_minzoom, _band_maxzoom, _class_filter in _PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_BANDS
+}
 _PATH_BACKGROUND_LINE_COLOR_EXPRESSION = [
     "match",
     ["get", "type"],
@@ -2136,6 +2179,104 @@ def _split_road_label_filter_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _path_pedestrian_label_zoom_step_filter_clause(value: object) -> list[object] | None:
+    if not isinstance(value, list) or len(value) != 5:
+        return None
+    if any(
+        value[index] != expected
+        for index, expected in _PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_STEP_ENTRIES
+    ):
+        return None
+    threshold = _numeric_zoom_bound(value[3])
+    if (
+        threshold is None
+        or abs(threshold - _PATH_PEDESTRIAN_LABEL_FILTER_SPLIT_ZOOM) > _ZOOM_BOUND_EPSILON
+    ):
+        return None
+    return value
+
+
+def _path_pedestrian_label_zoom_step_filter_clause_index(filter_value: list[object]) -> int | None:
+    for clause_index, clause in enumerate(filter_value[1:], start=1):
+        if _path_pedestrian_label_zoom_step_filter_clause(clause) is not None:
+            return clause_index
+    return None
+
+
+def _path_pedestrian_label_filter_layer_variant(
+    layer: dict[str, object],
+    filter_value: list[object],
+    clause_index: int,
+    suffix: str,
+    zoom_band: tuple[float | None, float | None],
+    class_filter: object,
+) -> dict[str, object]:
+    variant = copy.deepcopy(layer)
+    variant["id"] = f"{_PATH_PEDESTRIAN_LABEL_LAYER_ID}-{suffix}"
+    _set_zoom_bounds(variant, *zoom_band)
+    variant["filter"] = _filter_with_replaced_clause(
+        filter_value,
+        clause_index,
+        class_filter,
+    )
+    return variant
+
+
+def _path_pedestrian_label_filter_layer_variants(
+    layer: dict[str, object],
+) -> list[dict[str, object]] | None:
+    """Split the audited path-pedestrian label zoom filter into static QGIS zoom bands."""
+    if (
+        str(layer.get("id") or "") != _PATH_PEDESTRIAN_LABEL_LAYER_ID
+        or layer.get("type") != "symbol"
+    ):
+        return None
+    filter_value = layer.get("filter")
+    if not isinstance(filter_value, list) or filter_value[:1] != ["all"]:
+        return None
+
+    clause_index = _path_pedestrian_label_zoom_step_filter_clause_index(filter_value)
+    if clause_index is None:
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom, class_filter in _PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_BANDS:
+        zoom_band = _effective_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if zoom_band is None:
+            continue
+        variants.append(
+            _path_pedestrian_label_filter_layer_variant(
+                layer,
+                filter_value,
+                clause_index,
+                suffix,
+                zoom_band,
+                class_filter,
+            )
+        )
+    return variants or None
+
+
+def _split_path_pedestrian_label_filter_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _path_pedestrian_label_filter_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _path_background_line_color_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited path background casing colors into QGIS-safe type layers."""
     base_layer_id = _path_background_line_color_base_layer_id(layer.get("id"))
@@ -2466,6 +2607,14 @@ def _is_road_label_layer_id(layer_id: object) -> bool:
     return normalized == _ROAD_LABEL_LAYER_ID or normalized in _ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS
 
 
+def _is_path_pedestrian_label_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return (
+        normalized == _PATH_PEDESTRIAN_LABEL_LAYER_ID
+        or normalized in _PATH_PEDESTRIAN_LABEL_FILTER_ZOOM_VARIANT_IDS
+    )
+
+
 def _is_natural_point_label_layer_id(layer_id: object) -> bool:
     normalized = str(layer_id or "")
     return normalized == _NATURAL_POINT_LABEL_LAYER_ID or normalized.startswith(f"{_NATURAL_POINT_LABEL_LAYER_ID}-")
@@ -2672,6 +2821,7 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         (_is_road_number_shield_layer_id, _ROAD_NUMBER_SHIELD_LAYER_ID),
         (_is_road_exit_shield_layer_id, _ROAD_EXIT_SHIELD_LAYER_ID),
         (_is_road_label_layer_id, _ROAD_LABEL_LAYER_ID),
+        (_is_path_pedestrian_label_layer_id, _PATH_PEDESTRIAN_LABEL_LAYER_ID),
         (_is_poi_label_layer_id, _POI_LABEL_LAYER_ID),
         (_is_gate_label_layer_id, _GATE_LABEL_LAYER_ID),
         (_is_natural_point_label_layer_id, _NATURAL_POINT_LABEL_LAYER_ID),
@@ -6140,6 +6290,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     )
     style["layers"] = _split_path_type_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_label_filter_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_path_pedestrian_label_filter_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_background_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_path_trail_line_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_pedestrian_line_width_layers_for_qgis(style.get("layers"))

@@ -601,6 +601,46 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             ["pedestrian"],
         )
 
+    def test_qgis_style_summary_tracks_split_path_pedestrian_label_source_variants(self):
+        style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "path-pedestrian-label-below-z15",
+                    "type": "symbol",
+                    "minzoom": 12,
+                    "maxzoom": 15,
+                    "filter": ["==", ["get", "class"], "pedestrian"],
+                },
+                {
+                    "id": "path-pedestrian-label-z15-plus",
+                    "type": "symbol",
+                    "minzoom": 15,
+                    "filter": ["match", ["get", "class"], ["path", "pedestrian"], True, False],
+                },
+            ],
+        }
+
+        mid_zoom_summary = qgis_path_pedestrian_style_summary(style, camera_zoom=14.25)
+        high_zoom_summary = qgis_path_pedestrian_style_summary(style, camera_zoom=18.0)
+
+        mid_zoom_sources = {
+            detail["id"]: detail
+            for detail in mid_zoom_summary["qgis_path_pedestrian_visible_label_source_details"]
+        }
+        high_zoom_sources = {
+            detail["id"]: detail
+            for detail in high_zoom_summary["qgis_path_pedestrian_visible_label_source_details"]
+        }
+        self.assertEqual(
+            mid_zoom_sources["path-pedestrian-label-below-z15"]["duplicate_label_categories"],
+            ["pedestrian"],
+        )
+        self.assertEqual(
+            high_zoom_sources["path-pedestrian-label-z15-plus"]["duplicate_label_categories"],
+            ["pedestrian", "path", "step"],
+        )
+
     def test_qgis_style_summary_keeps_full_layer_id_lists(self):
         style = {
             "version": 8,

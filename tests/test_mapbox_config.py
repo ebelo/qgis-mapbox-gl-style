@@ -2346,6 +2346,84 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(lower_bound_layer["maxzoom"], 11)
         self.assertEqual(lower_bound_layer["filter"], ["all", ["has", "name"], low_zoom_filter])
 
+    def test_filter_simplification_splits_path_pedestrian_label_zoom_filter(self):
+        low_zoom_filter = [
+            "match",
+            ["get", "class"],
+            ["pedestrian"],
+            True,
+            False,
+        ]
+        high_zoom_filter = [
+            "match",
+            ["get", "class"],
+            ["path", "pedestrian"],
+            True,
+            False,
+        ]
+        non_negative_layer_filter = [
+            "any",
+            ["!", ["has", "layer"]],
+            [">=", ["get", "layer"], 0],
+        ]
+        style = {
+            "layers": [
+                {
+                    "id": "path-pedestrian-label",
+                    "type": "symbol",
+                    "minzoom": 12,
+                    "filter": [
+                        "all",
+                        [
+                            "case",
+                            ["has", "layer"],
+                            [">=", ["get", "layer"], 0],
+                            True,
+                        ],
+                        [
+                            "step",
+                            ["zoom"],
+                            copy.deepcopy(low_zoom_filter),
+                            15,
+                            copy.deepcopy(high_zoom_filter),
+                        ],
+                    ],
+                    "layout": {
+                        "symbol-placement": "line",
+                        "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
+                        "text-size": ["interpolate", ["linear"], ["zoom"], 12, 9, 18, 14],
+                    },
+                }
+            ]
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        self.assertEqual(
+            list(by_id),
+            ["path-pedestrian-label-below-z15", "path-pedestrian-label-z15-plus"],
+        )
+        self.assertEqual(by_id["path-pedestrian-label-below-z15"]["minzoom"], 12)
+        self.assertEqual(by_id["path-pedestrian-label-below-z15"]["maxzoom"], 15.0)
+        self.assertEqual(by_id["path-pedestrian-label-z15-plus"]["minzoom"], 15.0)
+        self.assertNotIn("maxzoom", by_id["path-pedestrian-label-z15-plus"])
+        self.assertEqual(
+            by_id["path-pedestrian-label-below-z15"]["filter"],
+            ["all", non_negative_layer_filter, low_zoom_filter],
+        )
+        self.assertEqual(
+            by_id["path-pedestrian-label-z15-plus"]["filter"],
+            ["all", non_negative_layer_filter, high_zoom_filter],
+        )
+        for layer in by_id.values():
+            self.assertEqual(layer["layout"]["text-field"], ["get", "name"])
+            self.assertEqual(layer["layout"]["text-size"], 9.0)
+            self.assertEqual(
+                mapbox_config.base_mapbox_style_layer_id_for_qfit(layer["id"]),
+                "path-pedestrian-label",
+            )
+
     def test_filter_simplification_snapshots_settlement_label_filters(self):
         major_filter = [
             "all",
