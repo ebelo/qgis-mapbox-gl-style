@@ -2275,6 +2275,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(by_id["road-label-below-z12"]["filter"], ["all", ["has", "name"], low_zoom_filter])
         self.assertEqual(by_id["road-label-z12-to-z15"]["filter"], ["all", ["has", "name"], mid_zoom_filter])
         self.assertEqual(by_id["road-label-z15-plus"]["filter"], ["all", ["has", "name"], high_zoom_filter])
+        self.assertEqual(
+            by_id["road-label-z15-plus"]["layout"]["symbol-spacing"],
+            mapbox_config._ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING,
+        )
+        self.assertEqual(
+            by_id["road-label-z15-plus"]["paint"]["text-color"],
+            mapbox_config._ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR,
+        )
         for layer in by_id.values():
             self.assertEqual(layer["layout"]["text-field"], ["get", "name"])
             self.assertEqual(layer["layout"]["text-size"], 10.0)

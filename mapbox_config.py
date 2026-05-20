@@ -732,14 +732,24 @@ _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER = [
     False,
     True,
 ]
+_ROAD_LABEL_FILTER_ZOOM_STEP_ENTRIES: tuple[tuple[int, object], ...] = (
+    (0, "step"),
+    (1, ["zoom"]),
+    (2, _ROAD_LABEL_LOW_ZOOM_CLASS_FILTER),
+    (4, _ROAD_LABEL_MID_ZOOM_CLASS_FILTER),
+    (6, _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER),
+)
+_ROAD_LABEL_HIGH_ZOOM_SUFFIX = "z15-plus"
 _ROAD_LABEL_FILTER_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, object], ...] = (
     ("below-z12", None, 12.0, _ROAD_LABEL_LOW_ZOOM_CLASS_FILTER),
     ("z12-to-z15", 12.0, 15.0, _ROAD_LABEL_MID_ZOOM_CLASS_FILTER),
-    ("z15-plus", 15.0, None, _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER),
+    (_ROAD_LABEL_HIGH_ZOOM_SUFFIX, 15.0, None, _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER),
 )
 _ROAD_LABEL_FILTER_ZOOM_VARIANT_IDS = {
     f"{_ROAD_LABEL_LAYER_ID}-{suffix}" for suffix, _band_minzoom, _band_maxzoom, _class_filter in _ROAD_LABEL_FILTER_ZOOM_BANDS
 }
+_ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING = 400.0
+_ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR = "hsl(0, 0%, 38%)"
 _PATH_BACKGROUND_LINE_COLOR_EXPRESSION = [
     "match",
     ["get", "type"],
@@ -1992,15 +2002,9 @@ def _split_path_type_filter_layers_for_qgis(layers: object) -> object:
 
 
 def _road_label_zoom_step_filter_clause(value: object) -> list[object] | None:
-    if (
-        not isinstance(value, list)
-        or len(value) != 7
-        or value[0] != "step"
-        or value[1] != ["zoom"]
-        or value[2] != _ROAD_LABEL_LOW_ZOOM_CLASS_FILTER
-        or value[4] != _ROAD_LABEL_MID_ZOOM_CLASS_FILTER
-        or value[6] != _ROAD_LABEL_HIGH_ZOOM_CLASS_FILTER
-    ):
+    if not isinstance(value, list) or len(value) != 7:
+        return None
+    if any(value[index] != expected for index, expected in _ROAD_LABEL_FILTER_ZOOM_STEP_ENTRIES):
         return None
     first_threshold = _numeric_zoom_bound(value[3])
     second_threshold = _numeric_zoom_bound(value[5])
@@ -2014,6 +2018,43 @@ def _road_label_zoom_step_filter_clause(value: object) -> list[object] | None:
     return value
 
 
+def _road_label_zoom_step_filter_clause_index(filter_value: list[object]) -> int | None:
+    for clause_index, clause in enumerate(filter_value[1:], start=1):
+        if _road_label_zoom_step_filter_clause(clause) is not None:
+            return clause_index
+    return None
+
+
+def _apply_high_zoom_road_label_style(variant: dict[str, object]) -> None:
+    variant_layout = variant.setdefault("layout", {})
+    if isinstance(variant_layout, dict):
+        variant_layout["symbol-spacing"] = _ROAD_LABEL_HIGH_ZOOM_SYMBOL_SPACING
+    variant_paint = variant.setdefault("paint", {})
+    if isinstance(variant_paint, dict):
+        variant_paint["text-color"] = _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR
+
+
+def _road_label_filter_layer_variant(
+    layer: dict[str, object],
+    filter_value: list[object],
+    clause_index: int,
+    suffix: str,
+    zoom_band: tuple[float | None, float | None],
+    class_filter: object,
+) -> dict[str, object]:
+    variant = copy.deepcopy(layer)
+    variant["id"] = f"{_ROAD_LABEL_LAYER_ID}-{suffix}"
+    _set_zoom_bounds(variant, *zoom_band)
+    variant["filter"] = _filter_with_replaced_clause(
+        filter_value,
+        clause_index,
+        class_filter,
+    )
+    if suffix == _ROAD_LABEL_HIGH_ZOOM_SUFFIX:
+        _apply_high_zoom_road_label_style(variant)
+    return variant
+
+
 def _road_label_filter_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split the audited road-label zoom filter into static QGIS zoom bands."""
     if str(layer.get("id") or "") != _ROAD_LABEL_LAYER_ID or layer.get("type") != "symbol":
@@ -2022,33 +2063,33 @@ def _road_label_filter_layer_variants(layer: dict[str, object]) -> list[dict[str
     if not isinstance(filter_value, list) or filter_value[:1] != ["all"]:
         return None
 
-    for clause_index, clause in enumerate(filter_value[1:], start=1):
-        if _road_label_zoom_step_filter_clause(clause) is None:
-            continue
+    clause_index = _road_label_zoom_step_filter_clause_index(filter_value)
+    if clause_index is None:
+        return None
 
-        existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
-        existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
-        variants: list[dict[str, object]] = []
-        for suffix, band_minzoom, band_maxzoom, class_filter in _ROAD_LABEL_FILTER_ZOOM_BANDS:
-            zoom_band = _effective_zoom_band(
-                existing_minzoom,
-                existing_maxzoom,
-                band_minzoom,
-                band_maxzoom,
-            )
-            if zoom_band is None:
-                continue
-            variant = copy.deepcopy(layer)
-            variant["id"] = f"{_ROAD_LABEL_LAYER_ID}-{suffix}"
-            _set_zoom_bounds(variant, *zoom_band)
-            variant["filter"] = _filter_with_replaced_clause(
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom, class_filter in _ROAD_LABEL_FILTER_ZOOM_BANDS:
+        zoom_band = _effective_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if zoom_band is None:
+            continue
+        variants.append(
+            _road_label_filter_layer_variant(
+                layer,
                 filter_value,
                 clause_index,
+                suffix,
+                zoom_band,
                 class_filter,
             )
-            variants.append(variant)
-        return variants or None
-    return None
+        )
+    return variants or None
 
 
 def _split_road_label_filter_layers_for_qgis(layers: object) -> object:
