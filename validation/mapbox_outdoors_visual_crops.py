@@ -787,6 +787,20 @@ def _style_audit_sample_candidates(
     return [candidates[index] for index in sorted(selected_indexes)]
 
 
+def _style_audit_filter_signature_rows(
+    candidates: list[Mapping[str, object]],
+) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        signature = candidate.get("filter_operator_signature")
+        if isinstance(signature, str) and signature:
+            counts[signature] = counts.get(signature, 0) + 1
+    return [
+        {"filter_operator_signature": signature, "count": count}
+        for signature, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def _style_audit_area_fill_focus(
     style_audit_report: Mapping[str, object] | None,
     *,
@@ -818,6 +832,7 @@ def _style_audit_area_fill_focus(
                 "qgis_dependent_by_property": list(
                     _style_audit_rows(summary, section["qgis_dependent_by_property"])
                 ),
+                "filter_signatures": _style_audit_filter_signature_rows(candidates),
                 "sample_candidates": [
                     _style_audit_candidate_sample(
                         candidate,
@@ -2160,8 +2175,11 @@ def _style_audit_area_fill_focus_lines(report: Mapping[str, object]) -> list[str
             "without reopening the full audit."
         ),
         "",
-        "| Area | Candidates | Source layers | Types | Simplified controls | QGIS-dependent controls | Sample layers |",
-        "| --- | ---: | --- | --- | --- | --- | --- |",
+        (
+            "| Area | Candidates | Source layers | Types | Simplified controls | "
+            "QGIS-dependent controls | Filter signatures | Sample layers |"
+        ),
+        "| --- | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         if not isinstance(row, Mapping):
@@ -2180,6 +2198,12 @@ def _style_audit_area_fill_focus_lines(report: Mapping[str, object]) -> list[str
                     ),
                     _joined_summary_labels(
                         _count_summary_labels(row.get("qgis_dependent_by_property"), "property")
+                    ),
+                    _joined_summary_labels(
+                        _count_summary_labels(
+                            row.get("filter_signatures"),
+                            "filter_operator_signature",
+                        )
                     ),
                     _joined_summary_labels(_candidate_sample_labels(row.get("sample_candidates"))),
                 ]

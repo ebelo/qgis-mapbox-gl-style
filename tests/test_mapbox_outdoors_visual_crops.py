@@ -789,6 +789,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             focus = report["style_audit_area_fill_focus"]
             self.assertEqual([row["key"] for row in focus], ["terrain_landcover", "airport_special_landuse"])
             self.assertEqual(focus[0]["candidate_count"], 2)
+            self.assertEqual(
+                focus[0]["filter_signatures"],
+                [{"filter_operator_signature": "all, get, match", "count": 1}],
+            )
             focus[0]["sample_candidates"].append({"source_layer": "landcover", "type": "fill"})
             markdown = build_summary_markdown(report)
             self.assertEqual(
@@ -825,6 +829,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("## Style audit area-fill focus", markdown)
             self.assertIn("Terrain/landcover", markdown)
             self.assertIn("landcover=1", markdown)
+            self.assertIn("all, get, match=1", markdown)
             self.assertIn("landuse-other-z10-plus-airport", markdown)
             self.assertIn(
                 "landcover (landcover/fill; controls=filter, paint.fill-color, "
@@ -881,7 +886,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(focus[1]["candidate_count"], 0)
             self.assertEqual(focus[1]["sample_candidates"], [])
             markdown = build_summary_markdown(report)
-            self.assertIn("| Airport/special landuse | 0 | - | - | - | - | - |", markdown)
+            self.assertIn("| Airport/special landuse | 0 | - | - | - | - | - | - |", markdown)
 
     def test_generate_visual_crop_report_samples_representative_area_fill_candidates(self):
         image_module, image_stat_module = _fake_image_modules()
