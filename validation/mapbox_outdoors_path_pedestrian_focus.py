@@ -1740,12 +1740,38 @@ def _input_artifact_markdown_lines(report: Mapping[str, object]) -> list[str]:
     comparison_summary_jsons = _string_list(input_artifacts.get("comparison_summary_jsons"))
     if comparison_summary_jsons:
         lines.append(f"Comparison summary inputs: `{', '.join(comparison_summary_jsons)}`")
+    comparison_summary_runs = _comparison_summary_run_markdown_lines(
+        input_artifacts.get("comparison_summary_runs")
+    )
+    if comparison_summary_runs:
+        lines.append("Comparison summary runs:")
+        lines.extend(comparison_summary_runs)
     qgis_style_cameras = _string_list(input_artifacts.get("qgis_style_cameras"))
     if qgis_style_cameras:
         lines.append(f"QGIS style input cameras: `{', '.join(qgis_style_cameras)}`")
     qgis_label_style_cameras = _string_list(input_artifacts.get("qgis_label_style_cameras"))
     if qgis_label_style_cameras:
         lines.append(f"QGIS label style input cameras: `{', '.join(qgis_label_style_cameras)}`")
+    return lines
+
+
+def _comparison_summary_run_markdown_lines(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    lines: list[str] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        path_value = item.get("path")
+        if not isinstance(path_value, str) or not path_value:
+            continue
+        details = [
+            f"{key}={detail_value}"
+            for key in ("generated_at", "style_url")
+            if isinstance((detail_value := item.get(key)), str) and detail_value
+        ]
+        suffix = f" ({', '.join(details)})" if details else ""
+        lines.append(f"- `{path_value}`{suffix}")
     return lines
 
 
@@ -2787,7 +2813,12 @@ def _load_cli_json_list(parser: argparse.ArgumentParser, path: Path, *, label: s
 def _comparison_inputs_from_cli_summary(
     parser: argparse.ArgumentParser,
     path: Path,
-) -> tuple[dict[str, Path], dict[str, Path], dict[str, dict[str, object]]]:
+) -> tuple[
+    dict[str, Path],
+    dict[str, Path],
+    dict[str, dict[str, object]],
+    dict[str, object],
+]:
     comparison_summary = _load_cli_json_object(parser, path, label="Comparison summary JSON")
     try:
         qgis_style_paths = qgis_style_paths_from_comparison_summary(comparison_summary, summary_path=path)
@@ -2796,7 +2827,12 @@ def _comparison_inputs_from_cli_summary(
             summary_path=path,
         )
         visual_artifacts = comparison_visual_artifacts_from_summary(comparison_summary, summary_path=path)
-        return qgis_style_paths, qgis_label_style_paths, visual_artifacts
+        return (
+            qgis_style_paths,
+            qgis_label_style_paths,
+            visual_artifacts,
+            _comparison_summary_metadata(comparison_summary),
+        )
     except FileNotFoundError as error:
         parser.error(f"Comparison manifest not found: {error.filename}")
     except json.JSONDecodeError as error:
@@ -2804,6 +2840,14 @@ def _comparison_inputs_from_cli_summary(
     except ValueError as error:
         parser.error(str(error))
     raise AssertionError(ARGPARSE_EXIT_SENTINEL)
+
+
+def _comparison_summary_metadata(comparison_summary: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key in ("generated_at", "style_url")
+        if isinstance((value := comparison_summary.get(key)), str) and value
+    }
 
 
 def _display_input_path(path: Path) -> str:
@@ -2842,14 +2886,23 @@ def main(argv: list[str] | None = None) -> int:
     qgis_style_paths_by_camera: dict[str, Path] = {}
     qgis_label_style_paths_by_camera: dict[str, Path] = {}
     visual_artifacts_by_camera: dict[str, dict[str, object]] = {}
+    comparison_summary_runs: list[dict[str, object]] = []
     for comparison_summary_path in args.comparison_summary_json:
-        qgis_style_paths, qgis_label_style_paths, visual_artifacts = _comparison_inputs_from_cli_summary(
-            parser,
-            comparison_summary_path,
+        qgis_style_paths, qgis_label_style_paths, visual_artifacts, summary_metadata = (
+            _comparison_inputs_from_cli_summary(
+                parser,
+                comparison_summary_path,
+            )
         )
         qgis_style_paths_by_camera.update(qgis_style_paths)
         qgis_label_style_paths_by_camera.update(qgis_label_style_paths)
         visual_artifacts_by_camera.update(visual_artifacts)
+        comparison_summary_runs.append(
+            {
+                "path": _display_input_path(comparison_summary_path),
+                **summary_metadata,
+            }
+        )
     qgis_style_paths_by_camera.update(dict(args.qgis_style_json))
     qgis_label_style_paths_by_camera.update(dict(args.qgis_label_styles_json))
     qgis_styles_by_camera = {
@@ -2873,7 +2926,10 @@ def main(argv: list[str] | None = None) -> int:
                 if args.source_style_json is not None
                 else None
             ),
-            "comparison_summary_jsons": [_display_input_path(path) for path in args.comparison_summary_json],
+            "comparison_summary_jsons": [
+                _display_input_path(path) for path in args.comparison_summary_json
+            ],
+            "comparison_summary_runs": comparison_summary_runs,
             "qgis_style_cameras": sorted(qgis_style_paths_by_camera),
             "qgis_label_style_cameras": sorted(qgis_label_style_paths_by_camera),
         },
