@@ -187,6 +187,7 @@ MARKDOWN_SEPARATOR_5_COLUMNS = "| --- | --- | --- | --- | --- |"
 MARKDOWN_SEPARATOR_6_COLUMNS = "| --- | --- | --- | --- | --- | --- |"
 MARKDOWN_SEPARATOR_7_COLUMNS = "| --- | --- | --- | --- | --- | --- | --- |"
 MARKDOWN_SEPARATOR_8_COLUMNS = "| --- | --- | --- | --- | --- | --- | --- | --- |"
+MARKDOWN_SEPARATOR_9_COLUMNS = "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
 UNSAMPLED_EXPRESSION_CONTROL = "expression-not-sampled"
 ARGPARSE_EXIT_SENTINEL = "argparse error should exit"
 
@@ -2000,6 +2001,16 @@ def _non_auxiliary_stroke_delta_row(
         "line_width_abs_delta_mm": abs(width_delta),
         "line_width_ratio": _numeric_control(deltas.get("line-width_ratio")),
     }
+    source_sampled_controls = comparison.get("source_sampled_controls")
+    if isinstance(source_sampled_controls, Mapping):
+        source_width = _numeric_control(source_sampled_controls.get("line-width"))
+        source_raw_width = _numeric_control(source_sampled_controls.get("line-width_raw_mm"))
+        if source_width is not None:
+            row["source_line_width_mm"] = source_width
+        if source_raw_width is not None:
+            row["source_line_width_raw_mm"] = source_raw_width
+        if source_sampled_controls.get("line-width_capped") is True:
+            row["source_line_width_capped"] = True
     if "decoded_candidate_count" in comparison:
         row["decoded_candidate_count"] = comparison.get("decoded_candidate_count")
     if "decoded_candidate_type_counts" in comparison:
@@ -2045,10 +2056,15 @@ def _stroke_delta_decoded_candidate_count(row: Mapping[str, object]) -> int:
     return _candidate_count_value(row.get("decoded_candidate_count"))
 
 
-def _stroke_delta_sort_key(row: Mapping[str, object]) -> tuple[int, float, str, str, str]:
+def _stroke_delta_source_width_capped(row: Mapping[str, object]) -> bool:
+    return row.get("source_line_width_capped") is True
+
+
+def _stroke_delta_sort_key(row: Mapping[str, object]) -> tuple[int, int, float, str, str, str]:
     decoded_candidate_count = _stroke_delta_decoded_candidate_count(row)
     return (
         0 if decoded_candidate_count > 0 else 1,
+        1 if _stroke_delta_source_width_capped(row) else 0,
         -float(row["line_width_abs_delta_mm"]),
         _stroke_delta_sort_text(row.get("camera")),
         _stroke_delta_sort_text(row.get("source_layer_id")),
@@ -2068,6 +2084,20 @@ def _largest_non_auxiliary_stroke_delta_rows(
     return rows[:limit]
 
 
+def _stroke_delta_source_cap_summaries(row: Mapping[str, object]) -> list[str]:
+    if not _stroke_delta_source_width_capped(row):
+        return []
+    summaries = ["source_width_capped=true"]
+    source_width = _numeric_control(row.get("source_line_width_mm"))
+    source_raw_width = _numeric_control(row.get("source_line_width_raw_mm"))
+    if source_width is not None:
+        summaries.append(f"source_width_mm={_compact_json(source_width)}")
+    if source_raw_width is not None:
+        summaries.append(f"source_raw_width_mm={_compact_json(source_raw_width)}")
+    summaries.append(f"cap_limit_mm={_compact_json(_MAX_LINE_WIDTH_MM)}")
+    return summaries
+
+
 def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]) -> list[str]:
     rows = _largest_non_auxiliary_stroke_delta_rows(cameras)
     if not rows:
@@ -2080,13 +2110,15 @@ def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]
                 "excluding qfit-only auxiliary helper strokes such as pale casing underlays."
             ),
             (
-                "Rows with decoded candidates sort ahead of zero-candidate rows; within each group, "
+                "Rows with decoded candidates sort ahead of zero-candidate rows; source-capped rows "
+                "sort after uncapped rows because the apparent width delta can reflect qfit's QGIS "
+                "line-width cap rather than a direct Mapbox/QGIS style mismatch. Within each group, "
                 "positive deltas mean QGIS is wider than the sampled source stroke and negative deltas "
                 "mean QGIS is narrower. Use this as a priority signal, not an automatic styling change."
             ),
             "",
-            "| Camera | Source layer | QGIS layer | Decoded candidates | Candidate types | Delta mm | Abs delta mm | Ratio |",
-            MARKDOWN_SEPARATOR_8_COLUMNS,
+            "| Camera | Source layer | QGIS layer | Decoded candidates | Candidate types | Source cap | Delta mm | Abs delta mm | Ratio |",
+            MARKDOWN_SEPARATOR_9_COLUMNS,
         ]
     )
     lines.extend(
@@ -2097,8 +2129,141 @@ def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]
                 row.get("qgis_layer_id"),
                 row.get("decoded_candidate_count"),
                 _top_count_labels(row.get("decoded_candidate_type_counts")),
+                _stroke_delta_source_cap_summaries(row),
                 row.get("line_width_delta_mm"),
                 row.get("line_width_abs_delta_mm"),
+                row.get("line_width_ratio"),
+            ]
+        )
+        for row in rows
+    )
+    return lines
+
+
+def _qgis_controls_by_layer_id(comparison: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    controls = comparison.get("qgis_controls")
+    control_rows = controls if isinstance(controls, list) else []
+    rows_by_layer_id: dict[str, Mapping[str, object]] = {}
+    for control_row in control_rows:
+        if not isinstance(control_row, Mapping):
+            continue
+        layer_id = str(control_row.get("layer_id") or "")
+        layer_controls = control_row.get("controls")
+        if layer_id and isinstance(layer_controls, Mapping):
+            rows_by_layer_id[layer_id] = layer_controls
+    return rows_by_layer_id
+
+
+def _non_auxiliary_dash_mismatch_row(
+    *,
+    camera: Mapping[str, object],
+    comparison: Mapping[str, object],
+    delta_row: object,
+    auxiliary_layer_ids: set[str],
+    qgis_controls_by_layer_id: Mapping[str, Mapping[str, object]],
+) -> dict[str, object] | None:
+    if not isinstance(delta_row, Mapping):
+        return None
+    layer_id = str(delta_row.get("layer_id") or "")
+    if (
+        not layer_id
+        or layer_id in auxiliary_layer_ids
+        or _is_auxiliary_qgis_stroke_layer_id(layer_id)
+    ):
+        return None
+    deltas = delta_row.get("deltas")
+    if not isinstance(deltas, Mapping) or deltas.get("line-dasharray_match") is not False:
+        return None
+    source_sampled_controls = comparison.get("source_sampled_controls")
+    qgis_controls = qgis_controls_by_layer_id.get(layer_id, {})
+    row = {
+        "camera": camera.get("camera"),
+        "source_layer_id": comparison.get("source_layer_id"),
+        "qgis_layer_id": layer_id,
+        "source_dasharray": source_sampled_controls.get("line-dasharray")
+        if isinstance(source_sampled_controls, Mapping)
+        else None,
+        "qgis_dasharray": qgis_controls.get("line-dasharray"),
+        "line_width_delta_mm": _numeric_control(deltas.get("line-width_delta_mm")),
+        "line_width_ratio": _numeric_control(deltas.get("line-width_ratio")),
+    }
+    if "decoded_candidate_count" in comparison:
+        row["decoded_candidate_count"] = comparison.get("decoded_candidate_count")
+    if "decoded_candidate_type_counts" in comparison:
+        row["decoded_candidate_type_counts"] = comparison.get("decoded_candidate_type_counts")
+    return row
+
+
+def _camera_non_auxiliary_dash_mismatch_rows(camera: object) -> list[dict[str, object]]:
+    if not isinstance(camera, Mapping):
+        return []
+    rows: list[dict[str, object]] = []
+    for comparison in _camera_source_qgis_stroke_comparisons(camera):
+        auxiliary_layer_ids = _comparison_auxiliary_layer_ids(comparison)
+        qgis_controls_by_layer_id = _qgis_controls_by_layer_id(comparison)
+        for delta_row in _comparison_delta_rows(comparison):
+            ranked_row = _non_auxiliary_dash_mismatch_row(
+                camera=camera,
+                comparison=comparison,
+                delta_row=delta_row,
+                auxiliary_layer_ids=auxiliary_layer_ids,
+                qgis_controls_by_layer_id=qgis_controls_by_layer_id,
+            )
+            if ranked_row is not None:
+                rows.append(ranked_row)
+    return rows
+
+
+def _dash_mismatch_sort_key(row: Mapping[str, object]) -> tuple[int, int, str, str, str]:
+    decoded_candidate_count = _stroke_delta_decoded_candidate_count(row)
+    return (
+        0 if decoded_candidate_count > 0 else 1,
+        -decoded_candidate_count,
+        _stroke_delta_sort_text(row.get("camera")),
+        _stroke_delta_sort_text(row.get("source_layer_id")),
+        _stroke_delta_sort_text(row.get("qgis_layer_id")),
+    )
+
+
+def _non_auxiliary_dash_mismatch_rows(cameras: Iterable[object]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for camera in cameras:
+        rows.extend(_camera_non_auxiliary_dash_mismatch_rows(camera))
+    rows.sort(key=_dash_mismatch_sort_key)
+    return rows
+
+
+def _non_auxiliary_dash_mismatch_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows = _non_auxiliary_dash_mismatch_rows(cameras)
+    if not rows:
+        return []
+    lines = ["", "## Non-auxiliary dash mismatches", ""]
+    lines.extend(
+        [
+            (
+                "Ranks visible source/QGIS stroke pairs where sampled line-dasharray controls differ, "
+                "excluding qfit-only auxiliary helper strokes."
+            ),
+            (
+                "Rows with decoded candidates sort ahead of zero-candidate rows, so dash work can be "
+                "prioritized only when it is backed by decoded path/pedestrian/step features."
+            ),
+            "",
+            "| Camera | Source layer | QGIS layer | Decoded candidates | Candidate types | Source dasharray | QGIS dasharray | Width delta mm | Ratio |",
+            MARKDOWN_SEPARATOR_9_COLUMNS,
+        ]
+    )
+    lines.extend(
+        _markdown_table_row(
+            [
+                row.get("camera"),
+                row.get("source_layer_id"),
+                row.get("qgis_layer_id"),
+                row.get("decoded_candidate_count"),
+                _top_count_labels(row.get("decoded_candidate_type_counts")),
+                row.get("source_dasharray"),
+                row.get("qgis_dasharray"),
+                row.get("line_width_delta_mm"),
                 row.get("line_width_ratio"),
             ]
         )
@@ -2473,6 +2638,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
     lines.extend(_source_qgis_stroke_control_markdown_lines(rows))
     lines.extend(_largest_non_auxiliary_stroke_delta_markdown_lines(rows))
+    lines.extend(_non_auxiliary_dash_mismatch_markdown_lines(rows))
     lines.extend(_qgis_auxiliary_stroke_markdown_lines(rows))
     lines.extend(_pedestrian_core_case_cap_markdown_lines(rows))
     lines.extend(_visible_source_detail_markdown_lines(rows))

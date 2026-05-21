@@ -1135,6 +1135,138 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             largest_delta_section.index("zero-candidate-source"),
         )
 
+    def test_summary_markdown_deprioritizes_source_capped_stroke_deltas(self):
+        report = {
+            "generated": "2026-05-20T01:35:00+00:00",
+            "cameras": [
+                {
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "source_qgis_stroke_control_comparisons": [
+                        {
+                            "source_layer_id": "capped-source",
+                            "source_sampled_controls": {
+                                "line-width": 3.0,
+                                "line-width_raw_mm": 3.2,
+                                "line-width_capped": True,
+                            },
+                            "decoded_candidate_count": 10,
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": "capped-qgis",
+                                    "deltas": {"line-width_delta_mm": 5.0},
+                                }
+                            ],
+                        },
+                        {
+                            "source_layer_id": "uncapped-source",
+                            "source_sampled_controls": {"line-width": 1.0},
+                            "decoded_candidate_count": 10,
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": "uncapped-qgis",
+                                    "deltas": {"line-width_delta_mm": 1.0},
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        markdown = build_summary_markdown(report)
+        largest_delta_section = markdown.split(
+            "## Largest non-auxiliary stroke width deltas",
+            1,
+        )[1].split("##", 1)[0]
+
+        self.assertLess(
+            largest_delta_section.index("uncapped-source"),
+            largest_delta_section.index("capped-source"),
+        )
+        self.assertIn("Source cap", largest_delta_section)
+        self.assertIn(
+            '["source_width_capped=true","source_width_mm=3.0","source_raw_width_mm=3.2","cap_limit_mm=3.0"]',
+            largest_delta_section,
+        )
+
+    def test_summary_markdown_ranks_non_auxiliary_dash_mismatches(self):
+        report = {
+            "generated": "2026-05-20T01:35:00+00:00",
+            "cameras": [
+                {
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "source_qgis_stroke_control_comparisons": [
+                        {
+                            "source_layer_id": "zero-candidate-source",
+                            "decoded_candidate_count": 0,
+                            "source_sampled_controls": {"line-dasharray": [4, 0.3]},
+                            "qgis_controls": [
+                                {
+                                    "layer_id": "zero-candidate-qgis",
+                                    "controls": {"line-dasharray": [1, 0]},
+                                }
+                            ],
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": "zero-candidate-qgis",
+                                    "deltas": {
+                                        "line-width_delta_mm": 10.0,
+                                        "line-width_ratio": 0.25,
+                                        "line-dasharray_match": False,
+                                    },
+                                }
+                            ],
+                        },
+                        {
+                            "source_layer_id": "candidate-backed-source",
+                            "decoded_candidate_count": 2,
+                            "decoded_candidate_type_counts": {"trail": 2},
+                            "source_sampled_controls": {"line-dasharray": [1, 0.3]},
+                            "qgis_controls": [
+                                {
+                                    "layer_id": "candidate-backed-qgis",
+                                    "controls": {"line-dasharray": [1, 1]},
+                                },
+                                {
+                                    "layer_id": "candidate-backed-helper",
+                                    "controls": {"line-dasharray": [1, 1]},
+                                },
+                            ],
+                            "qgis_auxiliary_layer_ids": ["candidate-backed-helper"],
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": "candidate-backed-qgis",
+                                    "deltas": {
+                                        "line-width_delta_mm": 1.0,
+                                        "line-width_ratio": 1.6,
+                                        "line-dasharray_match": False,
+                                    },
+                                },
+                                {
+                                    "layer_id": "candidate-backed-helper",
+                                    "deltas": {"line-dasharray_match": False},
+                                },
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        markdown = build_summary_markdown(report)
+        dash_section = markdown.split("## Non-auxiliary dash mismatches", 1)[1].split("##", 1)[0]
+
+        self.assertLess(
+            dash_section.index("candidate-backed-source"),
+            dash_section.index("zero-candidate-source"),
+        )
+        self.assertIn(
+            "| zermatt-trails-z18-outdoors | candidate-backed-source | candidate-backed-qgis | 2 |",
+            dash_section,
+        )
+        self.assertIn('["trail=2"] | [1,0.3] | [1,1] | 1.0 | 1.6 |', dash_section)
+        self.assertNotIn("candidate-backed-helper", dash_section)
+
     def test_build_path_pedestrian_focus_report_pairs_split_road_path_strokes_with_source_layer(self):
         road_report = _road_feature_report()
         road_report["cameras"][0]["camera_zoom"] = 18.0
@@ -1372,6 +1504,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             "| zermatt-trails-z18-outdoors | road-pedestrian | road-pedestrian-z18-plus | 1 |",
             largest_delta_section,
         )
+        self.assertIn("source_width_capped=true", largest_delta_section)
+        self.assertIn("source_raw_width_mm=3.175", largest_delta_section)
         self.assertNotIn("road-pedestrian-case-z18-plus-pale-casing", largest_delta_section)
         self.assertIn("## QGIS auxiliary stroke layers", markdown)
         self.assertIn("road-pedestrian-case-z18-plus-pale-casing", markdown)
