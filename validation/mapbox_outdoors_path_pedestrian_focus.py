@@ -72,6 +72,8 @@ PATH_PEDESTRIAN_STROKE_DELTA_KEYS = (
     "line-color_match",
     "line-opacity_delta",
 )
+PATH_PEDESTRIAN_TRAIL_TYPES = frozenset({"hiking", "mountain_bike", "trail"})
+PATH_PEDESTRIAN_CYCLEWAY_PISTE_TYPES = frozenset({"cycleway", "piste"})
 PATH_PEDESTRIAN_LARGEST_STROKE_DELTA_LIMIT = 12
 PATH_PEDESTRIAN_SOURCE_SPLIT_BASE_LAYER_IDS = frozenset(
     {
@@ -152,6 +154,7 @@ COMPARISON_VISUAL_METRIC_KEYS = (
 MARKDOWN_SEPARATOR_5_COLUMNS = "| --- | --- | --- | --- | --- |"
 MARKDOWN_SEPARATOR_6_COLUMNS = "| --- | --- | --- | --- | --- | --- |"
 MARKDOWN_SEPARATOR_7_COLUMNS = "| --- | --- | --- | --- | --- | --- | --- |"
+MARKDOWN_SEPARATOR_8_COLUMNS = "| --- | --- | --- | --- | --- | --- | --- | --- |"
 UNSAMPLED_EXPRESSION_CONTROL = "expression-not-sampled"
 ARGPARSE_EXIT_SENTINEL = "argparse error should exit"
 
@@ -1068,6 +1071,76 @@ def _stroke_controls(detail: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _candidate_count_value(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return int(value)
+
+
+def _candidate_count_map(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(key): count
+        for key, raw_count in value.items()
+        if (count := _candidate_count_value(raw_count)) > 0
+    }
+
+
+def _filtered_candidate_counts(value: object, allowed_types: frozenset[str]) -> dict[str, int]:
+    return {
+        path_type: count
+        for path_type, count in _candidate_count_map(value).items()
+        if path_type in allowed_types
+    }
+
+
+def _candidate_count_summary(
+    counts: Mapping[str, int],
+    *,
+    total_count: int | None = None,
+) -> dict[str, object]:
+    summary: dict[str, object] = {
+        "decoded_candidate_count": sum(counts.values()) if total_count is None else total_count
+    }
+    if counts:
+        summary["decoded_candidate_type_counts"] = dict(counts)
+    return summary
+
+
+def _source_layer_decoded_candidate_summary(
+    camera: Mapping[str, object],
+    source_layer_id: str,
+) -> dict[str, object]:
+    if source_layer_id in {"road-pedestrian", "road-pedestrian-case"}:
+        return _candidate_count_summary(
+            _candidate_count_map(camera.get("pedestrian_line_type_counts")),
+            total_count=_candidate_count_value(camera.get("pedestrian_line_count")),
+        )
+    if source_layer_id in {"road-steps", "road-steps-bg"}:
+        return {"decoded_candidate_count": _candidate_count_value(camera.get("step_line_count"))}
+    if source_layer_id == "road-path-trail":
+        return _candidate_count_summary(
+            _filtered_candidate_counts(
+                camera.get("path_line_type_counts"),
+                PATH_PEDESTRIAN_TRAIL_TYPES,
+            )
+        )
+    if source_layer_id == "road-path-cycleway-piste":
+        return _candidate_count_summary(
+            _filtered_candidate_counts(
+                camera.get("path_line_type_counts"),
+                PATH_PEDESTRIAN_CYCLEWAY_PISTE_TYPES,
+            )
+        )
+    if source_layer_id in {"road-path", "road-path-bg"}:
+        return _candidate_count_summary(
+            _candidate_count_map(camera.get("path_line_type_counts")),
+            total_count=_candidate_count_value(camera.get("path_line_count")),
+        )
+    return {}
+
+
 def _source_sampled_stroke_controls(
     detail: Mapping[str, object],
     camera_zoom: float | None,
@@ -1179,6 +1252,7 @@ def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> lis
             "source_layer_id": source_id,
             "source_controls": _stroke_controls(source_detail),
             "source_sampled_controls": source_sampled_controls,
+            **_source_layer_decoded_candidate_summary(camera, source_id),
             "qgis_layer_ids": [str(detail.get("id") or "") for detail in matched_details],
             "qgis_controls": [
                 {
@@ -1360,6 +1434,9 @@ def _camera_focus_row(
         "pedestrian_line_count": camera_report.get("pedestrian_line_candidate_count", 0),
         "path_line_count": camera_report.get("path_line_candidate_count", 0),
         "step_line_count": camera_report.get("step_line_candidate_count", 0),
+        "pedestrian_line_type_counts": _candidate_count_map(camera_report.get("pedestrian_line_type_counts")),
+        "path_line_type_counts": _candidate_count_map(camera_report.get("path_line_type_counts")),
+        "step_line_structure_counts": _candidate_count_map(camera_report.get("step_line_structure_counts")),
         "top_pedestrian_line_types": _top_count_labels(camera_report.get("pedestrian_line_type_counts")),
         "top_path_line_types": _top_count_labels(camera_report.get("path_line_type_counts")),
         "top_step_structures": _top_count_labels(camera_report.get("step_line_structure_counts")),
@@ -1670,6 +1747,16 @@ def _qgis_stroke_delta_summaries(comparison: Mapping[str, object]) -> list[str]:
     return summaries
 
 
+def _decoded_candidate_summaries(comparison: Mapping[str, object]) -> list[str]:
+    summaries = []
+    if "decoded_candidate_count" in comparison:
+        summaries.append(f"count={_compact_json(comparison.get('decoded_candidate_count'))}")
+    type_counts = comparison.get("decoded_candidate_type_counts")
+    if isinstance(type_counts, Mapping) and type_counts:
+        summaries.append(f"types={_compact_json(type_counts)}")
+    return summaries
+
+
 def _stroke_delta_summaries(deltas: object) -> list[str]:
     if not isinstance(deltas, Mapping):
         return []
@@ -1704,6 +1791,7 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
                 [
                     camera.get("camera"),
                     comparison.get("source_layer_id"),
+                    _decoded_candidate_summaries(comparison),
                     _stroke_control_summaries(comparison.get("source_controls")),
                     _stroke_control_summaries(comparison.get("source_sampled_controls")),
                     comparison.get("qgis_layer_ids"),
@@ -1732,10 +1820,15 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
                 "where both sides are directly comparable; line-width deltas are QGIS minus "
                 "source in millimetres."
             ),
+            (
+                "Decoded candidate counts estimate how many currently decoded road features "
+                "match each source stroke family, so visible control deltas without matching "
+                "features can be treated as lower-confidence styling signals."
+            ),
             "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
             "",
-            "| Camera | Source layer | Source controls | Source sampled controls | QGIS layer ids | QGIS controls | QGIS deltas |",
-            MARKDOWN_SEPARATOR_7_COLUMNS,
+            "| Camera | Source layer | Decoded candidates | Source controls | Source sampled controls | QGIS layer ids | QGIS controls | QGIS deltas |",
+            MARKDOWN_SEPARATOR_8_COLUMNS,
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)
@@ -1814,7 +1907,7 @@ def _non_auxiliary_stroke_delta_row(
     width_delta = _numeric_control(deltas.get("line-width_delta_mm"))
     if width_delta is None:
         return None
-    return {
+    row = {
         "camera": camera.get("camera"),
         "source_layer_id": comparison.get("source_layer_id"),
         "qgis_layer_id": layer_id,
@@ -1822,6 +1915,11 @@ def _non_auxiliary_stroke_delta_row(
         "line_width_abs_delta_mm": abs(width_delta),
         "line_width_ratio": _numeric_control(deltas.get("line-width_ratio")),
     }
+    if "decoded_candidate_count" in comparison:
+        row["decoded_candidate_count"] = comparison.get("decoded_candidate_count")
+    if "decoded_candidate_type_counts" in comparison:
+        row["decoded_candidate_type_counts"] = comparison.get("decoded_candidate_type_counts")
+    return row
 
 
 def _camera_source_qgis_stroke_comparisons(camera: object) -> list[Mapping[str, object]]:
@@ -1895,8 +1993,8 @@ def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]
                 "QGIS is narrower. Use this as a priority signal, not an automatic styling change."
             ),
             "",
-            "| Camera | Source layer | QGIS layer | Delta mm | Abs delta mm | Ratio |",
-            MARKDOWN_SEPARATOR_6_COLUMNS,
+            "| Camera | Source layer | QGIS layer | Decoded candidates | Candidate types | Delta mm | Abs delta mm | Ratio |",
+            MARKDOWN_SEPARATOR_8_COLUMNS,
         ]
     )
     lines.extend(
@@ -1905,6 +2003,8 @@ def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]
                 row.get("camera"),
                 row.get("source_layer_id"),
                 row.get("qgis_layer_id"),
+                row.get("decoded_candidate_count"),
+                _top_count_labels(row.get("decoded_candidate_type_counts")),
                 row.get("line_width_delta_mm"),
                 row.get("line_width_abs_delta_mm"),
                 row.get("line_width_ratio"),

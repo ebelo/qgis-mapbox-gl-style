@@ -823,6 +823,13 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [4, 0.3],
                     },
+                    "decoded_candidate_count": 236,
+                    "decoded_candidate_type_counts": {
+                        "trail": 69,
+                        "footway": 56,
+                        "piste": 48,
+                        "path": 4,
+                    },
                     "qgis_layer_ids": ["road-path"],
                     "qgis_controls": [
                         {
@@ -921,6 +928,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [1, 0.2],
                     },
+                    "decoded_candidate_count": 1,
                     "qgis_layer_ids": ["road-pedestrian-z18-plus"],
                     "qgis_controls": [
                         {
@@ -1146,6 +1154,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             comparisons["road-pedestrian-case"]["qgis_auxiliary_layer_ids"],
             ["road-pedestrian-case-z18-plus-pale-casing"],
         )
+        self.assertEqual(comparisons["road-pedestrian"]["decoded_candidate_count"], 1)
         self.assertEqual(
             camera["pedestrian_core_case_cap_relationships"],
             [
@@ -1183,6 +1192,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         )[1].split("## QGIS auxiliary stroke layers", 1)[0]
         self.assertIn("road-pedestrian-z18-plus", largest_delta_section)
         self.assertIn("road-pedestrian-case-z18-plus", largest_delta_section)
+        self.assertIn(
+            "| zermatt-trails-z18-outdoors | road-pedestrian | road-pedestrian-z18-plus | 1 |",
+            largest_delta_section,
+        )
         self.assertNotIn("road-pedestrian-case-z18-plus-pale-casing", largest_delta_section)
         self.assertIn("## QGIS auxiliary stroke layers", markdown)
         self.assertIn("road-pedestrian-case-z18-plus-pale-casing", markdown)
@@ -1437,7 +1450,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             markdown,
         )
         self.assertIn(
-            "| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] | [] | [] |",
+            "| unmatched-source-stroke | road-path | [] | [\"line-width=1.0\"] | [] | [] | [] | [] |",
             markdown,
         )
 
