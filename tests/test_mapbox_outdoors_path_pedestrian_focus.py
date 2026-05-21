@@ -799,8 +799,20 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             ["path-pedestrian-label: pedestrian"],
         )
         self.assertEqual(
+            camera["duplicate_label_diagnostic"]["visible_source_label_category_matches"],
+            ["path-pedestrian-label: pedestrian"],
+        )
+        self.assertEqual(
             camera["duplicate_label_diagnostic"]["unmatched_duplicate_name_categories"],
             ["path", "step"],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["source_excluded_duplicate_name_categories"],
+            ["path", "step"],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["qgis_unmatched_source_label_categories"],
+            [],
         )
         self.assertEqual(
             camera["source_qgis_stroke_control_comparisons"],
@@ -854,6 +866,45 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     ],
                 }
             ],
+        )
+
+    def test_duplicate_label_diagnostic_marks_qgis_missing_source_categories(self):
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "path-pedestrian-label",
+                    "type": "symbol",
+                    "minzoom": 12,
+                    "filter": ["match", ["get", "class"], ["pedestrian", "path"], True, False],
+                },
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            _road_feature_report(),
+            source_style=source_style,
+            qgis_styles_by_camera={"chamonix-trails-z14-outdoors": _qgis_preprocessed_style()},
+            qgis_label_styles_by_camera={"chamonix-trails-z14-outdoors": _qgis_label_styles()},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["visible_source_label_category_matches"],
+            ["path-pedestrian-label: pedestrian, path, step"],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["visible_label_source_category_matches"],
+            ["path-pedestrian-label: pedestrian"],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["source_excluded_duplicate_name_categories"],
+            [],
+        )
+        self.assertEqual(
+            camera["duplicate_label_diagnostic"]["qgis_unmatched_source_label_categories"],
+            ["path", "step"],
         )
 
     def test_build_path_pedestrian_focus_report_pairs_qgis_variant_strokes_with_source_ids(self):
@@ -1668,7 +1719,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             markdown,
         )
         self.assertIn("## Duplicate label diagnostics", markdown)
-        self.assertIn("Visible source-label category matches", markdown)
+        self.assertIn("Visible source-style label category matches", markdown)
+        self.assertIn("Visible QGIS label category matches", markdown)
+        self.assertIn("Source-excluded duplicate categories", markdown)
+        self.assertIn("QGIS-missing source categories", markdown)
         self.assertIn('"pedestrian: Englischer Viertel=5"', markdown)
         self.assertIn('"path: Hofmattweg=3"', markdown)
         self.assertIn('"road-label-z12-to-z15"', markdown)

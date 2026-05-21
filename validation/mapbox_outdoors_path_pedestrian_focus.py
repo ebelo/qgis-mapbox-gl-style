@@ -1028,8 +1028,11 @@ def _visible_label_repeat_distances(camera: Mapping[str, object]) -> list[str]:
     return repeat_distances
 
 
-def _visible_label_source_detail_rows(camera: Mapping[str, object]) -> list[Mapping[str, object]]:
-    details = camera.get("qgis_path_pedestrian_visible_label_source_details")
+def _visible_label_source_detail_rows(
+    camera: Mapping[str, object],
+    detail_key: str,
+) -> list[Mapping[str, object]]:
+    details = camera.get(detail_key)
     detail_rows = details if isinstance(details, list) else []
     return [detail for detail in detail_rows if isinstance(detail, Mapping)]
 
@@ -1037,11 +1040,13 @@ def _visible_label_source_detail_rows(camera: Mapping[str, object]) -> list[Mapp
 def _visible_label_source_category_matches(
     camera: Mapping[str, object],
     duplicate_categories: Iterable[str],
+    *,
+    detail_key: str,
 ) -> tuple[list[str], set[str]]:
     duplicate_category_set = set(duplicate_categories)
     matches: list[str] = []
     matched_categories: set[str] = set()
-    for detail in _visible_label_source_detail_rows(camera):
+    for detail in _visible_label_source_detail_rows(camera, detail_key):
         layer_id = str(detail.get("id") or "")
         categories = [
             category
@@ -1057,18 +1062,35 @@ def _visible_label_source_category_matches(
 def _duplicate_label_diagnostic(camera: Mapping[str, object]) -> dict[str, object]:
     duplicate_categories = _duplicate_label_categories(camera)
     category_names = [str(row.get("category") or "") for row in duplicate_categories]
-    label_source_matches, matched_categories = _visible_label_source_category_matches(
+    source_label_source_matches, source_matched_categories = _visible_label_source_category_matches(
         camera,
         category_names,
+        detail_key="source_path_pedestrian_visible_label_source_details",
+    )
+    qgis_label_source_matches, qgis_matched_categories = _visible_label_source_category_matches(
+        camera,
+        category_names,
+        detail_key="qgis_path_pedestrian_visible_label_source_details",
     )
     return {
         "has_duplicate_feature_names": bool(duplicate_categories),
         "duplicate_name_categories": duplicate_categories,
         "visible_merge_line_label_styles": _visible_merge_line_label_styles(camera),
         "visible_label_repeat_distances": _visible_label_repeat_distances(camera),
-        "visible_label_source_category_matches": label_source_matches,
+        "visible_label_source_category_matches": qgis_label_source_matches,
+        "visible_source_label_category_matches": source_label_source_matches,
         "unmatched_duplicate_name_categories": [
-            category for category in category_names if category and category not in matched_categories
+            category for category in category_names if category and category not in qgis_matched_categories
+        ],
+        "source_excluded_duplicate_name_categories": [
+            category
+            for category in category_names
+            if category and category not in source_matched_categories
+        ],
+        "qgis_unmatched_source_label_categories": [
+            category
+            for category in category_names
+            if category and category in source_matched_categories and category not in qgis_matched_categories
         ],
     }
 
@@ -2506,16 +2528,28 @@ def _duplicate_label_diagnostic_markdown_lines(cameras: Iterable[object]) -> lis
             continue
         merge_line_styles = _string_list(diagnostic.get("visible_merge_line_label_styles"))
         repeat_distances = _string_list(diagnostic.get("visible_label_repeat_distances"))
-        label_source_matches = _string_list(diagnostic.get("visible_label_source_category_matches"))
+        qgis_label_source_matches = _string_list(diagnostic.get("visible_label_source_category_matches"))
+        source_label_source_matches = _string_list(
+            diagnostic.get("visible_source_label_category_matches")
+        )
         unmatched_categories = _string_list(diagnostic.get("unmatched_duplicate_name_categories"))
+        source_excluded_categories = _string_list(
+            diagnostic.get("source_excluded_duplicate_name_categories")
+        )
+        qgis_unmatched_source_categories = _string_list(
+            diagnostic.get("qgis_unmatched_source_label_categories")
+        )
         rows.append(
             [
                 camera.get("camera"),
                 duplicate_summaries,
                 merge_line_styles,
                 repeat_distances,
-                label_source_matches,
+                source_label_source_matches,
+                qgis_label_source_matches,
                 unmatched_categories,
+                source_excluded_categories,
+                qgis_unmatched_source_categories,
             ]
         )
     if not rows:
@@ -2525,12 +2559,12 @@ def _duplicate_label_diagnostic_markdown_lines(cameras: Iterable[object]) -> lis
         [
             (
                 "Connects duplicate source feature names with the visible QGIS "
-                "line-label merge/repeat controls and source-label category matches "
-                "active at each camera zoom."
+                "line-label merge/repeat controls, source-style label filters, "
+                "and QGIS label-source filters active at each camera zoom."
             ),
             "",
-            "| Camera | Duplicate feature names | Visible merge-line label styles | Visible label repeat distances | Visible source-label category matches | Unmatched duplicate categories |",
-            "| --- | --- | --- | --- | --- | --- |",
+            "| Camera | Duplicate feature names | Visible merge-line label styles | Visible label repeat distances | Visible source-style label category matches | Visible QGIS label category matches | Unmatched duplicate categories | Source-excluded duplicate categories | QGIS-missing source categories |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)
