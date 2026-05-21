@@ -12,6 +12,7 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_visual_crops import (
     VisualCropAnnotationInputs,
+    _computed_crop_color_movement_group_records,
     _crop_color_metric,
     _three_channel_color_values,
     annotate_visual_crop_report_with_comparison_delta,
@@ -621,6 +622,16 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         "max_abs_rgb_delta": 127.0,
                         "max_abs_luminance_delta": 127.0,
                         "cameras": {"chamonix-trails-z14-outdoors": 1},
+                        "representative_crop": {
+                            "camera": "chamonix-trails-z14-outdoors",
+                            "crop": 1,
+                            "score": 127.0,
+                            "box": [6, 6, 10, 10],
+                            "diff": outputs["diff"],
+                            "qgis_minus_mapbox_rgb": [-127.0, -127.0, -127.0],
+                            "max_abs_rgb_delta": 127.0,
+                            "qgis_minus_mapbox_luminance": -127.0,
+                        },
                     }
                 ],
             )
@@ -1503,6 +1514,74 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertLess(
             movement_section.index("lighter + blue higher"),
             movement_section.index("darker + red lower"),
+        )
+
+    def test_computed_crop_color_movement_groups_keep_representative_crop(self):
+        report = {
+            "cameras": [
+                {
+                    "camera": "geneva",
+                    "crops": [
+                        {
+                            "index": 1,
+                            "box": [0, 0, 4, 4],
+                            "outputs": {"diff": "debug/geneva-diff.png"},
+                            "color_metrics": {
+                                "delta": {
+                                    "mean_rgb": [4.0, 0.0, 12.0],
+                                    "luminance": 6.0,
+                                    "luminance_direction": "lighter",
+                                    "dominant_rgb_delta": {
+                                        "channel": "blue",
+                                        "delta": 12.0,
+                                        "direction": "higher",
+                                    },
+                                }
+                            },
+                        }
+                    ],
+                },
+                {
+                    "camera": "zermatt",
+                    "crops": [
+                        {
+                            "index": 2,
+                            "box": [4, 4, 8, 8],
+                            "outputs": {"diff": "debug/zermatt-diff.png"},
+                            "color_metrics": {
+                                "delta": {
+                                    "mean_rgb": [2.0, 0.0, 16.0],
+                                    "luminance": 8.0,
+                                    "luminance_direction": "lighter",
+                                    "dominant_rgb_delta": {
+                                        "channel": "blue",
+                                        "delta": 16.0,
+                                        "direction": "higher",
+                                    },
+                                }
+                            },
+                        }
+                    ],
+                },
+            ],
+        }
+
+        records = _computed_crop_color_movement_group_records(report)
+        report["cameras"][1]["crops"][0]["box"][0] = 99
+
+        self.assertEqual(len(records), 1)
+        self.assertEqual(
+            records[0]["representative_crop"],
+            {
+                "camera": "zermatt",
+                "crop": 2,
+                "score": 16.0,
+                "box": [4, 4, 8, 8],
+                "diff": "debug/zermatt-diff.png",
+                "qgis_minus_mapbox_rgb": [2.0, 0.0, 16.0],
+                "max_abs_rgb_delta": 16.0,
+                "qgis_minus_mapbox_luminance": 8.0,
+            },
         )
 
     def test_build_summary_markdown_handles_malformed_color_delta_values(self):

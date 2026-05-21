@@ -1574,13 +1574,20 @@ def _crop_box_label(crop: Mapping[str, object]) -> object:
 
 
 def _crop_output_path_label(crop: Mapping[str, object], key: str) -> str:
-    outputs = crop.get("outputs")
-    if not isinstance(outputs, Mapping):
-        return "-"
-    path = outputs.get(key)
-    if not isinstance(path, str) or not path:
+    path = _crop_output_path_value(crop, key)
+    if path is None:
         return "-"
     return f"`{path}`"
+
+
+def _crop_output_path_value(crop: Mapping[str, object], key: str) -> str | None:
+    outputs = crop.get("outputs")
+    if not isinstance(outputs, Mapping):
+        return None
+    path = outputs.get(key)
+    if not isinstance(path, str) or not path:
+        return None
+    return path
 
 
 def _summary_crop_mappings(report: Mapping[str, object]) -> list[tuple[Mapping[str, object], Mapping[str, object]]]:
@@ -1671,14 +1678,44 @@ def _increment_count(counts: dict[str, int], key: object) -> None:
         counts[key] = counts.get(key, 0) + 1
 
 
+def _crop_color_movement_representative_record(
+    *,
+    camera_name: object,
+    crop: Mapping[str, object],
+    delta: Mapping[str, object],
+    score: float,
+) -> dict[str, object]:
+    record: dict[str, object] = {
+        "camera": camera_name,
+        "crop": crop.get("index"),
+        "score": score,
+    }
+    box = crop.get("box")
+    if isinstance(box, list):
+        record["box"] = list(box)
+    diff_path = _crop_output_path_value(crop, "diff")
+    if diff_path is not None:
+        record["diff"] = diff_path
+    rgb_values = _color_metric_values(delta, "mean_rgb")
+    if rgb_values:
+        record["qgis_minus_mapbox_rgb"] = rgb_values
+        record["max_abs_rgb_delta"] = max(abs(value) for value in rgb_values)
+    luminance = _metric_float(delta, "luminance")
+    if luminance is not None:
+        record["qgis_minus_mapbox_luminance"] = luminance
+    return record
+
+
 @dataclass
 class _CropColorMovementGroup:
     count: int = 0
     max_abs_rgb: float = 0.0
     max_abs_luminance: float = 0.0
     cameras: dict[str, int] = field(default_factory=dict)
+    representative_crop: dict[str, object] | None = None
+    representative_score: float = 0.0
 
-    def add(self, delta: Mapping[str, object], camera_name: object) -> None:
+    def add(self, delta: Mapping[str, object], camera_name: object, crop: Mapping[str, object]) -> None:
         self.count += 1
         dominant_rgb_delta = delta.get("dominant_rgb_delta")
         rgb_delta = (
@@ -1692,10 +1729,22 @@ class _CropColorMovementGroup:
         if luminance is not None:
             self.max_abs_luminance = max(self.max_abs_luminance, abs(luminance))
         _increment_count(self.cameras, camera_name)
+        score = max(
+            abs(rgb_delta) if rgb_delta is not None else 0.0,
+            abs(luminance) if luminance is not None else 0.0,
+        )
+        if self.representative_crop is None or score > self.representative_score:
+            self.representative_score = score
+            self.representative_crop = _crop_color_movement_representative_record(
+                camera_name=camera_name,
+                crop=crop,
+                delta=delta,
+                score=score,
+            )
 
     def to_record(self, key: tuple[str, str, str]) -> dict[str, object]:
         luminance_direction, channel, rgb_direction = key
-        return {
+        record: dict[str, object] = {
             "movement": _crop_color_movement_group_label(key),
             "luminance_direction": luminance_direction,
             "dominant_rgb_channel": channel,
@@ -1705,6 +1754,9 @@ class _CropColorMovementGroup:
             "max_abs_luminance_delta": self.max_abs_luminance,
             "cameras": dict(sorted(self.cameras.items())),
         }
+        if self.representative_crop is not None:
+            record["representative_crop"] = self.representative_crop
+        return record
 
 
 def _computed_crop_color_movement_group_records(report: Mapping[str, object]) -> list[dict[str, object]]:
@@ -1717,7 +1769,7 @@ def _computed_crop_color_movement_group_records(report: Mapping[str, object]) ->
         group_key = _crop_color_movement_group_key(delta)
         if group_key is None or not isinstance(delta, Mapping):
             continue
-        groups.setdefault(group_key, _CropColorMovementGroup()).add(delta, camera.get("camera"))
+        groups.setdefault(group_key, _CropColorMovementGroup()).add(delta, camera.get("camera"), crop)
     sorted_groups = sorted(
         groups.items(),
         key=lambda item: (-item[1].count, -item[1].max_abs_rgb, item[0]),
