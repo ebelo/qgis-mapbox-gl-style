@@ -14,6 +14,9 @@ try:
     from .mapbox_outdoors_path_pedestrian_focus import (
         REPO_ROOT,
         _display_input_path,
+        _largest_non_auxiliary_stroke_delta_rows,
+        _non_auxiliary_dash_mismatch_rows,
+        _top_count_labels,
         build_run_directory as _build_focus_run_directory,
         comparison_visual_artifacts_from_summary,
         load_json_object,
@@ -23,6 +26,9 @@ except ImportError:  # pragma: no cover - direct script execution
     from mapbox_outdoors_path_pedestrian_focus import (  # type: ignore[no-redef]
         REPO_ROOT,
         _display_input_path,
+        _largest_non_auxiliary_stroke_delta_rows,
+        _non_auxiliary_dash_mismatch_rows,
+        _top_count_labels,
         build_run_directory as _build_focus_run_directory,
         comparison_visual_artifacts_from_summary,
         load_json_object,
@@ -31,6 +37,8 @@ except ImportError:  # pragma: no cover - direct script execution
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-visual-crops"
 DEFAULT_CROP_SIZE = (320, 240)
 DEFAULT_CROPS_PER_CAMERA = 3
+DEFAULT_FOCUS_DASH_CUE_LIMIT = 2
+DEFAULT_FOCUS_STROKE_CUE_LIMIT = 3
 MIN_SCORE_FOR_CROP = 1.0
 MAX_OVERLAP_RATIO = 0.35
 CROP_IMAGE_COLUMNS = (
@@ -231,11 +239,183 @@ def _required_visual_artifacts(artifacts: Mapping[str, object]) -> bool:
     return all(isinstance(artifacts.get(key), Path) for key, _label in CROP_IMAGE_COLUMNS)
 
 
+def _non_empty_focus_value(value: object) -> bool:
+    return value is not None and value != "" and value != []
+
+
+def _focus_cue_from_row(row: Mapping[str, object], keys: Sequence[str]) -> dict[str, object]:
+    cue = {key: row.get(key) for key in keys if _non_empty_focus_value(row.get(key))}
+    candidate_types = _top_count_labels(row.get("decoded_candidate_type_counts"))
+    if candidate_types:
+        cue["candidate_types"] = candidate_types
+    return cue
+
+
+def _has_meaningful_width_delta(row: Mapping[str, object]) -> bool:
+    value = row.get("line_width_abs_delta_mm")
+    return isinstance(value, (int, float)) and abs(float(value)) > 1e-12
+
+
+def _path_pedestrian_focus_cues_by_camera(
+    focus_report: Mapping[str, object] | None,
+    *,
+    stroke_limit: int = DEFAULT_FOCUS_STROKE_CUE_LIMIT,
+    dash_limit: int = DEFAULT_FOCUS_DASH_CUE_LIMIT,
+) -> dict[str, dict[str, list[dict[str, object]]]]:
+    if not focus_report:
+        return {}
+    cameras = focus_report.get("cameras")
+    if not isinstance(cameras, list):
+        return {}
+    cues_by_camera: dict[str, dict[str, list[dict[str, object]]]] = {}
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        camera_name = str(camera.get("camera") or "")
+        if not camera_name:
+            continue
+        width_delta_rows = [
+            row
+            for row in _largest_non_auxiliary_stroke_delta_rows([camera], limit=10_000)
+            if _has_meaningful_width_delta(row)
+        ][: max(0, stroke_limit)]
+        width_rows = [
+            _focus_cue_from_row(
+                row,
+                (
+                    "source_layer_id",
+                    "qgis_layer_id",
+                    "decoded_candidate_count",
+                    "line_width_delta_mm",
+                    "line_width_abs_delta_mm",
+                    "line_width_ratio",
+                    "source_line_width_capped",
+                ),
+            )
+            for row in width_delta_rows
+        ]
+        dash_rows = [
+            _focus_cue_from_row(
+                row,
+                (
+                    "source_layer_id",
+                    "qgis_layer_id",
+                    "decoded_candidate_count",
+                    "source_dasharray",
+                    "qgis_dasharray",
+                    "line_width_delta_mm",
+                    "line_width_ratio",
+                ),
+            )
+            for row in _non_auxiliary_dash_mismatch_rows([camera])[: max(0, dash_limit)]
+        ]
+        if width_rows or dash_rows:
+            cues_by_camera[camera_name] = {
+                "stroke_width_deltas": width_rows,
+                "dash_mismatches": dash_rows,
+            }
+    return cues_by_camera
+
+
+def _camera_row_with_focus(
+    *,
+    camera_name: str,
+    status: str,
+    crops: list[dict[str, object]],
+    focus_cues: Mapping[str, object] | None,
+) -> dict[str, object]:
+    camera_row: dict[str, object] = {"camera": camera_name, "status": status, "crops": crops}
+    if focus_cues:
+        camera_row["path_pedestrian_focus"] = dict(focus_cues)
+    return camera_row
+
+
+def _hotspot_crop_rows(
+    *,
+    camera_name: str,
+    artifacts: Mapping[str, object],
+    diff_path: Path,
+    paths: VisualCropPaths,
+    crop_size: tuple[int, int],
+    crops_per_camera: int,
+    image_module: Any,
+    image_stat_module: Any,
+) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
+    crops: list[dict[str, object]] = []
+    contact_sheet_entries: list[dict[str, object]] = []
+    for crop_index, crop in enumerate(
+        find_hotspot_crop_boxes(
+            diff_path,
+            crop_size=crop_size,
+            crop_count=crops_per_camera,
+            image_module=image_module,
+            image_stat_module=image_stat_module,
+        ),
+        start=1,
+    ):
+        box = crop["box"]
+        if not isinstance(box, tuple):
+            continue
+        outputs = _write_crop_triplet(
+            camera_name=camera_name,
+            crop_index=crop_index,
+            artifacts=artifacts,
+            box=box,
+            run_dir=paths.run_dir,
+            image_module=image_module,
+        )
+        crops.append(
+            {
+                "index": crop_index,
+                "box": list(box),
+                "score": crop["score"],
+                "outputs": _display_crop_outputs(outputs),
+            }
+        )
+        contact_sheet_entries.append(
+            {
+                "camera": f"{camera_name} crop {crop_index}",
+                "outputs": _contact_sheet_outputs(outputs),
+            }
+        )
+    status = "cropped" if crops else "no_hotspot_crops"
+    return status, crops, contact_sheet_entries
+
+
+def _camera_visual_crop_rows(
+    *,
+    camera_name: str,
+    artifacts: Mapping[str, object],
+    paths: VisualCropPaths,
+    crop_size: tuple[int, int],
+    crops_per_camera: int,
+    image_module: Any,
+    image_stat_module: Any,
+) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
+    if not _required_visual_artifacts(artifacts):
+        return "missing_required_artifacts", [], []
+    diff_path = artifacts["diff"]
+    if not isinstance(diff_path, Path):
+        return "missing_diff", [], []
+    return _hotspot_crop_rows(
+        camera_name=camera_name,
+        artifacts=artifacts,
+        diff_path=diff_path,
+        paths=paths,
+        crop_size=crop_size,
+        crops_per_camera=crops_per_camera,
+        image_module=image_module,
+        image_stat_module=image_stat_module,
+    )
+
+
 def generate_visual_crop_report(
     comparison_summary: Mapping[str, object],
     *,
     comparison_summary_path: Path,
     paths: VisualCropPaths,
+    path_pedestrian_focus_report: Mapping[str, object] | None = None,
+    path_pedestrian_focus_report_path: Path | None = None,
     camera_names: Sequence[str] | None = None,
     crop_size: tuple[int, int] = DEFAULT_CROP_SIZE,
     crops_per_camera: int = DEFAULT_CROPS_PER_CAMERA,
@@ -256,57 +436,31 @@ def generate_visual_crop_report(
         comparison_summary,
         summary_path=comparison_summary_path,
     )
+    focus_cues_by_camera = _path_pedestrian_focus_cues_by_camera(path_pedestrian_focus_report)
     camera_rows = []
     contact_sheet_entries: list[dict[str, object]] = []
     for camera_name in _selected_camera_names(visual_artifacts_by_camera, camera_names):
-        artifacts = visual_artifacts_by_camera[camera_name]
-        if not _required_visual_artifacts(artifacts):
-            camera_rows.append({"camera": camera_name, "status": "missing_required_artifacts", "crops": []})
-            continue
-        diff_path = artifacts["diff"]
-        if not isinstance(diff_path, Path):
-            camera_rows.append({"camera": camera_name, "status": "missing_diff", "crops": []})
-            continue
-        crops = []
-        for crop_index, crop in enumerate(
-            find_hotspot_crop_boxes(
-                diff_path,
-                crop_size=crop_size,
-                crop_count=crops_per_camera,
-                image_module=image_module,
-                image_stat_module=image_stat_module,
-            ),
-            start=1,
-        ):
-            box = crop["box"]
-            if not isinstance(box, tuple):
-                continue
-            outputs = _write_crop_triplet(
+        status, crops, crop_contact_entries = _camera_visual_crop_rows(
+            camera_name=camera_name,
+            artifacts=visual_artifacts_by_camera[camera_name],
+            paths=paths,
+            crop_size=crop_size,
+            crops_per_camera=crops_per_camera,
+            image_module=image_module,
+            image_stat_module=image_stat_module,
+        )
+        camera_rows.append(
+            _camera_row_with_focus(
                 camera_name=camera_name,
-                crop_index=crop_index,
-                artifacts=artifacts,
-                box=box,
-                run_dir=paths.run_dir,
-                image_module=image_module,
+                status=status,
+                crops=crops,
+                focus_cues=focus_cues_by_camera.get(camera_name),
             )
-            crop_row = {
-                "index": crop_index,
-                "box": list(box),
-                "score": crop["score"],
-                "outputs": _display_crop_outputs(outputs),
-            }
-            crops.append(crop_row)
-            contact_sheet_entries.append(
-                {
-                    "camera": f"{camera_name} crop {crop_index}",
-                    "outputs": _contact_sheet_outputs(outputs),
-                }
-            )
-        status = "cropped" if crops else "no_hotspot_crops"
-        camera_rows.append({"camera": camera_name, "status": status, "crops": crops})
+        )
+        contact_sheet_entries.extend(crop_contact_entries)
     contact_sheet = build_all_cameras_contact_sheet(entries=contact_sheet_entries, output_path=paths.contact_sheet_path)
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
-    return {
+    report = {
         "generated": generated.astimezone(dt.timezone.utc).isoformat(),
         "comparison_summary_json": _display_input_path(comparison_summary_path),
         "crop_size": {"width": crop_size[0], "height": crop_size[1]},
@@ -316,6 +470,56 @@ def generate_visual_crop_report(
         "contact_sheet": _display_input_path(contact_sheet) if contact_sheet is not None else None,
         "cameras": camera_rows,
     }
+    if path_pedestrian_focus_report_path is not None:
+        report["path_pedestrian_focus_json"] = _display_input_path(path_pedestrian_focus_report_path)
+    return report
+
+
+def _format_focus_number(value: object) -> str:
+    if isinstance(value, (int, float)):
+        return f"{float(value):.4g}"
+    return str(value)
+
+
+def _candidate_focus_summary(cue: Mapping[str, object]) -> str | None:
+    candidate_count = cue.get("decoded_candidate_count")
+    candidate_types = cue.get("candidate_types")
+    if isinstance(candidate_types, list) and candidate_types:
+        return f"candidates={candidate_count} ({', '.join(str(value) for value in candidate_types[:3])})"
+    if candidate_count is not None:
+        return f"candidates={candidate_count}"
+    return None
+
+
+def _stroke_focus_cue_summary(cue: Mapping[str, object]) -> str:
+    parts = [f"{cue.get('source_layer_id')}->{cue.get('qgis_layer_id')}"]
+    if cue.get("line_width_delta_mm") is not None:
+        parts.append(f"delta={_format_focus_number(cue.get('line_width_delta_mm'))}mm")
+    if cue.get("line_width_ratio") is not None:
+        parts.append(f"ratio={_format_focus_number(cue.get('line_width_ratio'))}")
+    candidate_summary = _candidate_focus_summary(cue)
+    if candidate_summary is not None:
+        parts.append(candidate_summary)
+    if cue.get("source_line_width_capped") is True:
+        parts.append("source-capped")
+    return " ".join(parts)
+
+
+def _dash_focus_cue_summary(cue: Mapping[str, object]) -> str:
+    parts = [
+        f"{cue.get('source_layer_id')}->{cue.get('qgis_layer_id')}",
+        f"dash={_compact_focus_value(cue.get('source_dasharray'))}!={_compact_focus_value(cue.get('qgis_dasharray'))}",
+    ]
+    candidate_summary = _candidate_focus_summary(cue)
+    if candidate_summary is not None:
+        parts.append(candidate_summary)
+    return " ".join(parts)
+
+
+def _compact_focus_value(value: object) -> str:
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
+    return str(value)
 
 
 def _markdown_cell(value: object) -> str:
@@ -352,6 +556,8 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
     ]
     if report.get("contact_sheet"):
         lines.append(f"Crop contact sheet: `{report.get('contact_sheet')}`")
+    if report.get("path_pedestrian_focus_json"):
+        lines.append(f"Path/pedestrian focus input: `{report.get('path_pedestrian_focus_json')}`")
     return lines
 
 
@@ -392,6 +598,52 @@ def _summary_camera_rows(camera: Mapping[str, object]) -> list[str]:
     return [_summary_crop_row(camera, crop) for crop in crop_rows if isinstance(crop, Mapping)]
 
 
+def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in report.get("cameras", []):
+        if not isinstance(camera, Mapping):
+            continue
+        focus = camera.get("path_pedestrian_focus")
+        if not isinstance(focus, Mapping):
+            continue
+        stroke_cues = focus.get("stroke_width_deltas")
+        dash_cues = focus.get("dash_mismatches")
+        stroke_rows = stroke_cues if isinstance(stroke_cues, list) else []
+        dash_rows = dash_cues if isinstance(dash_cues, list) else []
+        rows.append(
+            [
+                camera.get("camera"),
+                [
+                    _stroke_focus_cue_summary(cue)
+                    for cue in stroke_rows
+                    if isinstance(cue, Mapping)
+                ],
+                [
+                    _dash_focus_cue_summary(cue)
+                    for cue in dash_rows
+                    if isinstance(cue, Mapping)
+                ],
+            ]
+        )
+    if not rows:
+        return []
+    lines = ["", "## Path/pedestrian focus cues", ""]
+    lines.extend(
+        [
+            (
+                "Shows the strongest per-camera path/pedestrian stroke cues from the focus report "
+                "next to visual hotspots, so crop review can distinguish candidate-backed style gaps "
+                "from capped-width or zero-candidate artifacts."
+            ),
+            "",
+            "| Camera | Stroke width cues | Dash mismatch cues |",
+            "| --- | --- | --- |",
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = _summary_header_lines(report)
     lines.extend(_summary_table_intro_lines())
@@ -399,6 +651,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         if not isinstance(camera, Mapping):
             continue
         lines.extend(_summary_camera_rows(camera))
+    lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"
 
 
@@ -433,6 +686,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         type=Path,
         help="All-camera comparison summary.json.",
+    )
+    parser.add_argument(
+        "--path-pedestrian-focus-json",
+        type=Path,
+        help="Optional path-pedestrian-focus.json to annotate visual crops with per-camera stroke cues.",
     )
     parser.add_argument(
         "--camera",
@@ -477,12 +735,21 @@ def main(argv: list[str] | None = None) -> int:
         args.comparison_summary_json,
         label="Comparison summary JSON",
     )
+    path_pedestrian_focus_report = None
+    if args.path_pedestrian_focus_json is not None:
+        path_pedestrian_focus_report = _load_cli_json_object(
+            parser,
+            args.path_pedestrian_focus_json,
+            label="Path/pedestrian focus JSON",
+        )
     paths = build_visual_crop_paths(build_run_directory())
     try:
         report = generate_visual_crop_report(
             comparison_summary,
             comparison_summary_path=args.comparison_summary_json,
             paths=paths,
+            path_pedestrian_focus_report=path_pedestrian_focus_report,
+            path_pedestrian_focus_report_path=args.path_pedestrian_focus_json,
             camera_names=args.camera,
             crop_size=args.crop_size,
             crops_per_camera=args.crops_per_camera,
