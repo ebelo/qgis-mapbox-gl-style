@@ -15,6 +15,13 @@ package_parent = str(PACKAGE_PARENT)
 if package_parent not in sys.path:
     sys.path.insert(0, package_parent)
 
+from qfit.mapbox_config import (  # noqa: E402
+    _extract_line_dasharray_literal,
+    _extract_zoom_scalar_size_at_zoom,
+    _line_width_mm_at_zoom,
+    base_mapbox_style_layer_id_for_qfit,
+)
+
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-path-pedestrian-focus"
 DEFAULT_COMPARISON_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-comparison"
 DEFAULT_ROAD_FEATURES_PATH = (
@@ -98,6 +105,8 @@ COMPARISON_VISUAL_METRIC_KEYS = (
     "ssim_status",
 )
 MARKDOWN_SEPARATOR_5_COLUMNS = "| --- | --- | --- | --- | --- |"
+MARKDOWN_SEPARATOR_6_COLUMNS = "| --- | --- | --- | --- | --- | --- |"
+UNSAMPLED_EXPRESSION_CONTROL = "expression-not-sampled"
 ARGPARSE_EXIT_SENTINEL = "argparse error should exit"
 
 
@@ -983,8 +992,6 @@ def _duplicate_label_diagnostic(camera: Mapping[str, object]) -> dict[str, objec
 
 
 def _qfit_base_style_layer_id(layer_id: object) -> str:
-    from qfit.mapbox_config import base_mapbox_style_layer_id_for_qfit  # noqa: PLC0415
-
     normalized = str(layer_id or "")
     base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
     if base_layer_id != normalized:
@@ -1015,6 +1022,30 @@ def _stroke_controls(detail: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _source_sampled_stroke_controls(
+    detail: Mapping[str, object],
+    camera_zoom: float | None,
+) -> dict[str, object]:
+    if camera_zoom is None:
+        return {}
+    sampled_controls: dict[str, object] = {}
+    line_width = _line_width_mm_at_zoom(detail.get("line-width"), camera_zoom)
+    if line_width is not None:
+        sampled_controls["line-width"] = line_width
+    line_color = detail.get("line-color")
+    if isinstance(line_color, str) and line_color:
+        sampled_controls["line-color"] = line_color
+    elif isinstance(line_color, list):
+        sampled_controls["line-color"] = UNSAMPLED_EXPRESSION_CONTROL
+    line_dasharray = _extract_line_dasharray_literal(detail.get("line-dasharray"), target_zoom=camera_zoom)
+    if line_dasharray is not None:
+        sampled_controls["line-dasharray"] = line_dasharray
+    line_opacity = _extract_zoom_scalar_size_at_zoom(detail.get("line-opacity"), camera_zoom)
+    if line_opacity is not None:
+        sampled_controls["line-opacity"] = line_opacity
+    return sampled_controls
+
+
 def _qgis_stroke_details_by_source_id(
     qgis_details: Iterable[Mapping[str, object]],
 ) -> dict[str, list[Mapping[str, object]]]:
@@ -1030,6 +1061,7 @@ def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> lis
     source_details = _visible_line_details(camera, "source_path_pedestrian_visible_layer_details")
     qgis_details = _visible_line_details(camera, "qgis_path_pedestrian_visible_layer_details")
     qgis_details_by_source_id = _qgis_stroke_details_by_source_id(qgis_details)
+    camera_zoom = _numeric_zoom(camera.get("camera_zoom"))
     comparisons = []
     for source_detail in source_details:
         source_id = str(source_detail.get("id") or "")
@@ -1038,6 +1070,7 @@ def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> lis
             {
                 "source_layer_id": source_id,
                 "source_controls": _stroke_controls(source_detail),
+                "source_sampled_controls": _source_sampled_stroke_controls(source_detail, camera_zoom),
                 "qgis_layer_ids": [str(detail.get("id") or "") for detail in matched_details],
                 "qgis_controls": [
                     {
@@ -1386,6 +1419,7 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
                     camera.get("camera"),
                     comparison.get("source_layer_id"),
                     _stroke_control_summaries(comparison.get("source_controls")),
+                    _stroke_control_summaries(comparison.get("source_sampled_controls")),
                     comparison.get("qgis_layer_ids"),
                     _qgis_stroke_control_summaries(comparison),
                 ]
@@ -1399,10 +1433,17 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
                 "Pairs visible source Mapbox path/pedestrian line layers with visible QGIS "
                 "variants by original style-layer id."
             ),
+            (
+                "Source sampled controls evaluate zoom expressions at the camera zoom; "
+                "line-width is shown in QGIS millimetres and dash arrays are the selected "
+                "Mapbox line-width-relative pattern. Literal line colors are carried through; "
+                "expression colors are marked as expression-not-sampled and remain available "
+                "in the raw source controls."
+            ),
             "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
             "",
-            "| Camera | Source layer | Source controls | QGIS layer ids | QGIS controls |",
-            MARKDOWN_SEPARATOR_5_COLUMNS,
+            "| Camera | Source layer | Source controls | Source sampled controls | QGIS layer ids | QGIS controls |",
+            MARKDOWN_SEPARATOR_6_COLUMNS,
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)

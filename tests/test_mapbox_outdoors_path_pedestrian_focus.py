@@ -818,6 +818,11 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                             ["literal", [1, 0.3]],
                         ],
                     },
+                    "source_sampled_controls": {
+                        "line-width": 0.5622395833333333,
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-dasharray": [4, 0.3],
+                    },
                     "qgis_layer_ids": ["road-path"],
                     "qgis_controls": [
                         {
@@ -895,6 +900,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
                     },
+                    "source_sampled_controls": {
+                        "line-width": 3.0,
+                        "line-color": "hsl(0, 0%, 95%)",
+                    },
                     "qgis_layer_ids": ["road-pedestrian-z16-plus"],
                     "qgis_controls": [
                         {
@@ -943,6 +952,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         }
         self.assertEqual(comparisons["road-path"]["qgis_layer_ids"], ["road-path-z16-plus"])
         self.assertEqual(
+            comparisons["road-path"]["source_sampled_controls"],
+            {
+                "line-width": 1.0583333333333333,
+                "line-color": "hsl(0, 0%, 95%)",
+                "line-dasharray": [1, 0.3],
+            },
+        )
+        self.assertEqual(
             comparisons["road-path"]["qgis_controls"],
             [
                 {
@@ -954,6 +971,38 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     },
                 }
             ],
+        )
+
+    def test_build_path_pedestrian_focus_report_marks_unsampled_source_color_expressions(self):
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-path",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {
+                        "line-color": ["match", ["get", "type"], "piste", "#2365d1", "#f2f2f2"],
+                        "line-width": 2,
+                    },
+                }
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            _road_feature_report(),
+            source_style=source_style,
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        [comparison] = camera["source_qgis_stroke_control_comparisons"]
+        self.assertEqual(
+            comparison["source_sampled_controls"],
+            {
+                "line-width": 0.5291666666666667,
+                "line-color": "expression-not-sampled",
+            },
         )
 
     def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
@@ -1081,7 +1130,11 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("| road-path | line | z>=12 |", markdown)
         self.assertIn('"line-width=[\\"interpolate\\",[\\"linear\\"],[\\"zoom\\"],12,1,18,4]"', markdown)
         self.assertIn("## Source vs QGIS stroke controls", markdown)
+        self.assertIn("Source sampled controls evaluate zoom expressions at the camera zoom", markdown)
+        self.assertIn("expression colors are marked as expression-not-sampled", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | road-path |", markdown)
+        self.assertIn('"line-width=0.5622395833333333"', markdown)
+        self.assertIn('"line-dasharray=[4,0.3]"', markdown)
         self.assertIn('["road-path"]', markdown)
         self.assertIn('road-path: line-width=1.5', markdown)
         self.assertIn('line-dasharray=[1,1]', markdown)
@@ -1194,7 +1247,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
             markdown,
         )
-        self.assertIn("| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] |", markdown)
+        self.assertIn("| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] | [] |", markdown)
 
     def test_build_summary_markdown_handles_no_focus_rows(self):
         markdown = build_summary_markdown({"generated": "now", "cameras": []})
