@@ -475,8 +475,37 @@ def generate_visual_crop_report(
         "cameras": camera_rows,
     }
     if path_pedestrian_focus_report_path is not None:
-        report["path_pedestrian_focus_json"] = _display_input_path(path_pedestrian_focus_report_path)
+        report["path_pedestrian_focus_json"] = _display_input_path(
+            path_pedestrian_focus_report_path
+        )
+        focus_comparison_paths = _focus_comparison_summary_paths(path_pedestrian_focus_report)
+        if focus_comparison_paths:
+            report["path_pedestrian_focus_comparison_summary_jsons"] = focus_comparison_paths
+            report["path_pedestrian_focus_comparison_match"] = (
+                report["comparison_summary_json"] in focus_comparison_paths
+            )
     return report
+
+
+def _focus_comparison_summary_paths(focus_report: Mapping[str, object] | None) -> list[str]:
+    if not focus_report:
+        return []
+    input_artifacts = focus_report.get("input_artifacts")
+    if not isinstance(input_artifacts, Mapping):
+        return []
+    raw_paths = input_artifacts.get("comparison_summary_jsons")
+    if isinstance(raw_paths, list):
+        return [str(path) for path in raw_paths if path is not None]
+    raw_runs = input_artifacts.get("comparison_summary_runs")
+    if isinstance(raw_runs, list):
+        return [
+            path
+            for item in raw_runs
+            if isinstance(item, Mapping)
+            and isinstance((path := item.get("path")), str)
+            and path
+        ]
+    return []
 
 
 def _comparison_summary_run_metadata(
@@ -580,6 +609,18 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
         lines.append(f"Comparison summary run: {comparison_summary_run}")
     if report.get("path_pedestrian_focus_json"):
         lines.append(f"Path/pedestrian focus input: `{report.get('path_pedestrian_focus_json')}`")
+    focus_comparison_paths = report.get("path_pedestrian_focus_comparison_summary_jsons")
+    if isinstance(focus_comparison_paths, list) and focus_comparison_paths:
+        lines.append(
+            "Path/pedestrian focus comparison inputs: "
+            f"`{', '.join(str(path) for path in focus_comparison_paths)}`"
+        )
+        match = report.get("path_pedestrian_focus_comparison_match")
+        if match is not None:
+            lines.append(
+                "Path/pedestrian focus comparison match: "
+                f"`{match}`"
+            )
     return lines
 
 

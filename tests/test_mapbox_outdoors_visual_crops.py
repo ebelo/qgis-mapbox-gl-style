@@ -152,8 +152,17 @@ def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z1
     return comparison_summary, summary_path
 
 
-def _path_pedestrian_focus_report(camera_name="chamonix-trails-z14-outdoors"):
+def _path_pedestrian_focus_report(
+    camera_name="chamonix-trails-z14-outdoors",
+    *,
+    comparison_summary_jsons=None,
+):
+    if comparison_summary_jsons is None:
+        comparison_summary_jsons = ["debug/comparison/summary.json"]
     return {
+        "input_artifacts": {
+            "comparison_summary_jsons": comparison_summary_jsons,
+        },
         "cameras": [
             {
                 "camera": camera_name,
@@ -414,9 +423,97 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             stroke_cues = focus_cues["stroke_width_deltas"]
             dash_cues = focus_cues["dash_mismatches"]
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
+            self.assertEqual(
+                report["path_pedestrian_focus_comparison_summary_jsons"],
+                ["debug/comparison/summary.json"],
+            )
+            self.assertIs(report["path_pedestrian_focus_comparison_match"], False)
             self.assertEqual(stroke_cues[0]["source_layer_id"], "road-path-trail")
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
             self.assertEqual(dash_cues[0]["source_dasharray"], [1, 0.25])
+
+    def test_generate_visual_crop_report_matches_focus_comparison_runs(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            focus_path = root / "focus" / "path-pedestrian-focus.json"
+            focus_report = _path_pedestrian_focus_report(comparison_summary_jsons=[])
+            focus_report["input_artifacts"] = {
+                "comparison_summary_runs": [{"path": str(summary_path)}],
+            }
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                path_pedestrian_focus_report=focus_report,
+                path_pedestrian_focus_report_path=focus_path,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertEqual(
+                report["path_pedestrian_focus_comparison_summary_jsons"],
+                [str(summary_path)],
+            )
+            self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
+
+    def test_generate_visual_crop_report_preserves_empty_focus_comparison_paths(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                path_pedestrian_focus_report=_path_pedestrian_focus_report(
+                    comparison_summary_jsons=[]
+                ),
+                path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertNotIn("path_pedestrian_focus_comparison_summary_jsons", report)
+            self.assertNotIn("path_pedestrian_focus_comparison_match", report)
+
+    def test_generate_visual_crop_report_omits_focus_comparison_without_input_artifacts(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                path_pedestrian_focus_report={"cameras": []},
+                path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertEqual(
+                report["path_pedestrian_focus_json"],
+                str(root / "focus" / "path-pedestrian-focus.json"),
+            )
+            self.assertNotIn("path_pedestrian_focus_comparison_summary_jsons", report)
+            self.assertNotIn("path_pedestrian_focus_comparison_match", report)
 
     def test_generate_visual_crop_report_rejects_output_outside_trusted_root(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -494,6 +591,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 "generated": "2026-05-20T20:00:00+00:00",
                 "comparison_summary_json": "debug/comparison/summary.json",
                 "path_pedestrian_focus_json": "debug/focus/path-pedestrian-focus.json",
+                "path_pedestrian_focus_comparison_summary_jsons": [
+                    "debug/comparison/summary.json",
+                ],
+                "path_pedestrian_focus_comparison_match": True,
                 "crop_size": {"width": 4, "height": 4},
                 "crops_per_camera": 1,
                 "camera_count": 1,
@@ -535,12 +636,41 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
 
         self.assertIn("Path/pedestrian focus input: `debug/focus/path-pedestrian-focus.json`", markdown)
+        self.assertIn(
+            "Path/pedestrian focus comparison inputs: `debug/comparison/summary.json`",
+            markdown,
+        )
+        self.assertIn("Path/pedestrian focus comparison match: `True`", markdown)
         self.assertIn("## Path/pedestrian focus cues", markdown)
         self.assertIn("road-path-trail->road-path-trail-below-z16", markdown)
         self.assertIn("candidates=74 (trail=69, hiking=5)", markdown)
         self.assertIn("candidate_types=trail=69", markdown)
         self.assertNotIn("candidates=None", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
+
+    def test_build_summary_markdown_omits_missing_focus_comparison_match(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "path_pedestrian_focus_json": "debug/focus/path-pedestrian-focus.json",
+                "path_pedestrian_focus_comparison_summary_jsons": [
+                    "debug/comparison/summary.json",
+                ],
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 0,
+                "crop_count": 0,
+                "cameras": [],
+            }
+        )
+
+        self.assertIn(
+            "Path/pedestrian focus comparison inputs: `debug/comparison/summary.json`",
+            markdown,
+        )
+        self.assertNotIn("Path/pedestrian focus comparison match:", markdown)
+        self.assertNotIn("`None`", markdown)
 
     def test_build_summary_markdown_lists_empty_camera_status(self):
         markdown = build_summary_markdown(
@@ -566,7 +696,14 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             summary_path.write_text(json.dumps(comparison_summary), encoding="utf-8")
             focus_path = root / "focus" / "path-pedestrian-focus.json"
             focus_path.parent.mkdir(parents=True)
-            focus_path.write_text(json.dumps(_path_pedestrian_focus_report()), encoding="utf-8")
+            focus_path.write_text(
+                json.dumps(
+                    _path_pedestrian_focus_report(
+                        comparison_summary_jsons=[str(summary_path)]
+                    )
+                ),
+                encoding="utf-8",
+            )
             output_root = root / "debug"
             stdout = io.StringIO()
 
@@ -607,6 +744,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "style_url": "mapbox://styles/mapbox/outdoors-v12",
                 },
             )
+            self.assertEqual(
+                report["path_pedestrian_focus_comparison_summary_jsons"],
+                [str(summary_path)],
+            )
+            self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
             self.assertIn("path_pedestrian_focus", report["cameras"][0])
             self.assertTrue((report_path.parent / "crop-sheet.jpg").exists())
