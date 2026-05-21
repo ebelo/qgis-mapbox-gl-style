@@ -3032,7 +3032,7 @@ def _pedestrian_high_zoom_cap_scales_by_base_layer_id(layers: list[object]) -> d
         if not isinstance(line_width, list):
             continue
         case_width_mm = _line_width_mm_at_zoom(line_width, _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM)
-        if case_width_mm is not None and 0 < case_width_mm < _MAX_LINE_WIDTH_MM:
+        if case_width_mm is not None and case_width_mm < _MAX_LINE_WIDTH_MM:
             scales[_pedestrian_pair_base_layer_id(layer_id)] = _MAX_LINE_WIDTH_MM / case_width_mm
     return scales
 

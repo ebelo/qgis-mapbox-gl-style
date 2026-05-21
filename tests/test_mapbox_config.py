@@ -5924,6 +5924,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._extract_zoom_scalar_size_at_zoom(pedestrian_width, 17.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
+        pedestrian_high_unpaired_mm = min(
+            pedestrian_high_unscaled_mm,
+            mapbox_config._MAX_LINE_WIDTH_MM,
+        )
         case_high_unscaled_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(case_width, 17.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
@@ -5946,7 +5950,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertAlmostEqual(
             by_id["bridge-pedestrian-z16-plus"]["paint"]["line-width"],
-            pedestrian_high_unscaled_mm,
+            pedestrian_high_unpaired_mm,
         )
         self.assertEqual(
             by_id["road-pedestrian-case-z16-plus-pale-casing"]["paint"],
