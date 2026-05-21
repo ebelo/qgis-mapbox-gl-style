@@ -47,6 +47,7 @@ DEFAULT_STYLE_AUDIT_SAMPLE_LIMIT = 5
 DEFAULT_STYLE_AUDIT_SIMPLIFICATION_LIMIT = 3
 DEFAULT_CROP_COLOR_DELTA_SUMMARY_LIMIT = 5
 DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT = 8
+DEFAULT_FOCUS_COVERAGE_SAMPLE_LIMIT = 3
 MAX_STYLE_AUDIT_SIMPLIFICATION_VALUE_LENGTH = 96
 MIN_SCORE_FOR_CROP = 1.0
 MAX_OVERLAP_RATIO = 0.35
@@ -516,6 +517,17 @@ def _path_pedestrian_focus_cues_by_camera(
     return cues_by_camera
 
 
+def _focus_coverage_sample_labels(
+    rows: Sequence[Mapping[str, object]],
+    formatter: Callable[[Mapping[str, object]], str],
+    *,
+    sample_limit: int = DEFAULT_FOCUS_COVERAGE_SAMPLE_LIMIT,
+) -> list[str]:
+    if sample_limit <= 0:
+        return []
+    return [formatter(row) for row in rows[:sample_limit]]
+
+
 def _path_pedestrian_focus_coverage_rows(
     focus_report: Mapping[str, object] | None,
 ) -> list[dict[str, object]]:
@@ -538,6 +550,15 @@ def _path_pedestrian_focus_coverage_rows(
         candidate_stroke_rows = [
             row for row in stroke_rows if _has_decoded_candidates(row)
         ]
+        candidate_zero_delta_rows = [
+            row for row in candidate_stroke_rows if not _has_meaningful_width_delta(row)
+        ]
+        zero_candidate_stroke_rows = [
+            row for row in stroke_rows if not _has_decoded_candidates(row)
+        ]
+        zero_candidate_dash_rows = [
+            row for row in dash_rows if not _has_decoded_candidates(row)
+        ]
         coverage_rows.append(
             {
                 "camera": camera_name,
@@ -546,12 +567,8 @@ def _path_pedestrian_focus_coverage_rows(
                 "candidate_backed_width_delta_rows": sum(
                     1 for row in candidate_stroke_rows if _has_meaningful_width_delta(row)
                 ),
-                "candidate_backed_zero_delta_rows": sum(
-                    1 for row in candidate_stroke_rows if not _has_meaningful_width_delta(row)
-                ),
-                "zero_candidate_stroke_rows": sum(
-                    1 for row in stroke_rows if not _has_decoded_candidates(row)
-                ),
+                "candidate_backed_zero_delta_rows": len(candidate_zero_delta_rows),
+                "zero_candidate_stroke_rows": len(zero_candidate_stroke_rows),
                 "source_capped_stroke_rows": sum(
                     1 for row in stroke_rows if row.get("source_line_width_capped") is True
                 ),
@@ -559,8 +576,18 @@ def _path_pedestrian_focus_coverage_rows(
                 "candidate_backed_dash_rows": sum(
                     1 for row in dash_rows if _has_decoded_candidates(row)
                 ),
-                "zero_candidate_dash_rows": sum(
-                    1 for row in dash_rows if not _has_decoded_candidates(row)
+                "zero_candidate_dash_rows": len(zero_candidate_dash_rows),
+                "candidate_zero_delta_stroke_samples": _focus_coverage_sample_labels(
+                    candidate_zero_delta_rows,
+                    _stroke_focus_cue_summary,
+                ),
+                "zero_candidate_stroke_samples": _focus_coverage_sample_labels(
+                    zero_candidate_stroke_rows,
+                    _stroke_focus_cue_summary,
+                ),
+                "zero_candidate_dash_samples": _focus_coverage_sample_labels(
+                    zero_candidate_dash_rows,
+                    _dash_focus_cue_summary,
                 ),
             }
         )
@@ -2165,6 +2192,63 @@ def _summary_focus_coverage_lines(report: Mapping[str, object]) -> list[str]:
     return lines
 
 
+def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[str]:
+    if report.get("path_pedestrian_focus_comparison_match") is False:
+        return []
+    rows = report.get("path_pedestrian_focus_coverage")
+    coverage_rows = rows if isinstance(rows, list) else []
+    sample_rows: list[list[object]] = []
+    for row in coverage_rows:
+        if not isinstance(row, Mapping):
+            continue
+        samples = [
+            row.get("candidate_zero_delta_stroke_samples"),
+            row.get("zero_candidate_stroke_samples"),
+            row.get("zero_candidate_dash_samples"),
+        ]
+        if not any(isinstance(sample, list) and sample for sample in samples):
+            continue
+        candidate_zero_delta_samples = row.get("candidate_zero_delta_stroke_samples")
+        zero_candidate_stroke_samples = row.get("zero_candidate_stroke_samples")
+        zero_candidate_dash_samples = row.get("zero_candidate_dash_samples")
+        sample_rows.append(
+            [
+                row.get("camera"),
+                _joined_summary_labels(
+                    candidate_zero_delta_samples
+                    if isinstance(candidate_zero_delta_samples, list)
+                    else []
+                ),
+                _joined_summary_labels(
+                    zero_candidate_stroke_samples
+                    if isinstance(zero_candidate_stroke_samples, list)
+                    else []
+                ),
+                _joined_summary_labels(
+                    zero_candidate_dash_samples
+                    if isinstance(zero_candidate_dash_samples, list)
+                    else []
+                ),
+            ]
+        )
+    if not sample_rows:
+        return []
+    lines = [
+        "",
+        "## Path/pedestrian focus coverage samples",
+        "",
+        (
+            "Shows representative focus rows hidden from the cue table because they are "
+            "candidate-backed zero-delta rows or zero-candidate rows."
+        ),
+        "",
+        "| Camera | Candidate zero-delta strokes | Zero-candidate strokes | Zero-candidate dashes |",
+        "| --- | --- | --- | --- |",
+    ]
+    lines.extend(_markdown_table_row(row) for row in sample_rows)
+    return lines
+
+
 def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
     if report.get("path_pedestrian_focus_comparison_match") is False:
         return []
@@ -2373,6 +2457,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_summary_crop_color_metric_lines(report))
     lines.extend(_style_audit_area_fill_focus_lines(report))
     lines.extend(_summary_focus_coverage_lines(report))
+    lines.extend(_summary_focus_coverage_sample_lines(report))
     lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"
 

@@ -773,6 +773,18 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         "dash_mismatch_rows": 2,
                         "candidate_backed_dash_rows": 1,
                         "zero_candidate_dash_rows": 1,
+                        "candidate_zero_delta_stroke_samples": [
+                            "road-steps->road-steps delta=0mm ratio=1 candidates=3"
+                        ],
+                        "zero_candidate_stroke_samples": [
+                            (
+                                "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
+                                "candidates=0 source-capped"
+                            )
+                        ],
+                        "zero_candidate_dash_samples": [
+                            "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
+                        ],
                     }
                 ],
             )
@@ -1839,6 +1851,18 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         "dash_mismatch_rows": 2,
                         "candidate_backed_dash_rows": 1,
                         "zero_candidate_dash_rows": 1,
+                        "candidate_zero_delta_stroke_samples": [
+                            "road-steps->road-steps delta=0mm ratio=1 candidates=3"
+                        ],
+                        "zero_candidate_stroke_samples": [
+                            (
+                                "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
+                                "candidates=0 source-capped"
+                            )
+                        ],
+                        "zero_candidate_dash_samples": [
+                            "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
+                        ],
                     }
                 ],
                 "cameras": [
@@ -1888,6 +1912,9 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             "| chamonix-trails-z14-outdoors | 3 | 2 | 1 | 1 | 1 | 1 | 2 | 1 | 1 |",
             markdown,
         )
+        self.assertIn("## Path/pedestrian focus coverage samples", markdown)
+        self.assertIn("road-steps->road-steps delta=0mm ratio=1 candidates=3", markdown)
+        self.assertIn("bridge-path->bridge-path delta=-0.7937mm ratio=0.25", markdown)
         self.assertIn("## Path/pedestrian focus cues", markdown)
         self.assertIn("| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | lighter + blue higher=2", markdown)
@@ -1899,6 +1926,31 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn("candidate_types=trail=69", markdown)
         self.assertNotIn("candidates=None", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
+
+    def test_build_summary_markdown_handles_partial_focus_coverage_sample_rows(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "path_pedestrian_focus_comparison_match": True,
+                "path_pedestrian_focus_coverage": [
+                    {
+                        "camera": "legacy-focus-report-camera",
+                        "zero_candidate_dash_samples": [
+                            "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("## Path/pedestrian focus coverage samples", markdown)
+        self.assertIn(
+            (
+                "| legacy-focus-report-camera | - | - | "
+                "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0 |"
+            ),
+            markdown,
+        )
 
     def test_build_summary_markdown_omits_zero_candidate_focus_cues(self):
         markdown = build_summary_markdown(
