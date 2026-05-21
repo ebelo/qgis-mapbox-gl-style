@@ -632,6 +632,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 summary,
             )
             self.assertIn("## Crop color metrics", summary)
+            self.assertIn("## Crop color movement groups", summary)
+            self.assertIn(
+                "| darker + red lower | 1 | 127.0 | 127.0 | chamonix-trails-z14-outdoors=1 |",
+                summary,
+            )
             self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 | darker; red -127.0 |", summary)
 
     def test_generate_visual_crop_report_marks_missing_required_artifacts(self):
@@ -1371,6 +1376,115 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertLess(ranked_section.index("camera-6"), ranked_section.index("camera-2"))
         self.assertNotIn("camera-1", ranked_section)
         self.assertIn("| camera-1 | 1 | - | - | 1.0, 0.0, 0.0 | +1.0 |", markdown)
+
+    def test_build_summary_markdown_groups_crop_color_movements(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 2,
+                "camera_count": 3,
+                "crop_count": 4,
+                "cameras": [
+                    {
+                        "camera": "geneva",
+                        "status": "cropped",
+                        "crops": [
+                            {
+                                "index": 1,
+                                "color_metrics": {
+                                    "delta": {
+                                        "mean_rgb": [4.0, 0.0, 12.0],
+                                        "luminance": 6.0,
+                                        "luminance_direction": "lighter",
+                                        "dominant_rgb_delta": {
+                                            "channel": "blue",
+                                            "delta": 12.0,
+                                            "direction": "higher",
+                                        },
+                                    }
+                                },
+                            },
+                            {
+                                "index": 2,
+                                "color_metrics": {
+                                    "delta": {
+                                        "mean_rgb": [1.0, 0.0, 5.0],
+                                        "luminance": 2.0,
+                                        "luminance_direction": "lighter",
+                                        "dominant_rgb_delta": {
+                                            "channel": "blue",
+                                            "delta": 5.0,
+                                            "direction": "higher",
+                                        },
+                                    }
+                                },
+                            },
+                        ],
+                    },
+                    {
+                        "camera": "zermatt",
+                        "status": "cropped",
+                        "crops": [
+                            {
+                                "index": 1,
+                                "color_metrics": {
+                                    "delta": {
+                                        "mean_rgb": [2.0, 0.0, 16.0],
+                                        "luminance": 8.0,
+                                        "luminance_direction": "lighter",
+                                        "dominant_rgb_delta": {
+                                            "channel": "blue",
+                                            "delta": 16.0,
+                                            "direction": "higher",
+                                        },
+                                    }
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "camera": "lausanne",
+                        "status": "cropped",
+                        "crops": [
+                            {
+                                "index": 1,
+                                "color_metrics": {
+                                    "delta": {
+                                        "mean_rgb": [-18.0, -1.0, -16.0],
+                                        "luminance": -6.0,
+                                        "luminance_direction": "darker",
+                                        "dominant_rgb_delta": {
+                                            "channel": "red",
+                                            "delta": -18.0,
+                                            "direction": "lower",
+                                        },
+                                    }
+                                },
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+
+        movement_section = markdown.split("## Crop color movement groups", 1)[1].split(
+            "## Crop color metrics",
+            1,
+        )[0]
+        self.assertIn(
+            "| lighter + blue higher | 3 | 16.0 | 8.0 | geneva=2, zermatt=1 |",
+            movement_section,
+        )
+        self.assertIn(
+            "| darker + red lower | 1 | 18.0 | 6.0 | lausanne=1 |",
+            movement_section,
+        )
+        self.assertLess(
+            movement_section.index("lighter + blue higher"),
+            movement_section.index("darker + red lower"),
+        )
 
     def test_build_summary_markdown_handles_malformed_color_delta_values(self):
         markdown = build_summary_markdown(

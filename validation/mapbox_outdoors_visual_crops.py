@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,7 @@ DEFAULT_FOCUS_STROKE_CUE_LIMIT = 3
 DEFAULT_STYLE_AUDIT_SAMPLE_LIMIT = 5
 DEFAULT_STYLE_AUDIT_SIMPLIFICATION_LIMIT = 3
 DEFAULT_CROP_COLOR_DELTA_SUMMARY_LIMIT = 5
+DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT = 8
 MAX_STYLE_AUDIT_SIMPLIFICATION_VALUE_LENGTH = 96
 MIN_SCORE_FOR_CROP = 1.0
 MAX_OVERLAP_RATIO = 0.35
@@ -1639,6 +1640,105 @@ def _summary_crop_color_delta_entries(
     return entries
 
 
+def _crop_color_movement_group_key(delta: object) -> tuple[str, str, str] | None:
+    if not isinstance(delta, Mapping):
+        return None
+    luminance_direction = delta.get("luminance_direction")
+    dominant_rgb_delta = delta.get("dominant_rgb_delta")
+    if not isinstance(luminance_direction, str) or not luminance_direction:
+        return None
+    if not isinstance(dominant_rgb_delta, Mapping):
+        return None
+    channel = dominant_rgb_delta.get("channel")
+    rgb_direction = dominant_rgb_delta.get("direction")
+    if not isinstance(channel, str) or not channel:
+        return None
+    if not isinstance(rgb_direction, str) or not rgb_direction:
+        return None
+    return luminance_direction, channel, rgb_direction
+
+
+def _crop_color_movement_group_label(key: tuple[str, str, str]) -> str:
+    luminance_direction, channel, rgb_direction = key
+    return f"{luminance_direction} + {channel} {rgb_direction}"
+
+
+def _increment_count(counts: dict[str, int], key: object) -> None:
+    if isinstance(key, str) and key:
+        counts[key] = counts.get(key, 0) + 1
+
+
+@dataclass
+class _CropColorMovementGroup:
+    count: int = 0
+    max_abs_rgb: float = 0.0
+    max_abs_luminance: float = 0.0
+    cameras: dict[str, int] = field(default_factory=dict)
+
+    def add(self, delta: Mapping[str, object], camera_name: object) -> None:
+        self.count += 1
+        dominant_rgb_delta = delta.get("dominant_rgb_delta")
+        rgb_delta = (
+            _metric_float(dominant_rgb_delta, "delta")
+            if isinstance(dominant_rgb_delta, Mapping)
+            else None
+        )
+        luminance = _metric_float(delta, "luminance")
+        if rgb_delta is not None:
+            self.max_abs_rgb = max(self.max_abs_rgb, abs(rgb_delta))
+        if luminance is not None:
+            self.max_abs_luminance = max(self.max_abs_luminance, abs(luminance))
+        _increment_count(self.cameras, camera_name)
+
+
+def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> list[list[object]]:
+    groups: dict[tuple[str, str, str], _CropColorMovementGroup] = {}
+    for camera, crop in _summary_crop_mappings(report):
+        metrics = crop.get("color_metrics")
+        if not isinstance(metrics, Mapping):
+            continue
+        delta = metrics.get("delta")
+        group_key = _crop_color_movement_group_key(delta)
+        if group_key is None or not isinstance(delta, Mapping):
+            continue
+        groups.setdefault(group_key, _CropColorMovementGroup()).add(delta, camera.get("camera"))
+    sorted_groups = sorted(
+        groups.items(),
+        key=lambda item: (-item[1].count, -item[1].max_abs_rgb, item[0]),
+    )
+    return [
+        [
+            _crop_color_movement_group_label(group_key),
+            group.count,
+            f"{group.max_abs_rgb:.1f}",
+            f"{group.max_abs_luminance:.1f}",
+            _joined_summary_labels(_top_count_labels(group.cameras)),
+        ]
+        for group_key, group in sorted_groups[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]
+    ]
+
+
+def _summary_crop_color_movement_group_lines(report: Mapping[str, object]) -> list[str]:
+    rows = _summary_crop_color_movement_group_rows(report)
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Crop color movement groups",
+        "",
+        (
+            "Groups crop-local QGIS-minus-Mapbox color movements by luminance direction "
+            "and dominant RGB channel, so repeated tint families are visible before "
+            "tuning a single style rule."
+        ),
+        "",
+        "| Movement | Crops | Max abs RGB | Max abs luminance | Cameras |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def _summary_largest_crop_color_delta_lines(report: Mapping[str, object]) -> list[str]:
     entries = _summary_crop_color_delta_entries(report)[:DEFAULT_CROP_COLOR_DELTA_SUMMARY_LIMIT]
     if not entries:
@@ -1948,6 +2048,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             )
         )
     lines.extend(_summary_largest_crop_color_delta_lines(report))
+    lines.extend(_summary_crop_color_movement_group_lines(report))
     lines.extend(_summary_crop_color_metric_lines(report))
     lines.extend(_style_audit_area_fill_focus_lines(report))
     lines.extend(_summary_focus_cue_lines(report))
