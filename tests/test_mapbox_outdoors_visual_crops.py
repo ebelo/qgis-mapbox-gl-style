@@ -136,6 +136,8 @@ def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z1
     diff.save(diff_path)
     diff.close()
     comparison_summary = {
+        "generated_at": "2026-05-20T20:00:00+00:00",
+        "style_url": "mapbox://styles/mapbox/outdoors-v12",
         "cameras": [
             {
                 "camera": camera_name,
@@ -445,6 +447,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             {
                 "generated": "2026-05-20T20:00:00+00:00",
                 "comparison_summary_json": "debug/comparison/summary.json",
+                "comparison_summary_run": {
+                    "path": "debug/comparison/summary.json",
+                    "generated_at": "2026-05-20T20:00:00+00:00",
+                    "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                },
                 "crop_size": {"width": 4, "height": 4},
                 "crops_per_camera": 1,
                 "camera_count": 1,
@@ -472,6 +479,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
 
         self.assertIn("# Mapbox Outdoors visual crop report", markdown)
+        self.assertIn(
+            "Comparison summary run: `debug/comparison/summary.json` "
+            "(generated_at=2026-05-20T20:00:00+00:00, "
+            "style_url=mapbox://styles/mapbox/outdoors-v12)",
+            markdown,
+        )
         self.assertIn("zermatt-trails-z18-outdoors", markdown)
         self.assertIn("debug/crops/crop-sheet.jpg", markdown)
 
@@ -586,6 +599,14 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             report_path = Path(stdout.getvalue().strip()).parent / "visual-crops.json"
             report = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(report["crop_count"], 1)
+            self.assertEqual(
+                report["comparison_summary_run"],
+                {
+                    "path": str(summary_path),
+                    "generated_at": "2026-05-20T20:00:00+00:00",
+                    "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                },
+            )
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
             self.assertIn("path_pedestrian_focus", report["cameras"][0])
             self.assertTrue((report_path.parent / "crop-sheet.jpg").exists())
