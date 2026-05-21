@@ -1832,6 +1832,13 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                 "road_features_json": "debug/roads/road-features.json",
                 "source_style_json": "debug/source/mapbox-outdoors-v12.json",
                 "comparison_summary_jsons": ["debug/comparison/summary.json"],
+                "comparison_summary_runs": [
+                    {
+                        "path": "debug/comparison/summary.json",
+                        "generated_at": "2026-05-20T00:35:04+00:00",
+                        "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                    }
+                ],
                 "qgis_style_cameras": ["chamonix-trails-z14-outdoors"],
                 "qgis_label_style_cameras": ["chamonix-trails-z14-outdoors"],
             },
@@ -1846,6 +1853,13 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("Road features input: `debug/roads/road-features.json`", markdown)
         self.assertIn("Source style input: `debug/source/mapbox-outdoors-v12.json`", markdown)
         self.assertIn("Comparison summary inputs: `debug/comparison/summary.json`", markdown)
+        self.assertIn("Comparison summary runs:", markdown)
+        self.assertIn(
+            "- `debug/comparison/summary.json` "
+            "(generated_at=2026-05-20T00:35:04+00:00, "
+            "style_url=mapbox://styles/mapbox/outdoors-v12)",
+            markdown,
+        )
         self.assertIn("QGIS style input cameras: `chamonix-trails-z14-outdoors`", markdown)
         self.assertIn("QGIS label style input cameras: `chamonix-trails-z14-outdoors`", markdown)
 
@@ -2022,6 +2036,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             comparison_summary_path.write_text(
                 json.dumps(
                     {
+                        "generated_at": "2026-05-20T00:35:04+00:00",
+                        "style_url": "mapbox://styles/mapbox/outdoors-v12",
                         "contact_sheet": str(contact_sheet_path),
                         "cameras": [
                             {
@@ -2074,6 +2090,16 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             self.assertEqual(
                 report["input_artifacts"]["comparison_summary_jsons"],
                 [str(comparison_summary_path)],
+            )
+            self.assertEqual(
+                report["input_artifacts"]["comparison_summary_runs"],
+                [
+                    {
+                        "path": str(comparison_summary_path),
+                        "generated_at": "2026-05-20T00:35:04+00:00",
+                        "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                    }
+                ],
             )
             self.assertEqual(report["input_artifacts"]["qgis_style_cameras"], ["chamonix-trails-z14-outdoors"])
             self.assertEqual(
