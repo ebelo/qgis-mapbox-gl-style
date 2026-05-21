@@ -628,7 +628,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             summary = paths.summary_path.read_text(encoding="utf-8")
             self.assertIn("## Largest crop color deltas", summary)
             self.assertIn(
-                "| chamonix-trails-z14-outdoors | 1 | -127.0, -127.0, -127.0 | -127.0 | 127.0 | darker; red -127.0 |",
+                f"| chamonix-trails-z14-outdoors | 1 | [6,6,10,10] | `{outputs['diff']}` | -127.0, -127.0, -127.0 | -127.0 | 127.0 | darker; red -127.0 |",
                 summary,
             )
             self.assertIn("## Crop color metrics", summary)
@@ -1366,8 +1366,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             "## Crop color metrics",
             1,
         )[0]
-        self.assertIn("| camera-6 | 1 | 6.0, 0.0, 0.0 | +1.0 | 6.0 |", ranked_section)
-        self.assertIn("| camera-2 | 1 | 2.0, 0.0, 0.0 | +1.0 | 2.0 |", ranked_section)
+        self.assertIn("| camera-6 | 1 | [0,0,4,4] | - | 6.0, 0.0, 0.0 | +1.0 | 6.0 |", ranked_section)
+        self.assertIn("| camera-2 | 1 | [0,0,4,4] | - | 2.0, 0.0, 0.0 | +1.0 | 2.0 |", ranked_section)
         self.assertLess(ranked_section.index("camera-6"), ranked_section.index("camera-2"))
         self.assertNotIn("camera-1", ranked_section)
         self.assertIn("| camera-1 | 1 | - | - | 1.0, 0.0, 0.0 | +1.0 |", markdown)
@@ -1414,7 +1414,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             "## Crop color metrics",
             1,
         )[0]
-        self.assertIn("| bad-color | 1 | - | +9.0 | - |", ranked_section)
+        self.assertIn("| bad-color | 1 | - | - | - | +9.0 | - |", ranked_section)
         self.assertNotIn("| bad-color | 2 |", ranked_section)
 
     def test_build_summary_markdown_lists_path_pedestrian_focus_cues(self):

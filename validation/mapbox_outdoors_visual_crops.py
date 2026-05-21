@@ -1562,6 +1562,23 @@ def _dominant_color_delta_label(metrics: object) -> str:
     return "; ".join(movement) if movement else "-"
 
 
+def _crop_box_label(crop: Mapping[str, object]) -> object:
+    box = crop.get("box")
+    if not isinstance(box, list):
+        return "-"
+    return box
+
+
+def _crop_output_path_label(crop: Mapping[str, object], key: str) -> str:
+    outputs = crop.get("outputs")
+    if not isinstance(outputs, Mapping):
+        return "-"
+    path = outputs.get(key)
+    if not isinstance(path, str) or not path:
+        return "-"
+    return f"`{path}`"
+
+
 def _summary_crop_mappings(report: Mapping[str, object]) -> list[tuple[Mapping[str, object], Mapping[str, object]]]:
     crop_mappings: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
     cameras = report.get("cameras")
@@ -1600,6 +1617,8 @@ def _summary_crop_color_delta_entry(
         [
             camera.get("camera"),
             crop.get("index"),
+            _crop_box_label(crop),
+            _crop_output_path_label(crop, "diff"),
             _color_metric_label(delta, "mean_rgb"),
             _luminance_metric_label(delta),
             f"{max_abs_rgb:.1f}" if max_abs_rgb is not None else "-",
@@ -1635,8 +1654,8 @@ def _summary_largest_crop_color_delta_lines(report: Mapping[str, object]) -> lis
             "reading every crop row."
         ),
         "",
-        "| Camera | Crop | QGIS-Mapbox RGB | QGIS-Mapbox luminance | Max abs RGB | Dominant movement |",
-        "| --- | ---: | --- | ---: | ---: | --- |",
+        "| Camera | Crop | Box | Diff crop | QGIS-Mapbox RGB | QGIS-Mapbox luminance | Max abs RGB | Dominant movement |",
+        "| --- | ---: | --- | --- | --- | ---: | ---: | --- |",
     ]
     lines.extend(_markdown_table_row(row) for _score, _luminance_score, row in entries)
     return lines
