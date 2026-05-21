@@ -439,8 +439,27 @@ def _style_audit_rows(summary: Mapping[str, object], key: object) -> list[Mappin
     return _style_audit_mapping_rows(summary.get(str(key)))
 
 
+def _style_audit_qgis_converter_warnings_by_layer(
+    style_audit_report: Mapping[str, object],
+) -> dict[str, Mapping[str, object]]:
+    layers = style_audit_report.get("layers")
+    if not isinstance(layers, list):
+        return {}
+    warnings_by_layer: dict[str, Mapping[str, object]] = {}
+    for layer in layers:
+        if not isinstance(layer, Mapping):
+            continue
+        layer_id = str(layer.get("id") or "")
+        qgis_converter_warnings = layer.get("qgis_converter_warnings")
+        if layer_id and isinstance(qgis_converter_warnings, Mapping):
+            warnings_by_layer[layer_id] = qgis_converter_warnings
+    return warnings_by_layer
+
+
 def _style_audit_candidate_sample(
     candidate: Mapping[str, object],
+    *,
+    qgis_converter_warnings_by_layer: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     sample: dict[str, object] = {}
     for key in (
@@ -465,6 +484,13 @@ def _style_audit_candidate_sample(
         value = candidate.get(source_key)
         if _non_empty_focus_value(value):
             sample[target_key] = value
+    qgis_converter_warnings = candidate.get("qgis_converter_warnings")
+    if not isinstance(qgis_converter_warnings, Mapping) and qgis_converter_warnings_by_layer:
+        qgis_converter_warnings = qgis_converter_warnings_by_layer.get(
+            str(candidate.get("layer") or "")
+        )
+    if isinstance(qgis_converter_warnings, Mapping):
+        sample["qgis_converter_warnings"] = qgis_converter_warnings
     return sample
 
 
@@ -524,6 +550,9 @@ def _style_audit_area_fill_focus(
     summary = _style_audit_summary(style_audit_report)
     if not summary:
         return []
+    qgis_converter_warnings_by_layer = _style_audit_qgis_converter_warnings_by_layer(
+        style_audit_report
+    )
     focus_rows: list[dict[str, object]] = []
     for section in STYLE_AUDIT_AREA_FILL_SECTIONS:
         candidate_rows = summary.get(str(section["candidates"]))
@@ -544,7 +573,10 @@ def _style_audit_area_fill_focus(
                     _style_audit_rows(summary, section["qgis_dependent_by_property"])
                 ),
                 "sample_candidates": [
-                    _style_audit_candidate_sample(candidate)
+                    _style_audit_candidate_sample(
+                        candidate,
+                        qgis_converter_warnings_by_layer=qgis_converter_warnings_by_layer,
+                    )
                     for candidate in _style_audit_sample_candidates(
                         candidates,
                         sample_limit=sample_limit,
@@ -1332,8 +1364,41 @@ def _candidate_sample_label(candidate: Mapping[str, object]) -> str:
     qgis_dependent = _string_values(candidate.get("qgis_dependent_properties"))
     if qgis_dependent:
         details.append(f"qgis={', '.join(qgis_dependent[:4])}")
+    qgis_warnings = _candidate_qgis_converter_warning_labels(candidate, layer)
+    if qgis_warnings:
+        details.append(f"qgis-warnings={', '.join(qgis_warnings[:2])}")
     detail_suffix = f" ({'; '.join(details)})" if details else ""
     return f"{layer}{detail_suffix}"
+
+
+def _candidate_qgis_converter_warning_labels(
+    candidate: Mapping[str, object],
+    layer: str,
+) -> list[str]:
+    warnings_summary = candidate.get("qgis_converter_warnings")
+    if not isinstance(warnings_summary, Mapping):
+        return []
+    warning_labels = [
+        _candidate_qgis_converter_warning_label(str(warning), layer)
+        for warning in _string_values(warnings_summary.get("warnings"))
+    ]
+    if warning_labels:
+        return warning_labels
+    by_message = warnings_summary.get("by_message")
+    if not isinstance(by_message, list):
+        return []
+    return [
+        str(row.get("message"))
+        for row in by_message
+        if isinstance(row, Mapping) and row.get("message") not in (None, "")
+    ]
+
+
+def _candidate_qgis_converter_warning_label(warning: str, layer: str) -> str:
+    layer_prefix = f"{layer}: "
+    if warning.startswith(layer_prefix):
+        return warning[len(layer_prefix) :]
+    return warning
 
 
 def _candidate_sample_labels(candidates: object) -> list[str]:

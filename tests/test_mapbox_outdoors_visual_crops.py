@@ -293,6 +293,14 @@ def _comparison_delta_report(candidate_summary_json, *, camera_name="chamonix-tr
 
 def _style_audit_report():
     return {
+        "layers": [
+            {
+                "id": "contour",
+                "qgis_converter_warnings": {
+                    "by_message": [{"count": 1, "message": "Example contour warning"}],
+                },
+            },
+        ],
         "summary": {
             "terrain_landcover_palette_candidates": [
                 {
@@ -658,6 +666,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 markdown,
             )
             self.assertIn("unknown-layer (landcover/fill)", markdown)
+            self.assertIn("qgis-warnings=Example contour warning", markdown)
             self.assertNotIn("None (", markdown)
 
     def test_generate_visual_crop_report_keeps_zero_candidate_style_audit_sections(self):
@@ -716,6 +725,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "source_layer": "landuse_overlay",
                     "type": "fill",
                     "qgis_dependent_control_properties": ["filter", "paint.fill-pattern"],
+                    "qgis_converter_warnings": {
+                        "count": 1,
+                        "warnings": ["wetland-pattern: Could not retrieve sprite 'wetland'"],
+                    },
                 },
                 {"layer": "contour-line", "source_layer": "contour", "type": "line"},
                 {
@@ -756,6 +769,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertNotIn("wetland (", build_summary_markdown(report))
             self.assertIn("wetland-pattern", build_summary_markdown(report))
             self.assertIn("contour-line", build_summary_markdown(report))
+            self.assertIn(
+                "qgis-warnings=Could not retrieve sprite 'wetland'",
+                build_summary_markdown(report),
+            )
 
     def test_generate_visual_crop_report_attaches_matching_comparison_delta_context(self):
         image_module, image_stat_module = _fake_image_modules()
