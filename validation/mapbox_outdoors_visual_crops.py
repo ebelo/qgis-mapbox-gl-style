@@ -472,10 +472,19 @@ def _path_pedestrian_focus_cues_by_camera(
         camera_name = str(camera.get("camera") or "")
         if not camera_name:
             continue
+        ranked_stroke_rows = _largest_non_auxiliary_stroke_delta_rows(
+            [camera],
+            limit=10_000,
+        )
         width_delta_rows = [
             row
-            for row in _largest_non_auxiliary_stroke_delta_rows([camera], limit=10_000)
+            for row in ranked_stroke_rows
             if _has_meaningful_width_delta(row) and _has_decoded_candidates(row)
+        ][: max(0, stroke_limit)]
+        source_capped_rows = [
+            row
+            for row in ranked_stroke_rows
+            if row.get("source_line_width_capped") is True and _has_decoded_candidates(row)
         ][: max(0, stroke_limit)]
         width_rows = [
             _focus_cue_from_row(
@@ -491,6 +500,21 @@ def _path_pedestrian_focus_cues_by_camera(
                 ),
             )
             for row in width_delta_rows
+        ]
+        source_capped_stroke_rows = [
+            _focus_cue_from_row(
+                row,
+                (
+                    "source_layer_id",
+                    "qgis_layer_id",
+                    "decoded_candidate_count",
+                    "line_width_delta_mm",
+                    "line_width_abs_delta_mm",
+                    "line_width_ratio",
+                    "source_line_width_capped",
+                ),
+            )
+            for row in source_capped_rows
         ]
         dash_rows = [
             _focus_cue_from_row(
@@ -509,9 +533,10 @@ def _path_pedestrian_focus_cues_by_camera(
             if _has_decoded_candidates(row)
         ]
         dash_rows = dash_rows[: max(0, dash_limit)]
-        if width_rows or dash_rows:
+        if width_rows or source_capped_stroke_rows or dash_rows:
             cues_by_camera[camera_name] = {
                 "stroke_width_deltas": width_rows,
+                "source_capped_strokes": source_capped_stroke_rows,
                 "dash_mismatches": dash_rows,
             }
     return cues_by_camera
@@ -2131,12 +2156,17 @@ def _summary_focus_row(
         "stroke_width_deltas",
         _stroke_focus_cue_summary,
     )
+    source_capped_summaries = _candidate_backed_focus_summaries(
+        focus,
+        "source_capped_strokes",
+        _stroke_focus_cue_summary,
+    )
     dash_summaries = _candidate_backed_focus_summaries(
         focus,
         "dash_mismatches",
         _dash_focus_cue_summary,
     )
-    if not stroke_summaries and not dash_summaries:
+    if not stroke_summaries and not source_capped_summaries and not dash_summaries:
         return None
     camera_name = camera.get("camera")
     return [
@@ -2145,6 +2175,7 @@ def _summary_focus_row(
             _focus_movement_group_labels(movement_group_records, camera_name)
         ),
         stroke_summaries,
+        source_capped_summaries,
         dash_summaries,
     ]
 
@@ -2315,8 +2346,11 @@ def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
                 "color movement families."
             ),
             "",
-            "| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |",
-            "| --- | --- | --- | --- |",
+            (
+                "| Camera | Crop movement groups | Stroke width cues | "
+                "Source-capped stroke cues | Dash mismatch cues |"
+            ),
+            "| --- | --- | --- | --- | --- |",
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)

@@ -287,6 +287,34 @@ def _path_pedestrian_focus_report(
     }
 
 
+def _candidate_backed_source_capped_stroke_comparison():
+    return {
+        "source_layer_id": "road-pedestrian",
+        "decoded_candidate_count": 191,
+        "decoded_candidate_type_counts": {"pedestrian": 191},
+        "source_sampled_controls": {
+            "line-width": 3.0,
+            "line-width_raw_mm": 3.175,
+            "line-width_capped": True,
+        },
+        "qgis_controls": [
+            {
+                "layer_id": "road-pedestrian-z18-plus",
+                "controls": {"line-width": 3.0},
+            }
+        ],
+        "qgis_control_deltas": [
+            {
+                "layer_id": "road-pedestrian-z18-plus",
+                "deltas": {
+                    "line-width_delta_mm": 0.0,
+                    "line-width_ratio": 1.0,
+                },
+            }
+        ],
+    }
+
+
 def _comparison_delta_report(candidate_summary_json, *, camera_name="chamonix-trails-z14-outdoors"):
     return {
         "input_artifacts": {
@@ -735,6 +763,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             comparison_summary, summary_path = _write_visual_triplet(root, image_module)
             focus_path = root / "focus" / "path-pedestrian-focus.json"
             focus_path.parent.mkdir(parents=True)
+            focus_report = _path_pedestrian_focus_report(
+                comparison_summary_jsons=[str(summary_path)]
+            )
+            focus_report["cameras"][0]["source_qgis_stroke_control_comparisons"].append(
+                _candidate_backed_source_capped_stroke_comparison()
+            )
             paths = build_visual_crop_paths(root / "debug" / "run")
 
             report = generate_visual_crop_report(
@@ -742,9 +776,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary_path=summary_path,
                 paths=paths,
                 annotation_inputs=VisualCropAnnotationInputs(
-                    path_pedestrian_focus_report=_path_pedestrian_focus_report(
-                        comparison_summary_jsons=[str(summary_path)]
-                    ),
+                    path_pedestrian_focus_report=focus_report,
                     path_pedestrian_focus_report_path=focus_path,
                 ),
                 crop_size=(4, 4),
@@ -756,6 +788,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
 
             focus_cues = report["cameras"][0]["path_pedestrian_focus"]
             stroke_cues = focus_cues["stroke_width_deltas"]
+            source_capped_cues = focus_cues["source_capped_strokes"]
             dash_cues = focus_cues["dash_mismatches"]
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
             self.assertEqual(
@@ -768,17 +801,21 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 [
                     {
                         "camera": "chamonix-trails-z14-outdoors",
-                        "stroke_rows": 3,
-                        "candidate_backed_stroke_rows": 2,
+                        "stroke_rows": 4,
+                        "candidate_backed_stroke_rows": 3,
                         "candidate_backed_width_delta_rows": 1,
-                        "candidate_backed_zero_delta_rows": 1,
+                        "candidate_backed_zero_delta_rows": 2,
                         "zero_candidate_stroke_rows": 1,
-                        "source_capped_stroke_rows": 1,
+                        "source_capped_stroke_rows": 2,
                         "dash_mismatch_rows": 2,
                         "candidate_backed_dash_rows": 1,
                         "zero_candidate_dash_rows": 1,
                         "candidate_zero_delta_stroke_samples": [
-                            "road-steps->road-steps delta=0mm ratio=1 candidates=3"
+                            "road-steps->road-steps delta=0mm ratio=1 candidates=3",
+                            (
+                                "road-pedestrian->road-pedestrian-z18-plus delta=0mm "
+                                "ratio=1 candidates=191 source-capped"
+                            ),
                         ],
                         "zero_candidate_stroke_samples": [
                             (
@@ -790,7 +827,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                             (
                                 "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
                                 "candidates=0 source-capped"
-                            )
+                            ),
+                            (
+                                "road-pedestrian->road-pedestrian-z18-plus delta=0mm "
+                                "ratio=1 candidates=191 source-capped"
+                            ),
                         ],
                         "zero_candidate_dash_samples": [
                             "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
@@ -804,6 +845,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
             self.assertEqual(stroke_cues[0]["source_layer_id"], "road-path-trail")
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
+            self.assertEqual(source_capped_cues[0]["source_layer_id"], "road-pedestrian")
+            self.assertEqual(source_capped_cues[0]["candidate_types"], ["pedestrian=191"])
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
 
@@ -1910,6 +1953,17 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                     "line_width_delta_mm": 0.079375,
                                 }
                             ],
+                            "source_capped_strokes": [
+                                {
+                                    "source_layer_id": "road-pedestrian",
+                                    "qgis_layer_id": "road-pedestrian-z18-plus",
+                                    "decoded_candidate_count": 191,
+                                    "candidate_types": ["pedestrian=191"],
+                                    "line_width_delta_mm": 0.0,
+                                    "line_width_ratio": 1.0,
+                                    "source_line_width_capped": True,
+                                }
+                            ],
                             "dash_mismatches": [
                                 {
                                     "source_layer_id": "bridge-path",
@@ -1949,13 +2003,24 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
         self.assertIn("## Path/pedestrian focus cues", markdown)
-        self.assertIn("| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |", markdown)
+        self.assertIn(
+            (
+                "| Camera | Crop movement groups | Stroke width cues | "
+                "Source-capped stroke cues | Dash mismatch cues |"
+            ),
+            markdown,
+        )
         self.assertIn("| chamonix-trails-z14-outdoors | lighter + blue higher=2", markdown)
         self.assertIn("camera movement below global top=1", markdown)
         self.assertIn("extra chamonix movement 6=1", markdown)
         self.assertNotIn("extra chamonix movement 7=1", markdown)
         self.assertIn("road-path-trail->road-path-trail-below-z16", markdown)
         self.assertIn("candidates=74 (trail=69, hiking=5)", markdown)
+        self.assertIn(
+            "road-pedestrian->road-pedestrian-z18-plus delta=0mm ratio=1",
+            markdown,
+        )
+        self.assertIn("candidates=191 (pedestrian=191) source-capped", markdown)
         self.assertIn("candidate_types=trail=69", markdown)
         self.assertNotIn("candidates=None", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
