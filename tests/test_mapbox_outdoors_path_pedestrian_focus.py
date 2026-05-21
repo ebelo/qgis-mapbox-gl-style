@@ -802,6 +802,159 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             camera["duplicate_label_diagnostic"]["unmatched_duplicate_name_categories"],
             ["path", "step"],
         )
+        self.assertEqual(
+            camera["source_qgis_stroke_control_comparisons"],
+            [
+                {
+                    "source_layer_id": "road-path",
+                    "source_controls": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 12, 1, 18, 4],
+                        "line-dasharray": [
+                            "step",
+                            ["zoom"],
+                            ["literal", [4, 0.3]],
+                            15,
+                            ["literal", [1, 0.3]],
+                        ],
+                    },
+                    "qgis_layer_ids": ["road-path"],
+                    "qgis_controls": [
+                        {
+                            "layer_id": "road-path",
+                            "controls": {
+                                "line-color": "#d8c6a3",
+                                "line-width": 1.5,
+                                "line-dasharray": [1, 1],
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+
+    def test_build_path_pedestrian_focus_report_pairs_qgis_variant_strokes_with_source_ids(self):
+        road_report = {
+            "generated": "2026-05-20T01:09:13+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "cameras": [
+                {
+                    "status": "decoded",
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "camera_zoom": 18.0,
+                    "tile_zoom": 18,
+                    "pedestrian_line_candidate_count": 1,
+                }
+            ],
+        }
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-pedestrian",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                    },
+                }
+            ],
+        }
+        qgis_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-pedestrian-z16-plus",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {
+                        "line-color": "#f6f2e8",
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                        "line-opacity": 0.65,
+                    },
+                }
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            road_report,
+            source_style=source_style,
+            qgis_styles_by_camera={"zermatt-trails-z18-outdoors": qgis_style},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        self.assertEqual(
+            camera["source_qgis_stroke_control_comparisons"],
+            [
+                {
+                    "source_layer_id": "road-pedestrian",
+                    "source_controls": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                    },
+                    "qgis_layer_ids": ["road-pedestrian-z16-plus"],
+                    "qgis_controls": [
+                        {
+                            "layer_id": "road-pedestrian-z16-plus",
+                            "controls": {
+                                "line-color": "#f6f2e8",
+                                "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                                "line-opacity": 0.65,
+                            },
+                        }
+                    ],
+                }
+            ],
+        )
+
+    def test_build_path_pedestrian_focus_report_pairs_split_road_path_strokes_with_source_layer(self):
+        road_report = _road_feature_report()
+        road_report["cameras"][0]["camera_zoom"] = 18.0
+        qgis_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-path-z16-plus",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-width": 1.0583333333333333,
+                        "line-dasharray": [1, 0.3],
+                    },
+                }
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            road_report,
+            source_style=_source_style(),
+            qgis_styles_by_camera={"chamonix-trails-z14-outdoors": qgis_style},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        comparisons = {
+            comparison["source_layer_id"]: comparison
+            for comparison in camera["source_qgis_stroke_control_comparisons"]
+        }
+        self.assertEqual(comparisons["road-path"]["qgis_layer_ids"], ["road-path-z16-plus"])
+        self.assertEqual(
+            comparisons["road-path"]["qgis_controls"],
+            [
+                {
+                    "layer_id": "road-path-z16-plus",
+                    "controls": {
+                        "line-width": 1.0583333333333333,
+                        "line-color": "hsl(0, 0%, 95%)",
+                        "line-dasharray": [1, 0.3],
+                    },
+                }
+            ],
+        )
 
     def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
         report = build_path_pedestrian_focus_report(
@@ -849,6 +1002,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertEqual(camera["qgis_path_pedestrian_visible_layer_details"], [])
         self.assertEqual(camera["qgis_path_pedestrian_label_details"], [])
         self.assertEqual(camera["qgis_path_pedestrian_visible_label_details"], [])
+        self.assertEqual(camera["source_qgis_stroke_control_comparisons"], [])
         self.assertIn("Source style cameras: 0/0 matched", build_summary_markdown(report))
 
     def test_build_path_pedestrian_focus_report_ignores_boolean_counts(self):
@@ -926,6 +1080,11 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("## Visible source Mapbox layer details", markdown)
         self.assertIn("| road-path | line | z>=12 |", markdown)
         self.assertIn('"line-width=[\\"interpolate\\",[\\"linear\\"],[\\"zoom\\"],12,1,18,4]"', markdown)
+        self.assertIn("## Source vs QGIS stroke controls", markdown)
+        self.assertIn("| chamonix-trails-z14-outdoors | road-path |", markdown)
+        self.assertIn('["road-path"]', markdown)
+        self.assertIn('road-path: line-width=1.5', markdown)
+        self.assertIn('line-dasharray=[1,1]', markdown)
         self.assertIn("## Visible QGIS layer details", markdown)
         self.assertIn("### chamonix-trails-z14-outdoors", markdown)
         self.assertIn("| road-path | line | 12<=z<16 |", markdown)
@@ -1010,6 +1169,32 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
 
         self.assertIn("| merge-line-only |", markdown)
         self.assertNotIn("## Duplicate label diagnostics", markdown)
+
+    def test_build_summary_markdown_marks_unmatched_source_stroke_rows(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "now",
+                "cameras": [
+                    {
+                        "camera": "unmatched-source-stroke",
+                        "source_qgis_stroke_control_comparisons": [
+                            {
+                                "source_layer_id": "road-path",
+                                "source_controls": {"line-width": 1.0},
+                                "qgis_layer_ids": [],
+                                "qgis_controls": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertIn(
+            "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
+            markdown,
+        )
+        self.assertIn("| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] |", markdown)
 
     def test_build_summary_markdown_handles_no_focus_rows(self):
         markdown = build_summary_markdown({"generated": "now", "cameras": []})

@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import json
 import sys
+from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,6 +48,21 @@ PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
     "fill-color",
     "fill-opacity",
 )
+PATH_PEDESTRIAN_STROKE_CONTROL_KEYS = (
+    "line-width",
+    "line-color",
+    "line-dasharray",
+    "line-opacity",
+)
+PATH_PEDESTRIAN_SOURCE_SPLIT_BASE_LAYER_IDS = frozenset(
+    {
+        "road-path",
+    }
+)
+PATH_PEDESTRIAN_SOURCE_SPLIT_SUFFIXES = (
+    "-below-z16",
+    "-z16-plus",
+)
 TOP_COUNT_LIMIT = 3
 SAMPLE_LAYER_LIMIT = 8
 DUPLICATE_LABEL_CATEGORY_KEYS = (
@@ -81,6 +97,7 @@ COMPARISON_VISUAL_METRIC_KEYS = (
     "normalized_rms_channel_delta",
     "ssim_status",
 )
+MARKDOWN_SEPARATOR_5_COLUMNS = "| --- | --- | --- | --- | --- |"
 ARGPARSE_EXIT_SENTINEL = "argparse error should exit"
 
 
@@ -965,6 +982,75 @@ def _duplicate_label_diagnostic(camera: Mapping[str, object]) -> dict[str, objec
     }
 
 
+def _qfit_base_style_layer_id(layer_id: object) -> str:
+    from qfit.mapbox_config import base_mapbox_style_layer_id_for_qfit  # noqa: PLC0415
+
+    normalized = str(layer_id or "")
+    base_layer_id = base_mapbox_style_layer_id_for_qfit(layer_id)
+    if base_layer_id != normalized:
+        return base_layer_id
+    for split_suffix in PATH_PEDESTRIAN_SOURCE_SPLIT_SUFFIXES:
+        if normalized.endswith(split_suffix):
+            split_base_layer_id = normalized[: -len(split_suffix)]
+            if split_base_layer_id in PATH_PEDESTRIAN_SOURCE_SPLIT_BASE_LAYER_IDS:
+                return split_base_layer_id
+    return base_layer_id
+
+
+def _visible_line_details(camera: Mapping[str, object], detail_key: str) -> list[Mapping[str, object]]:
+    details = camera.get(detail_key)
+    detail_rows = details if isinstance(details, list) else []
+    return [
+        detail
+        for detail in detail_rows
+        if isinstance(detail, Mapping) and detail.get("type") == "line"
+    ]
+
+
+def _stroke_controls(detail: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: detail[key]
+        for key in PATH_PEDESTRIAN_STROKE_CONTROL_KEYS
+        if key in detail
+    }
+
+
+def _qgis_stroke_details_by_source_id(
+    qgis_details: Iterable[Mapping[str, object]],
+) -> dict[str, list[Mapping[str, object]]]:
+    details_by_source_id: dict[str, list[Mapping[str, object]]] = defaultdict(list)
+    for detail in qgis_details:
+        layer_id = str(detail.get("id") or "")
+        source_id = _qfit_base_style_layer_id(layer_id)
+        details_by_source_id[source_id].append(detail)
+    return details_by_source_id
+
+
+def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> list[dict[str, object]]:
+    source_details = _visible_line_details(camera, "source_path_pedestrian_visible_layer_details")
+    qgis_details = _visible_line_details(camera, "qgis_path_pedestrian_visible_layer_details")
+    qgis_details_by_source_id = _qgis_stroke_details_by_source_id(qgis_details)
+    comparisons = []
+    for source_detail in source_details:
+        source_id = str(source_detail.get("id") or "")
+        matched_details = qgis_details_by_source_id.get(source_id, [])
+        comparisons.append(
+            {
+                "source_layer_id": source_id,
+                "source_controls": _stroke_controls(source_detail),
+                "qgis_layer_ids": [str(detail.get("id") or "") for detail in matched_details],
+                "qgis_controls": [
+                    {
+                        "layer_id": str(detail.get("id") or ""),
+                        "controls": _stroke_controls(detail),
+                    }
+                    for detail in matched_details
+                ],
+            }
+        )
+    return comparisons
+
+
 def _camera_focus_row(
     camera_report: Mapping[str, object],
     *,
@@ -1009,6 +1095,7 @@ def _camera_focus_row(
         else _missing_qgis_label_summary()
     )
     row["duplicate_label_diagnostic"] = _duplicate_label_diagnostic(row)
+    row["source_qgis_stroke_control_comparisons"] = _source_qgis_stroke_control_comparisons(row)
     return row
 
 
@@ -1225,7 +1312,7 @@ def _visible_style_detail_markdown_lines(
                 f"### {camera.get('camera')}",
                 "",
                 "| Layer | Type | Zoom band | Paint controls | Filter |",
-                "| --- | --- | --- | --- | --- |",
+                MARKDOWN_SEPARATOR_5_COLUMNS,
             ]
         )
         for detail in mapping_rows:
@@ -1258,6 +1345,68 @@ def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
         detail_key="qgis_path_pedestrian_visible_layer_details",
         title="## Visible QGIS layer details",
     )
+
+
+def _qgis_stroke_control_summaries(comparison: Mapping[str, object]) -> list[str]:
+    controls = comparison.get("qgis_controls")
+    control_rows = controls if isinstance(controls, list) else []
+    summaries = []
+    for control_row in control_rows:
+        if not isinstance(control_row, Mapping):
+            continue
+        layer_id = str(control_row.get("layer_id") or "")
+        layer_controls = control_row.get("controls")
+        if layer_id and isinstance(layer_controls, Mapping):
+            summaries.append(f"{layer_id}: {', '.join(_stroke_control_summaries(layer_controls))}")
+    return summaries
+
+
+def _stroke_control_summaries(controls: object) -> list[str]:
+    if not isinstance(controls, Mapping):
+        return []
+    return [
+        f"{key}={_compact_json(controls.get(key))}"
+        for key in PATH_PEDESTRIAN_STROKE_CONTROL_KEYS
+        if key in controls
+    ]
+
+
+def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        comparisons = camera.get("source_qgis_stroke_control_comparisons")
+        comparison_rows = comparisons if isinstance(comparisons, list) else []
+        for comparison in comparison_rows:
+            if not isinstance(comparison, Mapping) or not comparison.get("source_layer_id"):
+                continue
+            rows.append(
+                [
+                    camera.get("camera"),
+                    comparison.get("source_layer_id"),
+                    _stroke_control_summaries(comparison.get("source_controls")),
+                    comparison.get("qgis_layer_ids"),
+                    _qgis_stroke_control_summaries(comparison),
+                ]
+            )
+    if not rows:
+        return []
+    lines = ["", "## Source vs QGIS stroke controls", ""]
+    lines.extend(
+        [
+            (
+                "Pairs visible source Mapbox path/pedestrian line layers with visible QGIS "
+                "variants by original style-layer id."
+            ),
+            "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
+            "",
+            "| Camera | Source layer | Source controls | QGIS layer ids | QGIS controls |",
+            MARKDOWN_SEPARATOR_5_COLUMNS,
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
 
 
 def _label_detail_zoom_band(detail: Mapping[str, object]) -> str:
@@ -1309,7 +1458,7 @@ def _visible_label_detail_markdown_lines(cameras: Iterable[object]) -> list[str]
                 f"### {camera.get('camera')}",
                 "",
                 "| Style | Layer | Zoom band | Controls | Filter |",
-                "| --- | --- | --- | --- | --- |",
+                MARKDOWN_SEPARATOR_5_COLUMNS,
             ]
         )
         for detail in mapping_rows:
@@ -1562,6 +1711,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         )
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
+    lines.extend(_source_qgis_stroke_control_markdown_lines(rows))
     lines.extend(_visible_source_detail_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
     lines.extend(_visible_label_thinning_markdown_lines(rows))
