@@ -823,6 +823,13 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [4, 0.3],
                     },
+                    "decoded_candidate_count": 236,
+                    "decoded_candidate_type_counts": {
+                        "trail": 69,
+                        "footway": 56,
+                        "piste": 48,
+                        "path": 4,
+                    },
                     "qgis_layer_ids": ["road-path"],
                     "qgis_controls": [
                         {
@@ -921,6 +928,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [1, 0.2],
                     },
+                    "decoded_candidate_count": 1,
                     "qgis_layer_ids": ["road-pedestrian-z18-plus"],
                     "qgis_controls": [
                         {
@@ -950,6 +958,182 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         markdown = build_summary_markdown(report)
         self.assertIn("line-width_raw_mm=3.175", markdown)
         self.assertIn("line-width_capped=true", markdown)
+
+    def test_build_path_pedestrian_focus_report_adds_step_structure_candidate_counts(self):
+        road_report = {
+            "generated": "2026-05-20T01:09:13+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "cameras": [
+                {
+                    "status": "decoded",
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "camera_zoom": 18.0,
+                    "tile_zoom": 18,
+                    "step_line_candidate_count": 3,
+                    "step_line_structure_counts": {"none": 2, "bridge": 1},
+                }
+            ],
+        }
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-steps",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": 2},
+                }
+            ],
+        }
+        qgis_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-steps-z18-plus",
+                    "type": "line",
+                    "minzoom": 18,
+                    "paint": {"line-width": 1.0},
+                }
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            road_report,
+            source_style=source_style,
+            qgis_styles_by_camera={"zermatt-trails-z18-outdoors": qgis_style},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        [comparison] = camera["source_qgis_stroke_control_comparisons"]
+        self.assertEqual(comparison["decoded_candidate_count"], 3)
+        self.assertEqual(comparison["decoded_candidate_type_counts"], {"none": 2, "bridge": 1})
+        markdown = build_summary_markdown(report)
+        self.assertIn('types={\\"bridge\\":1,\\"none\\":2}', markdown)
+
+    def test_build_path_pedestrian_focus_report_adds_bridge_tunnel_candidate_counts(self):
+        road_report = {
+            "generated": "2026-05-20T01:09:13+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "cameras": [
+                {
+                    "status": "decoded",
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "camera_zoom": 18.0,
+                    "tile_zoom": 18,
+                    "pedestrian_line_candidate_count": 4,
+                    "pedestrian_line_structure_counts": {"none": 1, "bridge": 1, "tunnel": 2},
+                    "path_line_candidate_count": 5,
+                    "path_line_structure_counts": {"none": 2, "bridge": 2, "tunnel": 1},
+                    "step_line_candidate_count": 3,
+                    "step_line_structure_counts": {"none": 1, "bridge": 1, "tunnel": 1},
+                }
+            ],
+        }
+        source_style = {
+            "version": 8,
+            "layers": [
+                {"id": "bridge-path-trail", "type": "line", "minzoom": 14, "paint": {"line-width": 2}},
+                {
+                    "id": "tunnel-path-cycleway-piste",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": 2},
+                },
+                {"id": "bridge-pedestrian", "type": "line", "minzoom": 14, "paint": {"line-width": 2}},
+                {"id": "tunnel-steps", "type": "line", "minzoom": 14, "paint": {"line-width": 2}},
+            ],
+        }
+        qgis_style = {
+            "version": 8,
+            "layers": [
+                {"id": "bridge-path-trail", "type": "line", "minzoom": 14, "paint": {"line-width": 1}},
+                {
+                    "id": "tunnel-path-cycleway-piste",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": 1},
+                },
+                {"id": "bridge-pedestrian", "type": "line", "minzoom": 14, "paint": {"line-width": 1}},
+                {"id": "tunnel-steps", "type": "line", "minzoom": 14, "paint": {"line-width": 1}},
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            road_report,
+            source_style=source_style,
+            qgis_styles_by_camera={"zermatt-trails-z18-outdoors": qgis_style},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        self.assertEqual(
+            camera["source_path_pedestrian_visible_layer_ids"],
+            ["bridge-path-trail", "tunnel-path-cycleway-piste", "bridge-pedestrian", "tunnel-steps"],
+        )
+        comparisons = {
+            comparison["source_layer_id"]: comparison
+            for comparison in camera["source_qgis_stroke_control_comparisons"]
+        }
+        self.assertEqual(comparisons["bridge-path-trail"]["decoded_candidate_count"], 2)
+        self.assertEqual(comparisons["bridge-path-trail"]["decoded_candidate_type_counts"], {"bridge": 2})
+        self.assertEqual(comparisons["tunnel-path-cycleway-piste"]["decoded_candidate_count"], 1)
+        self.assertEqual(
+            comparisons["tunnel-path-cycleway-piste"]["decoded_candidate_type_counts"],
+            {"tunnel": 1},
+        )
+        self.assertEqual(comparisons["bridge-pedestrian"]["decoded_candidate_count"], 1)
+        self.assertEqual(comparisons["bridge-pedestrian"]["decoded_candidate_type_counts"], {"bridge": 1})
+        self.assertEqual(comparisons["tunnel-steps"]["decoded_candidate_count"], 1)
+        self.assertEqual(comparisons["tunnel-steps"]["decoded_candidate_type_counts"], {"tunnel": 1})
+        markdown = build_summary_markdown(report)
+        self.assertIn("| zermatt-trails-z18-outdoors | bridge-path-trail |", markdown)
+        self.assertIn('types={\\"bridge\\":2}', markdown)
+
+    def test_summary_markdown_prioritizes_candidate_backed_stroke_deltas(self):
+        report = {
+            "generated": "2026-05-20T01:35:00+00:00",
+            "cameras": [
+                {
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "source_qgis_stroke_control_comparisons": [
+                        {
+                            "source_layer_id": "zero-candidate-source",
+                            "decoded_candidate_count": 0,
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": "zero-candidate-qgis",
+                                    "deltas": {"line-width_delta_mm": 10.0},
+                                }
+                            ],
+                        },
+                        {
+                            "source_layer_id": "candidate-backed-source",
+                            "decoded_candidate_count": 1,
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": "candidate-backed-qgis",
+                                    "deltas": {"line-width_delta_mm": 1.0},
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
+        }
+
+        markdown = build_summary_markdown(report)
+        largest_delta_section = markdown.split(
+            "## Largest non-auxiliary stroke width deltas",
+            1,
+        )[1].split("##", 1)[0]
+
+        self.assertLess(
+            largest_delta_section.index("candidate-backed-source"),
+            largest_delta_section.index("zero-candidate-source"),
+        )
 
     def test_build_path_pedestrian_focus_report_pairs_split_road_path_strokes_with_source_layer(self):
         road_report = _road_feature_report()
@@ -1146,6 +1330,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             comparisons["road-pedestrian-case"]["qgis_auxiliary_layer_ids"],
             ["road-pedestrian-case-z18-plus-pale-casing"],
         )
+        self.assertEqual(comparisons["road-pedestrian"]["decoded_candidate_count"], 1)
         self.assertEqual(
             camera["pedestrian_core_case_cap_relationships"],
             [
@@ -1183,6 +1368,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         )[1].split("## QGIS auxiliary stroke layers", 1)[0]
         self.assertIn("road-pedestrian-z18-plus", largest_delta_section)
         self.assertIn("road-pedestrian-case-z18-plus", largest_delta_section)
+        self.assertIn(
+            "| zermatt-trails-z18-outdoors | road-pedestrian | road-pedestrian-z18-plus | 1 |",
+            largest_delta_section,
+        )
         self.assertNotIn("road-pedestrian-case-z18-plus-pale-casing", largest_delta_section)
         self.assertIn("## QGIS auxiliary stroke layers", markdown)
         self.assertIn("road-pedestrian-case-z18-plus-pale-casing", markdown)
@@ -1437,7 +1626,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             markdown,
         )
         self.assertIn(
-            "| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] | [] | [] |",
+            "| unmatched-source-stroke | road-path | [] | [\"line-width=1.0\"] | [] | [] | [] | [] |",
             markdown,
         )
 
