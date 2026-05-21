@@ -678,7 +678,6 @@ _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 14.0
 # The z14 Geneva/Chamonix comparisons benefit from a small casing-only boost,
 # but larger low-zoom path casings overshoot the Mapbox GL reference.
 _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.15
-_PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.5
 _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "bridge-pedestrian",
     "bridge-pedestrian-case",
@@ -851,14 +850,10 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
 _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
     "bridge-path-bg-z16-plus-outdoor",
     "bridge-path-bg-z16-plus-remaining",
-    "bridge-path-bg-z18-plus-outdoor",
-    "bridge-path-bg-z18-plus-remaining",
     "bridge-pedestrian-case-z16-to-z18",
     "bridge-pedestrian-case-z18-plus",
     "road-path-bg-z16-plus-outdoor",
     "road-path-bg-z16-plus-remaining",
-    "road-path-bg-z18-plus-outdoor",
-    "road-path-bg-z18-plus-remaining",
     "road-pedestrian-case-z16-to-z18",
     "road-pedestrian-case-z18-plus",
 }
@@ -3050,7 +3045,6 @@ def _should_sample_path_low_zoom_background_line_width(layer_id: object, prop: s
 
 
 def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
-    high_zoom_path_width = False
     low_zoom_path_background_width = False
     if _should_sample_path_low_zoom_line_width(layer_id, prop, maxzoom):
         target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
@@ -3062,20 +3056,12 @@ def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: o
             _path_high_zoom_line_width_sample_zoom(layer_id)
             or _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
         )
-        high_zoom_path_width = True
     else:
         return None
     target_zoom = _zoom_in_layer_range(target_sample_zoom, minzoom, maxzoom)
     if target_zoom is None:
         return None
     width = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
-    if (
-        width is not None
-        and high_zoom_path_width
-        and _path_background_line_color_base_layer_id(layer_id) is not None
-        and target_sample_zoom == _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
-    ):
-        width *= _PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
     if width is not None and low_zoom_path_background_width:
         width *= _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
     return width
