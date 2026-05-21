@@ -196,6 +196,10 @@ def _path_pedestrian_focus_report(
         "cameras": [
             {
                 "camera": camera_name,
+                "pedestrian_line_structure_counts": {"none": 115},
+                "path_line_type_counts": {"trail": 69, "footway": 56, "piste": 48},
+                "path_line_structure_counts": {"none": 236},
+                "step_line_structure_counts": {"bridge": 1, "none": 16},
                 "source_qgis_stroke_control_comparisons": [
                     {
                         "source_layer_id": "road-path-trail",
@@ -785,6 +789,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         "zero_candidate_dash_samples": [
                             "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
                         ],
+                        "path_line_types": ["trail=69", "footway=56", "piste=48"],
+                        "path_line_structures": ["none=236"],
+                        "step_line_structures": ["none=16", "bridge=1"],
+                        "pedestrian_line_structures": ["none=115"],
                     }
                 ],
             )
@@ -1863,6 +1871,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         "zero_candidate_dash_samples": [
                             "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
                         ],
+                        "path_line_types": ["trail=69", "footway=56", "piste=48"],
+                        "path_line_structures": ["none=236"],
+                        "step_line_structures": ["none=16", "bridge=1"],
+                        "pedestrian_line_structures": ["none=115"],
                     }
                 ],
                 "cameras": [
@@ -1915,6 +1927,14 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn("## Path/pedestrian focus coverage samples", markdown)
         self.assertIn("road-steps->road-steps delta=0mm ratio=1 candidates=3", markdown)
         self.assertIn("bridge-path->bridge-path delta=-0.7937mm ratio=0.25", markdown)
+        self.assertIn("## Path/pedestrian decoded feature coverage", markdown)
+        self.assertIn(
+            (
+                "| chamonix-trails-z14-outdoors | trail=69, footway=56, piste=48 | "
+                "none=236 | none=16, bridge=1 | none=115 |"
+            ),
+            markdown,
+        )
         self.assertIn("## Path/pedestrian focus cues", markdown)
         self.assertIn("| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | lighter + blue higher=2", markdown)
@@ -1944,6 +1964,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
 
         self.assertIn("## Path/pedestrian focus coverage samples", markdown)
+        self.assertNotIn("## Path/pedestrian decoded feature coverage", markdown)
         self.assertIn(
             (
                 "| legacy-focus-report-camera | - | - | "

@@ -135,7 +135,7 @@ python3 validation/mapbox_outdoors_visual_crops.py \
   --path-pedestrian-focus-json debug/mapbox-outdoors-path-pedestrian-focus/<timestamp>/path-pedestrian-focus.json
 ```
 
-The crop report also includes path/pedestrian focus coverage sections for that focus input. They show the raw non-auxiliary stroke and dash counts per camera, plus representative candidate-backed zero-delta and zero-candidate rows, before the cue table filters down to meaningful candidate-backed rows. This helps explain cases where a visually suspicious camera has decoded candidates but no surfaced focus cue.
+The crop report also includes path/pedestrian focus coverage sections for that focus input. They show the raw non-auxiliary stroke and dash counts per camera, representative candidate-backed zero-delta and zero-candidate rows, and decoded path/step/pedestrian feature type or structure counts before the cue table filters down to meaningful candidate-backed rows. This helps explain cases where a visually suspicious camera has decoded candidates but no surfaced focus cue.
 
 To inspect only cameras that still have candidate-backed path/pedestrian focus cues, add `--focus-cue-cameras`. This is useful after a global highest-delta crop run is dominated by a different camera and hides lower-scoring stroke-width or dash candidates:
 

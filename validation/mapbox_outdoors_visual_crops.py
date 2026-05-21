@@ -589,6 +589,12 @@ def _path_pedestrian_focus_coverage_rows(
                     zero_candidate_dash_rows,
                     _dash_focus_cue_summary,
                 ),
+                "path_line_types": _top_count_labels(camera.get("path_line_type_counts")),
+                "path_line_structures": _top_count_labels(camera.get("path_line_structure_counts")),
+                "step_line_structures": _top_count_labels(camera.get("step_line_structure_counts")),
+                "pedestrian_line_structures": _top_count_labels(
+                    camera.get("pedestrian_line_structure_counts")
+                ),
             }
         )
     return coverage_rows
@@ -2192,6 +2198,10 @@ def _summary_focus_coverage_lines(report: Mapping[str, object]) -> list[str]:
     return lines
 
 
+def _joined_summary_label_values(value: object) -> str:
+    return _joined_summary_labels(value if isinstance(value, list) else [])
+
+
 def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[str]:
     if report.get("path_pedestrian_focus_comparison_match") is False:
         return []
@@ -2208,27 +2218,12 @@ def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[s
         ]
         if not any(isinstance(sample, list) and sample for sample in samples):
             continue
-        candidate_zero_delta_samples = row.get("candidate_zero_delta_stroke_samples")
-        zero_candidate_stroke_samples = row.get("zero_candidate_stroke_samples")
-        zero_candidate_dash_samples = row.get("zero_candidate_dash_samples")
         sample_rows.append(
             [
                 row.get("camera"),
-                _joined_summary_labels(
-                    candidate_zero_delta_samples
-                    if isinstance(candidate_zero_delta_samples, list)
-                    else []
-                ),
-                _joined_summary_labels(
-                    zero_candidate_stroke_samples
-                    if isinstance(zero_candidate_stroke_samples, list)
-                    else []
-                ),
-                _joined_summary_labels(
-                    zero_candidate_dash_samples
-                    if isinstance(zero_candidate_dash_samples, list)
-                    else []
-                ),
+                _joined_summary_label_values(row.get("candidate_zero_delta_stroke_samples")),
+                _joined_summary_label_values(row.get("zero_candidate_stroke_samples")),
+                _joined_summary_label_values(row.get("zero_candidate_dash_samples")),
             ]
         )
     if not sample_rows:
@@ -2246,6 +2241,51 @@ def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[s
         "| --- | --- | --- | --- |",
     ]
     lines.extend(_markdown_table_row(row) for row in sample_rows)
+    return lines
+
+
+def _summary_focus_decoded_feature_lines(report: Mapping[str, object]) -> list[str]:
+    if report.get("path_pedestrian_focus_comparison_match") is False:
+        return []
+    rows = report.get("path_pedestrian_focus_coverage")
+    coverage_rows = rows if isinstance(rows, list) else []
+    feature_rows: list[list[object]] = []
+    for row in coverage_rows:
+        if not isinstance(row, Mapping):
+            continue
+        labels = [
+            row.get("path_line_types"),
+            row.get("path_line_structures"),
+            row.get("step_line_structures"),
+            row.get("pedestrian_line_structures"),
+        ]
+        if not any(isinstance(label, list) and label for label in labels):
+            continue
+        feature_rows.append(
+            [
+                row.get("camera"),
+                _joined_summary_label_values(row.get("path_line_types")),
+                _joined_summary_label_values(row.get("path_line_structures")),
+                _joined_summary_label_values(row.get("step_line_structures")),
+                _joined_summary_label_values(row.get("pedestrian_line_structures")),
+            ]
+        )
+    if not feature_rows:
+        return []
+    lines = [
+        "",
+        "## Path/pedestrian decoded feature coverage",
+        "",
+        (
+            "Shows decoded road-feature type and structure counts behind the focus rows, "
+            "so bridge/tunnel zero-candidate samples can be separated from cameras that "
+            "only decode surface path or step features."
+        ),
+        "",
+        "| Camera | Path types | Path structures | Step structures | Pedestrian structures |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    lines.extend(_markdown_table_row(row) for row in feature_rows)
     return lines
 
 
@@ -2458,6 +2498,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_style_audit_area_fill_focus_lines(report))
     lines.extend(_summary_focus_coverage_lines(report))
     lines.extend(_summary_focus_coverage_sample_lines(report))
+    lines.extend(_summary_focus_decoded_feature_lines(report))
     lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"
 
