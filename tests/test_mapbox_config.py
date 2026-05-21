@@ -5419,23 +5419,36 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-path-bg-below-z16-outdoor",
                 "road-path-bg-below-z16-remaining",
                 "road-path-bg-z16-to-z18-piste",
+                "road-path-bg-z16-to-z18-outdoor-pale-casing",
                 "road-path-bg-z16-to-z18-outdoor",
+                "road-path-bg-z16-to-z18-remaining-pale-casing",
                 "road-path-bg-z16-to-z18-remaining",
                 "road-path-bg-z18-plus-piste",
+                "road-path-bg-z18-plus-outdoor-pale-casing",
                 "road-path-bg-z18-plus-outdoor",
+                "road-path-bg-z18-plus-remaining-pale-casing",
                 "road-path-bg-z18-plus-remaining",
                 "bridge-path-bg-below-z16-piste",
                 "bridge-path-bg-below-z16-outdoor",
                 "bridge-path-bg-below-z16-remaining",
                 "bridge-path-bg-z16-to-z18-piste",
+                "bridge-path-bg-z16-to-z18-outdoor-pale-casing",
                 "bridge-path-bg-z16-to-z18-outdoor",
+                "bridge-path-bg-z16-to-z18-remaining-pale-casing",
                 "bridge-path-bg-z16-to-z18-remaining",
                 "bridge-path-bg-z18-plus-piste",
+                "bridge-path-bg-z18-plus-outdoor-pale-casing",
                 "bridge-path-bg-z18-plus-outdoor",
+                "bridge-path-bg-z18-plus-remaining-pale-casing",
                 "bridge-path-bg-z18-plus-remaining",
             ],
         )
         by_id = {layer["id"]: layer for layer in result["layers"]}
+        pale_casing_paint = {
+            "line-width": 3.0,
+            "line-color": "hsl(0, 0%, 98%)",
+            "line-opacity": 1.0,
+        }
         for layer_id in ("road-path-bg", "bridge-path-bg"):
             for band in ("below-z16", "z16-to-z18", "z18-plus"):
                 self.assertEqual(by_id[f"{layer_id}-{band}-piste"]["paint"]["line-color"], "hsl(215, 80%, 48%)")
@@ -5447,8 +5460,20 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 self.assertEqual(by_id[f"{layer_id}-z16-to-z18-{suffix}"]["maxzoom"], 18.0)
                 self.assertEqual(by_id[f"{layer_id}-z18-plus-{suffix}"]["minzoom"], 18.0)
             for band in ("z16-to-z18", "z18-plus"):
-                for suffix in ("piste", "outdoor", "remaining"):
-                    self.assertNotIn(f"{layer_id}-{band}-{suffix}-pale-casing", by_id)
+                self.assertNotIn(f"{layer_id}-{band}-piste-pale-casing", by_id)
+                for suffix in ("outdoor", "remaining"):
+                    pale_layer = by_id[f"{layer_id}-{band}-{suffix}-pale-casing"]
+                    base_layer = by_id[f"{layer_id}-{band}-{suffix}"]
+                    self.assertEqual(pale_layer["paint"], pale_casing_paint)
+                    self.assertEqual(pale_layer["filter"], base_layer["filter"])
+                    self.assertEqual(pale_layer.get("minzoom"), base_layer.get("minzoom"))
+                    self.assertEqual(pale_layer.get("maxzoom"), base_layer.get("maxzoom"))
+                    self.assertEqual(
+                        mapbox_config.base_mapbox_style_layer_id_for_qfit(
+                            f"{layer_id}-{band}-{suffix}-pale-casing"
+                        ),
+                        layer_id,
+                    )
         self.assertEqual(by_id["road-path-bg-below-z16-piste"]["minzoom"], 12)
         self.assertEqual(by_id["bridge-path-bg-below-z16-piste"]["minzoom"], 14)
         expected_below_z16_outdoor_filter = [
@@ -5539,7 +5564,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         }
         mixed_layers = [
             "not-a-layer",
-            {"id": "road-path-bg-z16-plus-piste", "type": "line"},
+            {"id": "road-path-bg-z18-plus-piste", "type": "line"},
             selected_layer,
         ]
 
@@ -5550,7 +5575,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         result = mapbox_config._add_path_high_zoom_pale_casing_layers_for_qgis(mixed_layers)
 
         self.assertEqual(result[0], "not-a-layer")
-        self.assertEqual(result[1]["id"], "road-path-bg-z16-plus-piste")
+        self.assertEqual(result[1]["id"], "road-path-bg-z18-plus-piste")
         self.assertEqual(result[2]["id"], "road-pedestrian-case-z18-plus-pale-casing")
         self.assertEqual(result[2]["filter"], selected_layer["filter"])
         self.assertEqual(
@@ -5568,7 +5593,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(
             mapbox_config._path_high_zoom_pale_casing_base_layer_id(
-                "road-path-bg-z16-plus-outdoor-pale-casing"
+                "road-path-bg-z18-plus-outdoor-pale-casing"
             ),
             "road-path-bg",
         )

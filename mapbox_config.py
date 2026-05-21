@@ -840,12 +840,16 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ),
 )
 _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
-    "bridge-path-bg-z16-plus-outdoor",
-    "bridge-path-bg-z16-plus-remaining",
+    "bridge-path-bg-z16-to-z18-outdoor",
+    "bridge-path-bg-z16-to-z18-remaining",
+    "bridge-path-bg-z18-plus-outdoor",
+    "bridge-path-bg-z18-plus-remaining",
     "bridge-pedestrian-case-z16-to-z18",
     "bridge-pedestrian-case-z18-plus",
-    "road-path-bg-z16-plus-outdoor",
-    "road-path-bg-z16-plus-remaining",
+    "road-path-bg-z16-to-z18-outdoor",
+    "road-path-bg-z16-to-z18-remaining",
+    "road-path-bg-z18-plus-outdoor",
+    "road-path-bg-z18-plus-remaining",
     "road-pedestrian-case-z16-to-z18",
     "road-pedestrian-case-z18-plus",
 }
