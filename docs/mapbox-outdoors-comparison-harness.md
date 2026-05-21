@@ -156,6 +156,14 @@ python3 validation/mapbox_outdoors_visual_crops.py \
 
 The delta context is shown only when the comparison-delta candidate summary matches the crop report's comparison summary, which keeps stale probe movement from being mixed into a newer visual crop sheet.
 
+When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit so the crop report includes the global terrain/landcover and airport/special-landuse candidate counts and sample layers:
+
+```bash
+python3 validation/mapbox_outdoors_visual_crops.py \
+  --comparison-summary-json debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/summary.json \
+  --style-audit-json debug/mapbox-outdoors-style-audit/mapbox-outdoors-v12/<timestamp>/audit.json
+```
+
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
 ## Style audit before tuning

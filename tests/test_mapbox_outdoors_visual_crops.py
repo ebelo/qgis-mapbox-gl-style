@@ -11,6 +11,7 @@ from unittest.mock import patch
 from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_visual_crops import (
+    VisualCropAnnotationInputs,
     annotate_visual_crop_report_with_comparison_delta,
     build_run_directory,
     build_summary_markdown,
@@ -290,6 +291,86 @@ def _comparison_delta_report(candidate_summary_json, *, camera_name="chamonix-tr
     }
 
 
+def _style_audit_report():
+    return {
+        "summary": {
+            "terrain_landcover_palette_candidates": [
+                {
+                    "layer": "landcover",
+                    "source_layer": "landcover",
+                    "type": "fill",
+                    "zoom_band": "z0-z12",
+                    "filter_operator_signature": "all, get, match",
+                    "terrain_landcover_palette_control_properties": [
+                        "filter",
+                        "paint.fill-color",
+                        "paint.fill-opacity",
+                    ],
+                    "airport_special_landuse_control_properties": [
+                        "paint.unused-airport-color",
+                    ],
+                    "qfit_simplified_control_properties": [
+                        "paint.fill-color",
+                        "paint.fill-opacity",
+                    ],
+                    "qgis_dependent_control_properties": ["filter"],
+                },
+                {
+                    "layer": "contour",
+                    "source_layer": "contour",
+                    "type": "line",
+                    "zoom_band": "z11+",
+                    "terrain_landcover_palette_control_properties": [
+                        "filter",
+                        "paint.line-color",
+                    ],
+                    "qgis_dependent_control_properties": ["filter"],
+                },
+            ],
+            "terrain_landcover_palette_candidates_by_source_layer": [
+                {"source_layer": "landcover", "count": 1},
+                {"source_layer": "contour", "count": 1},
+            ],
+            "terrain_landcover_palette_candidates_by_type": [
+                {"type": "fill", "count": 1},
+                {"type": "line", "count": 1},
+            ],
+            "terrain_landcover_palette_simplified_by_property": [
+                {"property": "paint.fill-opacity", "count": 1},
+            ],
+            "terrain_landcover_palette_qgis_dependent_by_property": [
+                {"property": "filter", "count": 2},
+            ],
+            "airport_special_landuse_candidates": [
+                {
+                    "layer": "landuse-other-z10-plus-airport",
+                    "source_layer": "landuse",
+                    "type": "fill",
+                    "zoom_band": "z10+",
+                    "airport_special_landuse_control_properties": [
+                        "filter",
+                        "paint.fill-color",
+                    ],
+                    "qfit_simplified_control_properties": ["filter"],
+                    "qgis_dependent_control_properties": ["filter"],
+                },
+            ],
+            "airport_special_landuse_candidates_by_source_layer": [
+                {"source_layer": "landuse", "count": 1},
+            ],
+            "airport_special_landuse_candidates_by_type": [
+                {"type": "fill", "count": 1},
+            ],
+            "airport_special_landuse_simplified_by_property": [
+                {"property": "filter", "count": 1},
+            ],
+            "airport_special_landuse_qgis_dependent_by_property": [
+                {"property": "filter", "count": 1},
+            ],
+        }
+    }
+
+
 class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
     def test_build_run_directory_and_paths_are_predictable(self):
         run_dir = build_run_directory(
@@ -496,10 +577,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report=_path_pedestrian_focus_report(
-                    comparison_summary_jsons=[str(summary_path)]
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=_path_pedestrian_focus_report(
+                        comparison_summary_jsons=[str(summary_path)]
+                    ),
+                    path_pedestrian_focus_report_path=focus_path,
                 ),
-                path_pedestrian_focus_report_path=focus_path,
                 crop_size=(4, 4),
                 crops_per_camera=1,
                 trusted_output_root=root / "debug",
@@ -520,6 +603,57 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
+
+    def test_generate_visual_crop_report_attaches_style_audit_area_fill_focus(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            style_audit_path = root / "style-audit" / "audit.json"
+            style_audit_path.parent.mkdir(parents=True)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    style_audit_report=_style_audit_report(),
+                    style_audit_report_path=style_audit_path,
+                ),
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertEqual(report["style_audit_json"], str(style_audit_path))
+            focus = report["style_audit_area_fill_focus"]
+            self.assertEqual([row["key"] for row in focus], ["terrain_landcover", "airport_special_landuse"])
+            self.assertEqual(focus[0]["candidate_count"], 2)
+            focus[0]["sample_candidates"].append({"source_layer": "landcover", "type": "fill"})
+            markdown = build_summary_markdown(report)
+            self.assertEqual(
+                focus[0]["sample_candidates"][0],
+                {
+                    "layer": "landcover",
+                    "source_layer": "landcover",
+                    "type": "fill",
+                    "zoom_band": "z0-z12",
+                    "filter_operator_signature": "all, get, match",
+                    "control_properties": ["filter", "paint.fill-color", "paint.fill-opacity"],
+                    "qfit_simplified_properties": ["paint.fill-color", "paint.fill-opacity"],
+                    "qgis_dependent_properties": ["filter"],
+                },
+            )
+            self.assertIn("Style audit input: `", markdown)
+            self.assertIn("## Style audit area-fill focus", markdown)
+            self.assertIn("Terrain/landcover", markdown)
+            self.assertIn("landcover=1", markdown)
+            self.assertIn("landuse-other-z10-plus-airport", markdown)
+            self.assertIn("unknown-layer (landcover/fill)", markdown)
+            self.assertNotIn("None (", markdown)
 
     def test_generate_visual_crop_report_attaches_matching_comparison_delta_context(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -653,10 +787,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report=_path_pedestrian_focus_report(
-                    comparison_summary_jsons=[str(summary_path)]
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=_path_pedestrian_focus_report(
+                        comparison_summary_jsons=[str(summary_path)]
+                    ),
+                    path_pedestrian_focus_report_path=focus_path,
                 ),
-                path_pedestrian_focus_report_path=focus_path,
                 focus_cue_cameras_only=True,
                 crop_size=(4, 4),
                 crops_per_camera=1,
@@ -695,8 +831,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report=focus_report,
-                path_pedestrian_focus_report_path=focus_path,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=focus_report,
+                    path_pedestrian_focus_report_path=focus_path,
+                ),
                 crop_size=(4, 4),
                 crops_per_camera=1,
                 trusted_output_root=root / "debug",
@@ -719,8 +857,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report=_path_pedestrian_focus_report(),
-                path_pedestrian_focus_report_path=focus_path,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=_path_pedestrian_focus_report(),
+                    path_pedestrian_focus_report_path=focus_path,
+                ),
                 crop_size=(4, 4),
                 crops_per_camera=1,
                 trusted_output_root=root / "debug",
@@ -750,8 +890,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     comparison_summary,
                     comparison_summary_path=summary_path,
                     paths=paths,
-                    path_pedestrian_focus_report=_path_pedestrian_focus_report(),
-                    path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                    annotation_inputs=VisualCropAnnotationInputs(
+                        path_pedestrian_focus_report=_path_pedestrian_focus_report(),
+                        path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                    ),
                     focus_cue_cameras_only=True,
                     crop_size=(4, 4),
                     crops_per_camera=1,
@@ -776,8 +918,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report=focus_report,
-                path_pedestrian_focus_report_path=focus_path,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=focus_report,
+                    path_pedestrian_focus_report_path=focus_path,
+                ),
                 crop_size=(4, 4),
                 crops_per_camera=1,
                 trusted_output_root=root / "debug",
@@ -802,10 +946,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report=_path_pedestrian_focus_report(
-                    comparison_summary_jsons=[]
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=_path_pedestrian_focus_report(
+                        comparison_summary_jsons=[]
+                    ),
+                    path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
                 ),
-                path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
                 crop_size=(4, 4),
                 crops_per_camera=1,
                 trusted_output_root=root / "debug",
@@ -827,8 +973,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 comparison_summary,
                 comparison_summary_path=summary_path,
                 paths=paths,
-                path_pedestrian_focus_report={"cameras": []},
-                path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report={"cameras": []},
+                    path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                ),
                 crop_size=(4, 4),
                 crops_per_camera=1,
                 trusted_output_root=root / "debug",
@@ -1135,6 +1283,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 json.dumps(_comparison_delta_report(summary_path)),
                 encoding="utf-8",
             )
+            style_audit_path = root / "style-audit" / "audit.json"
+            style_audit_path.parent.mkdir(parents=True)
+            style_audit_path.write_text(
+                json.dumps(_style_audit_report()),
+                encoding="utf-8",
+            )
             output_root = root / "debug"
             stdout = io.StringIO()
 
@@ -1156,6 +1310,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         str(focus_path),
                         "--comparison-delta-json",
                         str(delta_path),
+                        "--style-audit-json",
+                        str(style_audit_path),
                         "--camera",
                         "chamonix-trails-z14-outdoors",
                         "--crops-per-camera",
@@ -1183,6 +1339,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
             self.assertIs(report["comparison_delta_candidate_summary_match"], True)
             self.assertIn("comparison_delta", report["cameras"][0])
+            self.assertEqual(report["style_audit_json"], str(style_audit_path))
+            self.assertEqual(report["style_audit_area_fill_focus"][0]["candidate_count"], 2)
             self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
             self.assertEqual(

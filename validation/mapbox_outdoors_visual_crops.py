@@ -41,6 +41,7 @@ DEFAULT_CROP_SIZE = (320, 240)
 DEFAULT_CROPS_PER_CAMERA = 3
 DEFAULT_FOCUS_DASH_CUE_LIMIT = 2
 DEFAULT_FOCUS_STROKE_CUE_LIMIT = 3
+DEFAULT_STYLE_AUDIT_SAMPLE_LIMIT = 5
 MIN_SCORE_FOR_CROP = 1.0
 MAX_OVERLAP_RATIO = 0.35
 CROP_IMAGE_COLUMNS = (
@@ -53,6 +54,26 @@ COMPARISON_CONTEXT_KEYS = (
     "artifact_status",
     *COMPARISON_VISUAL_METRIC_KEYS,
 )
+STYLE_AUDIT_AREA_FILL_SECTIONS = (
+    {
+        "key": "terrain_landcover",
+        "label": "Terrain/landcover",
+        "candidates": "terrain_landcover_palette_candidates",
+        "by_source_layer": "terrain_landcover_palette_candidates_by_source_layer",
+        "by_type": "terrain_landcover_palette_candidates_by_type",
+        "simplified_by_property": "terrain_landcover_palette_simplified_by_property",
+        "qgis_dependent_by_property": "terrain_landcover_palette_qgis_dependent_by_property",
+    },
+    {
+        "key": "airport_special_landuse",
+        "label": "Airport/special landuse",
+        "candidates": "airport_special_landuse_candidates",
+        "by_source_layer": "airport_special_landuse_candidates_by_source_layer",
+        "by_type": "airport_special_landuse_candidates_by_type",
+        "simplified_by_property": "airport_special_landuse_simplified_by_property",
+        "qgis_dependent_by_property": "airport_special_landuse_qgis_dependent_by_property",
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +82,21 @@ class VisualCropPaths:
     json_path: Path
     summary_path: Path
     contact_sheet_path: Path
+
+
+@dataclass(frozen=True)
+class VisualCropAnnotationInputs:
+    path_pedestrian_focus_report: Mapping[str, object] | None = None
+    path_pedestrian_focus_report_path: Path | None = None
+    style_audit_report: Mapping[str, object] | None = None
+    style_audit_report_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class _FocusAnnotationContext:
+    comparison_paths: list[str]
+    comparison_match: bool | None
+    cues_by_camera: dict[str, dict[str, list[dict[str, object]]]]
 
 
 def build_run_directory(
@@ -355,6 +391,115 @@ def _path_pedestrian_focus_cues_by_camera(
     return cues_by_camera
 
 
+def _focus_annotation_context(
+    annotations: VisualCropAnnotationInputs,
+    *,
+    comparison_summary_path: Path,
+    focus_cue_cameras_only: bool,
+) -> _FocusAnnotationContext:
+    comparison_paths = _focus_comparison_summary_paths(
+        annotations.path_pedestrian_focus_report
+    )
+    comparison_match = None
+    if comparison_paths:
+        comparison_match = _display_input_path(comparison_summary_path) in comparison_paths
+    if focus_cue_cameras_only and comparison_match is False:
+        raise ValueError(
+            "Focus cue camera filtering requires the path/pedestrian focus report "
+            "to match the comparison summary."
+        )
+    cues_by_camera = (
+        {}
+        if comparison_match is False
+        else _path_pedestrian_focus_cues_by_camera(
+            annotations.path_pedestrian_focus_report
+        )
+    )
+    return _FocusAnnotationContext(
+        comparison_paths=comparison_paths,
+        comparison_match=comparison_match,
+        cues_by_camera=cues_by_camera,
+    )
+
+
+def _style_audit_summary(style_audit_report: Mapping[str, object] | None) -> Mapping[str, object]:
+    if not style_audit_report:
+        return {}
+    summary = style_audit_report.get("summary")
+    return summary if isinstance(summary, Mapping) else {}
+
+
+def _style_audit_rows(summary: Mapping[str, object], key: object) -> list[Mapping[str, object]]:
+    rows = summary.get(str(key))
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _style_audit_candidate_sample(
+    candidate: Mapping[str, object],
+) -> dict[str, object]:
+    sample: dict[str, object] = {}
+    for key in (
+        "layer",
+        "source_layer",
+        "type",
+        "zoom_band",
+        "filter_operator_signature",
+    ):
+        value = candidate.get(key)
+        if _non_empty_focus_value(value):
+            sample[key] = value
+    control_properties = candidate.get("terrain_landcover_palette_control_properties")
+    if not _non_empty_focus_value(control_properties):
+        control_properties = candidate.get("airport_special_landuse_control_properties")
+    if _non_empty_focus_value(control_properties):
+        sample["control_properties"] = control_properties
+    for source_key, target_key in (
+        ("qfit_simplified_control_properties", "qfit_simplified_properties"),
+        ("qgis_dependent_control_properties", "qgis_dependent_properties"),
+    ):
+        value = candidate.get(source_key)
+        if _non_empty_focus_value(value):
+            sample[target_key] = value
+    return sample
+
+
+def _style_audit_area_fill_focus(
+    style_audit_report: Mapping[str, object] | None,
+    *,
+    sample_limit: int = DEFAULT_STYLE_AUDIT_SAMPLE_LIMIT,
+) -> list[dict[str, object]]:
+    summary = _style_audit_summary(style_audit_report)
+    if not summary:
+        return []
+    focus_rows: list[dict[str, object]] = []
+    for section in STYLE_AUDIT_AREA_FILL_SECTIONS:
+        candidates = _style_audit_rows(summary, section["candidates"])
+        if not candidates:
+            continue
+        focus_rows.append(
+            {
+                "key": section["key"],
+                "label": section["label"],
+                "candidate_count": len(candidates),
+                "by_source_layer": list(_style_audit_rows(summary, section["by_source_layer"])),
+                "by_type": list(_style_audit_rows(summary, section["by_type"])),
+                "simplified_by_property": list(
+                    _style_audit_rows(summary, section["simplified_by_property"])
+                ),
+                "qgis_dependent_by_property": list(
+                    _style_audit_rows(summary, section["qgis_dependent_by_property"])
+                ),
+                "sample_candidates": [
+                    _style_audit_candidate_sample(candidate)
+                    for candidate in candidates[: max(0, sample_limit)]
+                ],
+            }
+        )
+    return focus_rows
+
+
 def _camera_row_with_focus(
     *,
     camera_name: str,
@@ -613,13 +758,36 @@ def _camera_visual_crop_rows(
     )
 
 
+def _add_visual_crop_annotation_metadata(
+    report: dict[str, object],
+    *,
+    annotations: VisualCropAnnotationInputs,
+    focus_context: _FocusAnnotationContext,
+) -> None:
+    if annotations.style_audit_report_path is not None:
+        report["style_audit_json"] = _display_input_path(annotations.style_audit_report_path)
+        area_fill_focus = _style_audit_area_fill_focus(annotations.style_audit_report)
+        if area_fill_focus:
+            report["style_audit_area_fill_focus"] = area_fill_focus
+    if annotations.path_pedestrian_focus_report_path is not None:
+        report["path_pedestrian_focus_json"] = _display_input_path(
+            annotations.path_pedestrian_focus_report_path
+        )
+        if focus_context.comparison_paths:
+            report["path_pedestrian_focus_comparison_summary_jsons"] = (
+                focus_context.comparison_paths
+            )
+            report["path_pedestrian_focus_comparison_match"] = (
+                focus_context.comparison_match
+            )
+
+
 def generate_visual_crop_report(
     comparison_summary: Mapping[str, object],
     *,
     comparison_summary_path: Path,
     paths: VisualCropPaths,
-    path_pedestrian_focus_report: Mapping[str, object] | None = None,
-    path_pedestrian_focus_report_path: Path | None = None,
+    annotation_inputs: VisualCropAnnotationInputs | None = None,
     camera_names: Sequence[str] | None = None,
     focus_cue_cameras_only: bool = False,
     crop_size: tuple[int, int] = DEFAULT_CROP_SIZE,
@@ -641,21 +809,13 @@ def generate_visual_crop_report(
         comparison_summary,
         summary_path=comparison_summary_path,
     )
-    focus_comparison_paths = _focus_comparison_summary_paths(path_pedestrian_focus_report)
-    focus_comparison_match = None
-    if focus_comparison_paths:
-        focus_comparison_match = _display_input_path(comparison_summary_path) in focus_comparison_paths
-    if focus_cue_cameras_only and focus_comparison_match is False:
-        raise ValueError(
-            "Focus cue camera filtering requires the path/pedestrian focus report "
-            "to match the comparison summary."
-        )
-    focus_cues_by_camera = (
-        {}
-        if focus_comparison_match is False
-        else _path_pedestrian_focus_cues_by_camera(path_pedestrian_focus_report)
+    annotations = annotation_inputs or VisualCropAnnotationInputs()
+    focus_context = _focus_annotation_context(
+        annotations,
+        comparison_summary_path=comparison_summary_path,
+        focus_cue_cameras_only=focus_cue_cameras_only,
     )
-    focus_camera_names = set(focus_cues_by_camera) if focus_cue_cameras_only else None
+    focus_camera_names = set(focus_context.cues_by_camera) if focus_cue_cameras_only else None
     camera_rows = []
     contact_sheet_entries: list[dict[str, object]] = []
     for camera_name in _selected_camera_names(
@@ -680,7 +840,7 @@ def generate_visual_crop_report(
                 comparison_context=_comparison_context_from_artifacts(
                     visual_artifacts_by_camera[camera_name]
                 ),
-                focus_cues=focus_cues_by_camera.get(camera_name),
+                focus_cues=focus_context.cues_by_camera.get(camera_name),
             )
         )
         contact_sheet_entries.extend(crop_contact_entries)
@@ -701,13 +861,11 @@ def generate_visual_crop_report(
         "contact_sheet": _display_input_path(contact_sheet) if contact_sheet is not None else None,
         "cameras": camera_rows,
     }
-    if path_pedestrian_focus_report_path is not None:
-        report["path_pedestrian_focus_json"] = _display_input_path(
-            path_pedestrian_focus_report_path
-        )
-        if focus_comparison_paths:
-            report["path_pedestrian_focus_comparison_summary_jsons"] = focus_comparison_paths
-            report["path_pedestrian_focus_comparison_match"] = focus_comparison_match
+    _add_visual_crop_annotation_metadata(
+        report,
+        annotations=annotations,
+        focus_context=focus_context,
+    )
     return report
 
 
@@ -843,6 +1001,8 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
         match = report.get("comparison_delta_candidate_summary_match")
         if match is not None:
             lines.append(f"Comparison delta candidate match: `{match}`")
+    if report.get("style_audit_json"):
+        lines.append(f"Style audit input: `{report.get('style_audit_json')}`")
     if report.get("path_pedestrian_focus_json"):
         lines.append(f"Path/pedestrian focus input: `{report.get('path_pedestrian_focus_json')}`")
     focus_comparison_paths = report.get("path_pedestrian_focus_comparison_summary_jsons")
@@ -1076,6 +1236,98 @@ def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
     return lines
 
 
+def _count_summary_labels(rows: object, value_key: str) -> list[str]:
+    if not isinstance(rows, list):
+        return []
+    labels = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        value = row.get(value_key)
+        count = row.get("count")
+        if value is not None and isinstance(count, int) and not isinstance(count, bool):
+            labels.append(f"{value}={count}")
+    return labels
+
+
+def _joined_summary_labels(labels: Iterable[str]) -> str:
+    values = [label for label in labels if label]
+    return ", ".join(values) if values else "-"
+
+
+def _string_values(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item not in (None, "")]
+
+
+def _candidate_sample_label(candidate: Mapping[str, object]) -> str:
+    layer = str(candidate.get("layer") or "unknown-layer")
+    source_layer = candidate.get("source_layer")
+    layer_type = candidate.get("type")
+    controls = _string_values(candidate.get("control_properties"))
+    details = []
+    if source_layer is not None or layer_type is not None:
+        details.append(f"{source_layer}/{layer_type}")
+    if controls:
+        details.append(f"controls={', '.join(controls[:4])}")
+    detail_suffix = f" ({'; '.join(details)})" if details else ""
+    return f"{layer}{detail_suffix}"
+
+
+def _candidate_sample_labels(candidates: object) -> list[str]:
+    if not isinstance(candidates, list):
+        return []
+    return [
+        _candidate_sample_label(candidate)
+        for candidate in candidates
+        if isinstance(candidate, Mapping)
+    ]
+
+
+def _style_audit_area_fill_focus_lines(report: Mapping[str, object]) -> list[str]:
+    focus = report.get("style_audit_area_fill_focus")
+    rows = focus if isinstance(focus, list) else []
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Style audit area-fill focus",
+        "",
+        (
+            "Shows global terrain/landcover and airport/special-landuse candidates from the "
+            "style audit beside the crop sheet, so broad fill differences can be reviewed "
+            "without reopening the full audit."
+        ),
+        "",
+        "| Area | Candidates | Source layers | Types | Simplified controls | QGIS-dependent controls | Sample layers |",
+        "| --- | ---: | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            _markdown_table_row(
+                [
+                    row.get("label"),
+                    row.get("candidate_count"),
+                    _joined_summary_labels(
+                        _count_summary_labels(row.get("by_source_layer"), "source_layer")
+                    ),
+                    _joined_summary_labels(_count_summary_labels(row.get("by_type"), "type")),
+                    _joined_summary_labels(
+                        _count_summary_labels(row.get("simplified_by_property"), "property")
+                    ),
+                    _joined_summary_labels(
+                        _count_summary_labels(row.get("qgis_dependent_by_property"), "property")
+                    ),
+                    _joined_summary_labels(_candidate_sample_labels(row.get("sample_candidates"))),
+                ]
+            )
+        )
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = _summary_header_lines(report)
     include_comparison_delta = _include_comparison_delta_columns(report)
@@ -1089,6 +1341,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 include_comparison_delta=include_comparison_delta,
             )
         )
+    lines.extend(_style_audit_area_fill_focus_lines(report))
     lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"
 
@@ -1134,6 +1387,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--comparison-delta-json",
         type=Path,
         help="Optional comparison-delta.json to annotate crops with per-camera metric movements.",
+    )
+    parser.add_argument(
+        "--style-audit-json",
+        type=Path,
+        help="Optional style audit JSON to annotate crops with area-fill candidate context.",
     )
     parser.add_argument(
         "--camera",
@@ -1202,14 +1460,25 @@ def main(argv: list[str] | None = None) -> int:
             args.comparison_delta_json,
             label="Comparison delta JSON",
         )
+    style_audit_report = None
+    if args.style_audit_json is not None:
+        style_audit_report = _load_cli_json_object(
+            parser,
+            args.style_audit_json,
+            label="Style audit JSON",
+        )
     paths = build_visual_crop_paths(build_run_directory())
     try:
         report = generate_visual_crop_report(
             comparison_summary,
             comparison_summary_path=args.comparison_summary_json,
             paths=paths,
-            path_pedestrian_focus_report=path_pedestrian_focus_report,
-            path_pedestrian_focus_report_path=args.path_pedestrian_focus_json,
+            annotation_inputs=VisualCropAnnotationInputs(
+                path_pedestrian_focus_report=path_pedestrian_focus_report,
+                path_pedestrian_focus_report_path=args.path_pedestrian_focus_json,
+                style_audit_report=style_audit_report,
+                style_audit_report_path=args.style_audit_json,
+            ),
             camera_names=args.camera,
             focus_cue_cameras_only=args.focus_cue_cameras,
             crop_size=args.crop_size,
