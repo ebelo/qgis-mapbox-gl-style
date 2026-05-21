@@ -5445,9 +5445,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
     def test_path_high_zoom_pale_casing_helper_inserts_only_selected_layers(self):
         unchanged_layers = "not-a-layer-list"
         selected_layer = {
-            "id": "road-pedestrian-case-z16-plus",
+            "id": "road-pedestrian-case-z18-plus",
             "type": "line",
-            "minzoom": 16,
+            "minzoom": 18,
             "filter": ["==", ["get", "class"], "pedestrian"],
             "paint": {"line-width": 2.4, "line-color": "hsl(60, 10%, 70%)"},
         }
@@ -5465,7 +5465,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result[0], "not-a-layer")
         self.assertEqual(result[1]["id"], "road-path-bg-z16-plus-piste")
-        self.assertEqual(result[2]["id"], "road-pedestrian-case-z16-plus-pale-casing")
+        self.assertEqual(result[2]["id"], "road-pedestrian-case-z18-plus-pale-casing")
         self.assertEqual(result[2]["filter"], selected_layer["filter"])
         self.assertEqual(
             result[2]["paint"],
@@ -5475,9 +5475,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "line-opacity": 1.0,
             },
         )
-        self.assertEqual(result[3]["id"], "road-pedestrian-case-z16-plus")
+        self.assertEqual(result[3]["id"], "road-pedestrian-case-z18-plus")
         self.assertEqual(
-            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z16-plus-pale-casing"),
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z18-plus-pale-casing"),
             "road-pedestrian-case",
         )
         self.assertEqual(
@@ -5488,7 +5488,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(
             mapbox_config._path_high_zoom_pale_casing_base_layer_id(
-                "road-pedestrian-case-z16-plus-pale-casing"
+                "road-pedestrian-case-z18-plus-pale-casing"
             ),
             "road-pedestrian-case",
         )
@@ -5906,12 +5906,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             [layer["id"] for layer in result["layers"]],
             [
                 "road-pedestrian-below-z16",
-                "road-pedestrian-z16-plus",
+                "road-pedestrian-z16-to-z18",
+                "road-pedestrian-z18-plus",
                 "road-pedestrian-case-below-z16",
-                "road-pedestrian-case-z16-plus-pale-casing",
-                "road-pedestrian-case-z16-plus",
+                "road-pedestrian-case-z16-to-z18-pale-casing",
+                "road-pedestrian-case-z16-to-z18",
+                "road-pedestrian-case-z18-plus-pale-casing",
+                "road-pedestrian-case-z18-plus",
                 "bridge-pedestrian-below-z16",
-                "bridge-pedestrian-z16-plus",
+                "bridge-pedestrian-z16-to-z18",
+                "bridge-pedestrian-z18-plus",
                 "road-minor",
             ],
         )
@@ -5932,6 +5936,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._extract_zoom_scalar_size_at_zoom(case_width, 17.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
+        case_mid_mm = min(case_high_unscaled_mm, mapbox_config._MAX_LINE_WIDTH_MM)
         high_zoom_cap_scale = mapbox_config._MAX_LINE_WIDTH_MM / case_high_unscaled_mm
         pedestrian_high_mm = pedestrian_high_unscaled_mm * high_zoom_cap_scale
         case_high_mm = mapbox_config._MAX_LINE_WIDTH_MM
@@ -5941,19 +5946,31 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             pedestrian_low_mm,
         )
         self.assertAlmostEqual(
-            by_id["road-pedestrian-z16-plus"]["paint"]["line-width"],
+            by_id["road-pedestrian-z16-to-z18"]["paint"]["line-width"],
+            pedestrian_high_unpaired_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["road-pedestrian-z18-plus"]["paint"]["line-width"],
             pedestrian_high_mm,
         )
         self.assertAlmostEqual(
-            by_id["road-pedestrian-case-z16-plus"]["paint"]["line-width"],
+            by_id["road-pedestrian-case-z16-to-z18"]["paint"]["line-width"],
+            case_mid_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["road-pedestrian-case-z18-plus"]["paint"]["line-width"],
             case_high_mm,
         )
         self.assertAlmostEqual(
-            by_id["bridge-pedestrian-z16-plus"]["paint"]["line-width"],
+            by_id["bridge-pedestrian-z16-to-z18"]["paint"]["line-width"],
+            pedestrian_high_unpaired_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-pedestrian-z18-plus"]["paint"]["line-width"],
             pedestrian_high_unpaired_mm,
         )
         self.assertEqual(
-            by_id["road-pedestrian-case-z16-plus-pale-casing"]["paint"],
+            by_id["road-pedestrian-case-z16-to-z18-pale-casing"]["paint"],
             {
                 "line-width": 3.0,
                 "line-color": "hsl(0, 0%, 98%)",
@@ -5961,8 +5978,20 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            by_id["road-pedestrian-case-z16-plus-pale-casing"].get("filter"),
-            by_id["road-pedestrian-case-z16-plus"].get("filter"),
+            by_id["road-pedestrian-case-z18-plus-pale-casing"]["paint"],
+            {
+                "line-width": 3.0,
+                "line-color": "hsl(0, 0%, 98%)",
+                "line-opacity": 1.0,
+            },
+        )
+        self.assertEqual(
+            by_id["road-pedestrian-case-z16-to-z18-pale-casing"].get("filter"),
+            by_id["road-pedestrian-case-z16-to-z18"].get("filter"),
+        )
+        self.assertEqual(
+            by_id["road-pedestrian-case-z18-plus-pale-casing"].get("filter"),
+            by_id["road-pedestrian-case-z18-plus"].get("filter"),
         )
         self.assertGreater(case_high_mm, pedestrian_high_mm)
         self.assertAlmostEqual(
@@ -5970,19 +5999,29 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             case_high_unscaled_mm / pedestrian_high_unscaled_mm,
         )
         self.assertEqual(by_id["road-pedestrian-below-z16"]["maxzoom"], 16.0)
-        self.assertEqual(by_id["road-pedestrian-z16-plus"]["minzoom"], 16.0)
+        self.assertEqual(by_id["road-pedestrian-z16-to-z18"]["minzoom"], 16.0)
+        self.assertEqual(by_id["road-pedestrian-z16-to-z18"]["maxzoom"], 18.0)
+        self.assertEqual(by_id["road-pedestrian-z18-plus"]["minzoom"], 18.0)
         self.assertEqual(by_id["road-pedestrian-case-below-z16"]["minzoom"], 14)
         self.assertEqual(
-            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-z16-plus"),
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-z16-to-z18"),
             "road-pedestrian",
         )
         self.assertEqual(
-            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z16-plus"),
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-z18-plus"),
+            "road-pedestrian",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z16-to-z18"),
+            "road-pedestrian-case",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-pedestrian-case-z18-plus"),
             "road-pedestrian-case",
         )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit(
-                "road-pedestrian-case-z16-plus-pale-casing"
+                "road-pedestrian-case-z18-plus-pale-casing"
             ),
             "road-pedestrian-case",
         )

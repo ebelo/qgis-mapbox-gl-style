@@ -883,19 +883,13 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             "version": 8,
             "layers": [
                 {
-                    "id": "road-pedestrian-z16-plus",
+                    "id": "road-pedestrian-z18-plus",
                     "type": "line",
-                    "minzoom": 16,
+                    "minzoom": 18,
                     "paint": {
                         "line-color": "#f6f2e8",
-                        "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
-                        "line-dasharray": [
-                            "step",
-                            ["zoom"],
-                            ["literal", [1, 0]],
-                            16,
-                            ["literal", [1, 0.2]],
-                        ],
+                        "line-width": 2.328099173553719,
+                        "line-dasharray": [1, 0.2],
                         "line-opacity": 0.65,
                     },
                 }
@@ -927,28 +921,27 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [1, 0.2],
                     },
-                    "qgis_layer_ids": ["road-pedestrian-z16-plus"],
+                    "qgis_layer_ids": ["road-pedestrian-z18-plus"],
                     "qgis_controls": [
                         {
-                            "layer_id": "road-pedestrian-z16-plus",
+                            "layer_id": "road-pedestrian-z18-plus",
                             "controls": {
+                                "line-width": 2.328099173553719,
                                 "line-color": "#f6f2e8",
-                                "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
-                                "line-dasharray": [
-                                    "step",
-                                    ["zoom"],
-                                    ["literal", [1, 0]],
-                                    16,
-                                    ["literal", [1, 0.2]],
-                                ],
+                                "line-dasharray": [1, 0.2],
                                 "line-opacity": 0.65,
                             },
                         }
                     ],
                     "qgis_control_deltas": [
                         {
-                            "layer_id": "road-pedestrian-z16-plus",
-                            "deltas": {"line-color_match": False},
+                            "layer_id": "road-pedestrian-z18-plus",
+                            "deltas": {
+                                "line-width_delta_mm": -0.6719008264462811,
+                                "line-width_ratio": 0.7760330578512397,
+                                "line-dasharray_match": True,
+                                "line-color_match": False,
+                            },
                         }
                     ],
                 }
@@ -1117,21 +1110,21 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             "version": 8,
             "layers": [
                 {
-                    "id": "road-pedestrian-case-z16-plus-pale-casing",
+                    "id": "road-pedestrian-case-z18-plus-pale-casing",
                     "type": "line",
-                    "minzoom": 16,
+                    "minzoom": 18,
                     "paint": {"line-width": 3.0},
                 },
                 {
-                    "id": "road-pedestrian-case-z16-plus",
+                    "id": "road-pedestrian-case-z18-plus",
                     "type": "line",
-                    "minzoom": 16,
+                    "minzoom": 18,
                     "paint": {"line-width": 2.4},
                 },
                 {
-                    "id": "road-pedestrian-z16-plus",
+                    "id": "road-pedestrian-z18-plus",
                     "type": "line",
-                    "minzoom": 16,
+                    "minzoom": 18,
                     "paint": {"line-width": 1.92},
                 },
             ],
@@ -1161,11 +1154,11 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     "source_both_widths_capped": True,
                     "source_case_over_core_mm": 0.0,
                     "source_case_to_core_ratio": 1.0,
-                    "qgis_core_layer_id": "road-pedestrian-z16-plus",
+                    "qgis_core_layer_id": "road-pedestrian-z18-plus",
                     "qgis_core_width_mm": 1.92,
-                    "qgis_case_layer_id": "road-pedestrian-case-z16-plus",
+                    "qgis_case_layer_id": "road-pedestrian-case-z18-plus",
                     "qgis_case_width_mm": 2.4,
-                    "qgis_pale_casing_layer_id": "road-pedestrian-case-z16-plus-pale-casing",
+                    "qgis_pale_casing_layer_id": "road-pedestrian-case-z18-plus-pale-casing",
                     "qgis_pale_casing_width_mm": 3.0,
                     "qgis_case_over_core_mm": 0.48,
                     "qgis_case_to_core_ratio": 1.25,
