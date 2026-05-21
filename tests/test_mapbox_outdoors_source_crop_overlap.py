@@ -155,15 +155,22 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         combined = {row["source_layer"]: row for row in report["combined_source_layers"]}
         self.assertEqual(combined["landuse"]["overlap_feature_count"], 1)
         self.assertEqual(combined["landuse"]["property_counts"]["class"], {"park": 1})
+        self.assertAlmostEqual(combined["landuse"]["bbox_crop_coverage_ratio"], 0.128418417649)
+        self.assertAlmostEqual(
+            combined["landuse"]["property_overlap_areas"]["class"]["park"]["crop_coverage_ratio"],
+            0.128418417649,
+        )
         self.assertEqual(combined["landuse_overlay"]["overlap_feature_count"], 0)
         self.assertEqual(combined["contour"]["overlap_feature_count"], 2)
+        self.assertEqual(combined["contour"]["bbox_crop_coverage_ratio"], 0.0)
         self.assertEqual(combined["contour"]["property_counts"]["index"], {"10": 1, "1": 1})
         self.assertEqual(combined["contour"]["ele_range"], {"min": 1580.0, "max": 1600.0})
 
         markdown = build_summary_markdown(report)
-        self.assertIn("| `landuse` | 2 | 1 | park=1 | park=1 | - | - |", markdown)
-        self.assertIn("| `landuse_overlay` | 0 | 0 | - | - | - | - |", markdown)
-        self.assertIn("| `contour` | 2 | 2 | - | - | 10=1, 1=1 | 1580-1600 |", markdown)
+        self.assertIn("Bbox coverage is a summed upper-bound attribution aid", markdown)
+        self.assertIn("| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | park=1 | - | - |", markdown)
+        self.assertIn("| `landuse_overlay` | 0 | 0 | 0.000 | - | - | - | - | - |", markdown)
+        self.assertIn("| `contour` | 2 | 2 | 0.000 | - | - | - | 10=1, 1=1 | 1580-1600 |", markdown)
 
     def test_write_report_outputs_json_and_markdown(self):
         with tempfile.TemporaryDirectory() as tmp:

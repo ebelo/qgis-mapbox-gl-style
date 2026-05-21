@@ -8,7 +8,7 @@ import math
 import os
 import sys
 from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.request import urlopen
@@ -301,6 +301,37 @@ def bbox_overlaps_lon_lat_bounds(
     return east >= bounds["west"] and west <= bounds["east"] and north >= bounds["south"] and south <= bounds["north"]
 
 
+def _bbox_area(west: float, south: float, east: float, north: float) -> float:
+    return max(0.0, east - west) * max(0.0, north - south)
+
+
+def lon_lat_bounds_area(bounds: Mapping[str, float]) -> float:
+    return _bbox_area(bounds["west"], bounds["south"], bounds["east"], bounds["north"])
+
+
+def bbox_overlap_area(
+    bbox: tuple[float, float, float, float] | None,
+    bounds: Mapping[str, float],
+) -> float:
+    if bbox is None:
+        return 0.0
+    west, south, east, north = bbox
+    return _bbox_area(
+        max(west, bounds["west"]),
+        max(south, bounds["south"]),
+        min(east, bounds["east"]),
+        min(north, bounds["north"]),
+    )
+
+
+def _feature_bbox_overlap_area(feature: Mapping[str, object], bounds: Mapping[str, float]) -> float:
+    return bbox_overlap_area(feature_lon_lat_bbox(feature), bounds)
+
+
+def _rounded_float(value: float) -> float:
+    return round(value, 12)
+
+
 def _clean_count_value(value: object) -> str:
     if value is None:
         return MISSING_VALUE
@@ -325,6 +356,33 @@ def _property_count_summary(features: Sequence[Mapping[str, object]]) -> dict[st
         counts = _property_counts(features, key)
         if counts:
             summary[key] = counts
+    return summary
+
+
+def _property_area_summary(
+    features: Sequence[Mapping[str, object]],
+    *,
+    bounds: Mapping[str, float],
+    crop_area: float,
+) -> dict[str, dict[str, dict[str, float]]]:
+    summary: dict[str, dict[str, dict[str, float]]] = {}
+    feature_areas = [(feature, _feature_bbox_overlap_area(feature, bounds)) for feature in features]
+    for key in PROPERTY_COUNT_KEYS:
+        areas = Counter[str]()
+        for feature, area in feature_areas:
+            if area <= 0.0:
+                continue
+            areas[_clean_count_value(_feature_properties(feature).get(key))] += area
+        areas.pop(MISSING_VALUE, None)
+        if not areas:
+            continue
+        summary[key] = {
+            value: {
+                "overlap_bbox_area": _rounded_float(area),
+                "crop_coverage_ratio": _rounded_float(area / crop_area) if crop_area else 0.0,
+            }
+            for value, area in areas.most_common(MAX_COUNT_VALUES)
+        }
     return summary
 
 
@@ -362,11 +420,21 @@ def source_layer_overlap_record(
     overlapping_features = [
         feature for feature in tile_features if bbox_overlaps_lon_lat_bounds(feature_lon_lat_bbox(feature), bounds)
     ]
+    crop_area = lon_lat_bounds_area(bounds)
+    overlap_area = sum(_feature_bbox_overlap_area(feature, bounds) for feature in overlapping_features)
     return {
         "source_layer": source_layer,
         "tile_feature_count": len(tile_features),
         "overlap_feature_count": len(overlapping_features),
+        "crop_bbox_area": _rounded_float(crop_area),
+        "overlap_bbox_area": _rounded_float(overlap_area),
+        "bbox_crop_coverage_ratio": _rounded_float(overlap_area / crop_area) if crop_area else 0.0,
         "property_counts": _property_count_summary(overlapping_features),
+        "property_overlap_areas": _property_area_summary(
+            overlapping_features,
+            bounds=bounds,
+            crop_area=crop_area,
+        ),
         "ele_range": _numeric_property_range(overlapping_features, "ele"),
         "sample_properties": _sample_feature_properties(overlapping_features),
     }
@@ -495,6 +563,43 @@ def _combined_property_counts(records: Sequence[Mapping[str, object]]) -> dict[s
     }
 
 
+def _iter_property_area_values(record: Mapping[str, object]) -> Iterator[tuple[str, str, float]]:
+    property_overlap_areas = record.get("property_overlap_areas")
+    if not isinstance(property_overlap_areas, dict):
+        return
+    for key, value_areas in property_overlap_areas.items():
+        if not isinstance(value_areas, dict):
+            continue
+        for value, area_record in value_areas.items():
+            if not isinstance(area_record, dict):
+                continue
+            overlap_area = area_record.get("overlap_bbox_area")
+            if isinstance(overlap_area, (int, float)):
+                yield str(key), str(value), float(overlap_area)
+
+
+def _combined_property_areas(
+    records: Sequence[Mapping[str, object]],
+    *,
+    crop_area: float,
+) -> dict[str, dict[str, dict[str, float]]]:
+    property_areas: dict[str, Counter[str]] = {}
+    for record in records:
+        for key, value, overlap_area in _iter_property_area_values(record):
+            property_areas.setdefault(key, Counter()).update({value: overlap_area})
+    return {
+        key: {
+            value: {
+                "overlap_bbox_area": _rounded_float(area),
+                "crop_coverage_ratio": _rounded_float(area / crop_area) if crop_area else 0.0,
+            }
+            for value, area in counter.most_common(MAX_COUNT_VALUES)
+        }
+        for key, counter in property_areas.items()
+        if counter
+    }
+
+
 def _combined_ele_range(records: Sequence[Mapping[str, object]]) -> dict[str, float] | None:
     values: list[float] = []
     for record in records:
@@ -510,11 +615,17 @@ def _combined_ele_range(records: Sequence[Mapping[str, object]]) -> dict[str, fl
 
 
 def _combined_source_layer_record(source_layer: str, records: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    crop_area = sum(float(record.get("crop_bbox_area") or 0.0) for record in records)
+    overlap_area = sum(float(record.get("overlap_bbox_area") or 0.0) for record in records)
     return {
         "source_layer": source_layer,
         "tile_feature_count": sum(int(record.get("tile_feature_count") or 0) for record in records),
         "overlap_feature_count": sum(int(record.get("overlap_feature_count") or 0) for record in records),
+        "crop_bbox_area": _rounded_float(crop_area),
+        "overlap_bbox_area": _rounded_float(overlap_area),
+        "bbox_crop_coverage_ratio": _rounded_float(overlap_area / crop_area) if crop_area else 0.0,
         "property_counts": _combined_property_counts(records),
+        "property_overlap_areas": _combined_property_areas(records, crop_area=crop_area),
         "ele_range": _combined_ele_range(records),
     }
 
@@ -635,6 +746,24 @@ def _format_property_counts(record: Mapping[str, object], key: str) -> str:
     return _format_counts(property_counts.get(key) if isinstance(property_counts, dict) else None)
 
 
+def _format_coverage(value: object) -> str:
+    return f"{float(value):.3f}" if isinstance(value, (int, float)) else "-"
+
+
+def _format_property_coverage(record: Mapping[str, object], key: str) -> str:
+    property_areas = record.get("property_overlap_areas")
+    if not isinstance(property_areas, dict):
+        return "-"
+    value_areas = property_areas.get(key)
+    if not isinstance(value_areas, dict) or not value_areas:
+        return "-"
+    return ", ".join(
+        f"{value}={float(area_record.get('crop_coverage_ratio', 0.0)):.3f}"
+        for value, area_record in value_areas.items()
+        if isinstance(area_record, dict)
+    )
+
+
 def _format_ele_range(value: object) -> str:
     if not isinstance(value, dict):
         return "-"
@@ -669,21 +798,27 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "Mapbox vector tiles, and counts decoded source features whose transformed geometry bbox "
             "overlaps each crop. Token-bearing URLs are intentionally omitted."
         ),
+        (
+            "Bbox coverage is a summed upper-bound attribution aid, not pixel ownership; ratios can exceed "
+            "1.0 when feature bboxes overlap or line-feature bboxes span the same crop area."
+        ),
         "",
         "## Combined overlap by source layer",
         "",
-        "| Source layer | Tile features | Overlap features | Classes | Types | Index values | Elevation range |",
-        "| --- | ---: | ---: | --- | --- | --- | --- |",
+        "| Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | Types | Index values | Elevation range |",
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
     ]
     for record in report.get("combined_source_layers", []):
         if not isinstance(record, dict):
             continue
         lines.append(
-            "| `{source_layer}` | {tile_features} | {overlap_features} | {classes} | {types} | {indices} | {ele} |".format(
+            "| `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {types} | {indices} | {ele} |".format(
                 source_layer=record["source_layer"],
                 tile_features=record["tile_feature_count"],
                 overlap_features=record["overlap_feature_count"],
+                coverage=_format_coverage(record.get("bbox_crop_coverage_ratio")),
                 classes=_format_property_counts(record, "class"),
+                class_coverage=_format_property_coverage(record, "class"),
                 types=_format_property_counts(record, "type"),
                 indices=_format_property_counts(record, "index"),
                 ele=_format_ele_range(record.get("ele_range")),
@@ -694,8 +829,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "",
             "## Per-crop overlap",
             "",
-            "| Crop | Box | Lon/lat bounds | Tiles | Source layer | Tile features | Overlap features | Classes | Types | Index values | Elevation range |",
-            "| ---: | --- | --- | ---: | --- | ---: | ---: | --- | --- | --- | --- |",
+            "| Crop | Box | Lon/lat bounds | Tiles | Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | Types | Index values | Elevation range |",
+            "| ---: | --- | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
         ]
     )
     for crop in report.get("crops", []):
@@ -705,7 +840,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             if not isinstance(source_layer_record, dict):
                 continue
             lines.append(
-                "| {crop} | {box} | {bounds} | {tile_count} | `{source_layer}` | {tile_features} | {overlap_features} | {classes} | {types} | {indices} | {ele} |".format(
+                "| {crop} | {box} | {bounds} | {tile_count} | `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {types} | {indices} | {ele} |".format(
                     crop=crop["index"],
                     box=crop["box"],
                     bounds=_format_bounds(crop["lon_lat_bounds"]),
@@ -713,7 +848,9 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     source_layer=source_layer_record["source_layer"],
                     tile_features=source_layer_record["tile_feature_count"],
                     overlap_features=source_layer_record["overlap_feature_count"],
+                    coverage=_format_coverage(source_layer_record.get("bbox_crop_coverage_ratio")),
                     classes=_format_property_counts(source_layer_record, "class"),
+                    class_coverage=_format_property_coverage(source_layer_record, "class"),
                     types=_format_property_counts(source_layer_record, "type"),
                     indices=_format_property_counts(source_layer_record, "index"),
                     ele=_format_ele_range(source_layer_record.get("ele_range")),
