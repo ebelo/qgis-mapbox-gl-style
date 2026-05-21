@@ -1176,6 +1176,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         )
         markdown = build_summary_markdown(report)
         self.assertIn("## Pedestrian core/case cap relationships", markdown)
+        self.assertIn("## Largest non-auxiliary stroke width deltas", markdown)
+        largest_delta_section = markdown.split(
+            "## Largest non-auxiliary stroke width deltas",
+            1,
+        )[1].split("## QGIS auxiliary stroke layers", 1)[0]
+        self.assertIn("road-pedestrian-z18-plus", largest_delta_section)
+        self.assertIn("road-pedestrian-case-z18-plus", largest_delta_section)
+        self.assertNotIn("road-pedestrian-case-z18-plus-pale-casing", largest_delta_section)
         self.assertIn("## QGIS auxiliary stroke layers", markdown)
         self.assertIn("road-pedestrian-case-z18-plus-pale-casing", markdown)
         self.assertIn("should not be read as one-to-one source style mismatches", markdown)
