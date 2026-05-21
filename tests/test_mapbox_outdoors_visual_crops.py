@@ -700,6 +700,63 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown = build_summary_markdown(report)
             self.assertIn("| Airport/special landuse | 0 | - | - | - | - | - |", markdown)
 
+    def test_generate_visual_crop_report_samples_representative_area_fill_candidates(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            style_audit_report = _style_audit_report()
+            style_audit_report["summary"]["terrain_landcover_palette_candidates"] = [
+                {"layer": "landcover", "source_layer": "landcover", "type": "fill"},
+                {"layer": "landuse", "source_layer": "landuse", "type": "fill"},
+                {"layer": "national-park", "source_layer": "landuse_overlay", "type": "fill"},
+                {"layer": "wetland", "source_layer": "landuse_overlay", "type": "fill"},
+                {
+                    "layer": "wetland-pattern",
+                    "source_layer": "landuse_overlay",
+                    "type": "fill",
+                    "qgis_dependent_control_properties": ["filter", "paint.fill-pattern"],
+                },
+                {"layer": "contour-line", "source_layer": "contour", "type": "line"},
+                {
+                    "layer": "national-park_tint-band",
+                    "source_layer": "landuse_overlay",
+                    "type": "line",
+                },
+                {"layer": "pitch-outline", "source_layer": "landuse", "type": "line"},
+            ]
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    style_audit_report=style_audit_report,
+                    style_audit_report_path=root / "style-audit" / "audit.json",
+                ),
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            terrain_samples = report["style_audit_area_fill_focus"][0]["sample_candidates"]
+            self.assertEqual(
+                [sample["layer"] for sample in terrain_samples],
+                [
+                    "landcover",
+                    "landuse",
+                    "wetland-pattern",
+                    "contour-line",
+                    "national-park_tint-band",
+                ],
+            )
+            self.assertNotIn("wetland (", build_summary_markdown(report))
+            self.assertIn("wetland-pattern", build_summary_markdown(report))
+            self.assertIn("contour-line", build_summary_markdown(report))
+
     def test_generate_visual_crop_report_attaches_matching_comparison_delta_context(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:

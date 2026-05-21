@@ -468,6 +468,54 @@ def _style_audit_candidate_sample(
     return sample
 
 
+def _style_audit_candidate_has_non_filter_qgis_dependency(candidate: Mapping[str, object]) -> bool:
+    return any(
+        property_name != "filter"
+        for property_name in _string_values(candidate.get("qgis_dependent_control_properties"))
+    )
+
+
+def _style_audit_candidate_source_type(candidate: Mapping[str, object]) -> tuple[str, str]:
+    return (
+        str(candidate.get("source_layer") or ""),
+        str(candidate.get("type") or ""),
+    )
+
+
+def _style_audit_sample_candidates(
+    candidates: list[Mapping[str, object]],
+    *,
+    sample_limit: int,
+) -> list[Mapping[str, object]]:
+    if sample_limit <= 0:
+        return []
+
+    selected_indexes: set[int] = set()
+    covered_source_types: set[tuple[str, str]] = set()
+
+    def add_candidate(index: int, candidate: Mapping[str, object]) -> None:
+        if len(selected_indexes) >= sample_limit:
+            return
+        if index in selected_indexes:
+            return
+        selected_indexes.add(index)
+        covered_source_types.add(_style_audit_candidate_source_type(candidate))
+
+    for index, candidate in enumerate(candidates):
+        if _style_audit_candidate_has_non_filter_qgis_dependency(candidate):
+            add_candidate(index, candidate)
+
+    for index, candidate in enumerate(candidates):
+        source_type = _style_audit_candidate_source_type(candidate)
+        if source_type not in covered_source_types:
+            add_candidate(index, candidate)
+
+    for index, candidate in enumerate(candidates):
+        add_candidate(index, candidate)
+
+    return [candidates[index] for index in sorted(selected_indexes)]
+
+
 def _style_audit_area_fill_focus(
     style_audit_report: Mapping[str, object] | None,
     *,
@@ -497,7 +545,10 @@ def _style_audit_area_fill_focus(
                 ),
                 "sample_candidates": [
                     _style_audit_candidate_sample(candidate)
-                    for candidate in candidates[: max(0, sample_limit)]
+                    for candidate in _style_audit_sample_candidates(
+                        candidates,
+                        sample_limit=sample_limit,
+                    )
                 ],
             }
         )
