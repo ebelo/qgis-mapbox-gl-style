@@ -87,6 +87,9 @@ PATH_PEDESTRIAN_CORE_CASE_LAYER_PAIRS = (
     ("tunnel-pedestrian", "tunnel-pedestrian-case"),
 )
 PATH_PEDESTRIAN_PALE_CASING_SUFFIX = "-pale-casing"
+PATH_PEDESTRIAN_AUXILIARY_STROKE_SUFFIXES = (
+    PATH_PEDESTRIAN_PALE_CASING_SUFFIX,
+)
 PATH_PEDESTRIAN_CORE_CASE_SOURCE_KEYS = (
     "source_both_widths_capped",
     "source_case_to_core_ratio",
@@ -1146,6 +1149,19 @@ def _qgis_stroke_details_by_source_id(
     return details_by_source_id
 
 
+def _is_auxiliary_qgis_stroke_layer_id(layer_id: object) -> bool:
+    normalized = str(layer_id or "")
+    return normalized.endswith(PATH_PEDESTRIAN_AUXILIARY_STROKE_SUFFIXES)
+
+
+def _auxiliary_qgis_stroke_layer_ids(details: Iterable[Mapping[str, object]]) -> list[str]:
+    return [
+        str(detail.get("id") or "")
+        for detail in details
+        if _is_auxiliary_qgis_stroke_layer_id(detail.get("id"))
+    ]
+
+
 def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> list[dict[str, object]]:
     source_details = _visible_line_details(camera, "source_path_pedestrian_visible_layer_details")
     qgis_details = _visible_line_details(camera, "qgis_path_pedestrian_visible_layer_details")
@@ -1156,31 +1172,33 @@ def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> lis
         source_id = str(source_detail.get("id") or "")
         matched_details = qgis_details_by_source_id.get(source_id, [])
         source_sampled_controls = _source_sampled_stroke_controls(source_detail, camera_zoom)
-        comparisons.append(
-            {
-                "source_layer_id": source_id,
-                "source_controls": _stroke_controls(source_detail),
-                "source_sampled_controls": source_sampled_controls,
-                "qgis_layer_ids": [str(detail.get("id") or "") for detail in matched_details],
-                "qgis_controls": [
-                    {
-                        "layer_id": str(detail.get("id") or ""),
-                        "controls": _stroke_controls(detail),
-                    }
-                    for detail in matched_details
-                ],
-                "qgis_control_deltas": [
-                    {
-                        "layer_id": str(detail.get("id") or ""),
-                        "deltas": _stroke_control_deltas(
-                            source_sampled_controls,
-                            _stroke_controls(detail),
-                        ),
-                    }
-                    for detail in matched_details
-                ],
-            }
-        )
+        comparison: dict[str, object] = {
+            "source_layer_id": source_id,
+            "source_controls": _stroke_controls(source_detail),
+            "source_sampled_controls": source_sampled_controls,
+            "qgis_layer_ids": [str(detail.get("id") or "") for detail in matched_details],
+            "qgis_controls": [
+                {
+                    "layer_id": str(detail.get("id") or ""),
+                    "controls": _stroke_controls(detail),
+                }
+                for detail in matched_details
+            ],
+            "qgis_control_deltas": [
+                {
+                    "layer_id": str(detail.get("id") or ""),
+                    "deltas": _stroke_control_deltas(
+                        source_sampled_controls,
+                        _stroke_controls(detail),
+                    ),
+                }
+                for detail in matched_details
+            ],
+        }
+        auxiliary_layer_ids = _auxiliary_qgis_stroke_layer_ids(matched_details)
+        if auxiliary_layer_ids:
+            comparison["qgis_auxiliary_layer_ids"] = auxiliary_layer_ids
+        comparisons.append(comparison)
     return comparisons
 
 
@@ -1721,6 +1739,44 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
     return lines
 
 
+def _qgis_auxiliary_stroke_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        comparisons = camera.get("source_qgis_stroke_control_comparisons")
+        comparison_rows = comparisons if isinstance(comparisons, list) else []
+        for comparison in comparison_rows:
+            if not isinstance(comparison, Mapping):
+                continue
+            auxiliary_layer_ids = comparison.get("qgis_auxiliary_layer_ids")
+            if isinstance(auxiliary_layer_ids, list) and auxiliary_layer_ids:
+                rows.append(
+                    [
+                        camera.get("camera"),
+                        comparison.get("source_layer_id"),
+                        auxiliary_layer_ids,
+                    ]
+                )
+    if not rows:
+        return []
+    lines = ["", "## QGIS auxiliary stroke layers", ""]
+    lines.extend(
+        [
+            (
+                "Lists qfit-only helper stroke layers paired with a source layer, such as pale "
+                "casing underlays. Their deltas are useful for validating the helper layer, but "
+                "should not be read as one-to-one source style mismatches."
+            ),
+            "",
+            "| Camera | Source layer | QGIS auxiliary layer ids |",
+            "| --- | --- | --- |",
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def _core_case_relationship_summary(
     relationship: Mapping[str, object],
     keys: Iterable[str],
@@ -2086,6 +2142,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
     lines.extend(_source_qgis_stroke_control_markdown_lines(rows))
+    lines.extend(_qgis_auxiliary_stroke_markdown_lines(rows))
     lines.extend(_pedestrian_core_case_cap_markdown_lines(rows))
     lines.extend(_visible_source_detail_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
