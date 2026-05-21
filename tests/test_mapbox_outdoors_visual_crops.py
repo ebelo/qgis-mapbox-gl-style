@@ -225,6 +225,34 @@ def _path_pedestrian_focus_report(
                             }
                         ],
                     },
+                    {
+                        "source_layer_id": "road-steps",
+                        "decoded_candidate_count": 3,
+                        "decoded_candidate_type_counts": {"steps": 3},
+                        "source_sampled_controls": {
+                            "line-width": 0.5291666666666667,
+                            "line-dasharray": [0.3, 0.3],
+                        },
+                        "qgis_controls": [
+                            {
+                                "layer_id": "road-steps",
+                                "controls": {
+                                    "line-width": 0.5291666666666667,
+                                    "line-dasharray": [1, 0],
+                                },
+                            }
+                        ],
+                        "qgis_control_deltas": [
+                            {
+                                "layer_id": "road-steps",
+                                "deltas": {
+                                    "line-width_delta_mm": 0.0,
+                                    "line-width_ratio": 1.0,
+                                    "line-dasharray_match": False,
+                                },
+                            }
+                        ],
+                    },
                 ],
             }
         ]
@@ -459,7 +487,38 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
             self.assertEqual(stroke_cues[0]["source_layer_id"], "road-path-trail")
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
-            self.assertEqual(dash_cues[0]["source_dasharray"], [1, 0.25])
+            self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
+            self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
+
+    def test_generate_visual_crop_report_filters_zero_candidate_focus_cues(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            focus_path = root / "focus" / "path-pedestrian-focus.json"
+            focus_report = _path_pedestrian_focus_report(comparison_summary_jsons=[str(summary_path)])
+            comparisons = focus_report["cameras"][0]["source_qgis_stroke_control_comparisons"]
+            comparisons[0]["decoded_candidate_count"] = 0
+            comparisons[0]["decoded_candidate_type_counts"] = {}
+            comparisons[2]["decoded_candidate_count"] = 0
+            comparisons[2]["decoded_candidate_type_counts"] = {}
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                path_pedestrian_focus_report=focus_report,
+                path_pedestrian_focus_report_path=focus_path,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
+            self.assertNotIn("path_pedestrian_focus", report["cameras"][0])
 
     def test_generate_visual_crop_report_suppresses_mismatched_focus_cues(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -692,7 +751,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                 {
                                     "source_layer_id": "bridge-path",
                                     "qgis_layer_id": "bridge-path",
-                                    "decoded_candidate_count": 0,
+                                    "decoded_candidate_count": 2,
                                     "source_dasharray": [1, 0.25],
                                     "qgis_dasharray": [4, 0.3],
                                 }
@@ -715,6 +774,52 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn("candidate_types=trail=69", markdown)
         self.assertNotIn("candidates=None", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
+
+    def test_build_summary_markdown_omits_zero_candidate_focus_cues(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "path_pedestrian_focus_json": "debug/focus/path-pedestrian-focus.json",
+                "path_pedestrian_focus_comparison_summary_jsons": [
+                    "debug/comparison/summary.json",
+                ],
+                "path_pedestrian_focus_comparison_match": True,
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 1,
+                "crop_count": 0,
+                "cameras": [
+                    {
+                        "camera": "zermatt-trails-z18-outdoors",
+                        "status": "cropped",
+                        "path_pedestrian_focus": {
+                            "stroke_width_deltas": [
+                                {
+                                    "source_layer_id": "bridge-steps",
+                                    "qgis_layer_id": "bridge-steps",
+                                    "decoded_candidate_count": 0,
+                                    "line_width_delta_mm": -1.3229166666666665,
+                                }
+                            ],
+                            "dash_mismatches": [
+                                {
+                                    "source_layer_id": "bridge-path",
+                                    "qgis_layer_id": "bridge-path",
+                                    "decoded_candidate_count": 0,
+                                    "source_dasharray": [1, 0.25],
+                                    "qgis_dasharray": [4, 0.3],
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Path/pedestrian focus comparison match: `True`", markdown)
+        self.assertNotIn("## Path/pedestrian focus cues", markdown)
+        self.assertNotIn("bridge-steps->bridge-steps", markdown)
 
     def test_build_summary_markdown_omits_missing_focus_comparison_match(self):
         markdown = build_summary_markdown(

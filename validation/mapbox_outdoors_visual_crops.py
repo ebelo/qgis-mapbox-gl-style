@@ -4,7 +4,7 @@ import argparse
 import datetime as dt
 import json
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -263,6 +263,26 @@ def _has_meaningful_width_delta(row: Mapping[str, object]) -> bool:
     return isinstance(value, (int, float)) and abs(float(value)) > 1e-12
 
 
+def _decoded_candidate_count(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return 0
+
+
+def _has_decoded_candidates(row: Mapping[str, object]) -> bool:
+    if _decoded_candidate_count(row.get("decoded_candidate_count")) > 0:
+        return True
+    candidate_type_counts = row.get("decoded_candidate_type_counts")
+    if isinstance(candidate_type_counts, Mapping) and candidate_type_counts:
+        return True
+    candidate_types = row.get("candidate_types")
+    return isinstance(candidate_types, list) and bool(candidate_types)
+
+
 def _path_pedestrian_focus_cues_by_camera(
     focus_report: Mapping[str, object] | None,
     *,
@@ -284,7 +304,7 @@ def _path_pedestrian_focus_cues_by_camera(
         width_delta_rows = [
             row
             for row in _largest_non_auxiliary_stroke_delta_rows([camera], limit=10_000)
-            if _has_meaningful_width_delta(row)
+            if _has_meaningful_width_delta(row) and _has_decoded_candidates(row)
         ][: max(0, stroke_limit)]
         width_rows = [
             _focus_cue_from_row(
@@ -314,8 +334,10 @@ def _path_pedestrian_focus_cues_by_camera(
                     "line_width_ratio",
                 ),
             )
-            for row in _non_auxiliary_dash_mismatch_rows([camera])[: max(0, dash_limit)]
+            for row in _non_auxiliary_dash_mismatch_rows([camera])
+            if _has_decoded_candidates(row)
         ]
+        dash_rows = dash_rows[: max(0, dash_limit)]
         if width_rows or dash_rows:
             cues_by_camera[camera_name] = {
                 "stroke_width_deltas": width_rows,
@@ -742,35 +764,53 @@ def _summary_camera_rows(camera: Mapping[str, object]) -> list[str]:
     return [_summary_crop_row(camera, crop) for crop in crop_rows if isinstance(crop, Mapping)]
 
 
+def _candidate_backed_focus_summaries(
+    focus: Mapping[str, object],
+    cue_key: str,
+    formatter: Callable[[Mapping[str, object]], str],
+) -> list[str]:
+    cues = focus.get(cue_key)
+    cue_rows = cues if isinstance(cues, list) else []
+    return [
+        formatter(cue)
+        for cue in cue_rows
+        if isinstance(cue, Mapping) and _has_decoded_candidates(cue)
+    ]
+
+
+def _summary_focus_row(camera: object) -> list[object] | None:
+    if not isinstance(camera, Mapping):
+        return None
+    focus = camera.get("path_pedestrian_focus")
+    if not isinstance(focus, Mapping):
+        return None
+    stroke_summaries = _candidate_backed_focus_summaries(
+        focus,
+        "stroke_width_deltas",
+        _stroke_focus_cue_summary,
+    )
+    dash_summaries = _candidate_backed_focus_summaries(
+        focus,
+        "dash_mismatches",
+        _dash_focus_cue_summary,
+    )
+    if not stroke_summaries and not dash_summaries:
+        return None
+    return [camera.get("camera"), stroke_summaries, dash_summaries]
+
+
+def _summary_focus_rows(report: Mapping[str, object]) -> list[list[object]]:
+    return [
+        row
+        for camera in report.get("cameras", [])
+        if (row := _summary_focus_row(camera)) is not None
+    ]
+
+
 def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
     if report.get("path_pedestrian_focus_comparison_match") is False:
         return []
-    rows: list[list[object]] = []
-    for camera in report.get("cameras", []):
-        if not isinstance(camera, Mapping):
-            continue
-        focus = camera.get("path_pedestrian_focus")
-        if not isinstance(focus, Mapping):
-            continue
-        stroke_cues = focus.get("stroke_width_deltas")
-        dash_cues = focus.get("dash_mismatches")
-        stroke_rows = stroke_cues if isinstance(stroke_cues, list) else []
-        dash_rows = dash_cues if isinstance(dash_cues, list) else []
-        rows.append(
-            [
-                camera.get("camera"),
-                [
-                    _stroke_focus_cue_summary(cue)
-                    for cue in stroke_rows
-                    if isinstance(cue, Mapping)
-                ],
-                [
-                    _dash_focus_cue_summary(cue)
-                    for cue in dash_rows
-                    if isinstance(cue, Mapping)
-                ],
-            ]
-        )
+    rows = _summary_focus_rows(report)
     if not rows:
         return []
     lines = ["", "## Path/pedestrian focus cues", ""]
