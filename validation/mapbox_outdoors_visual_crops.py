@@ -463,6 +463,10 @@ def generate_visual_crop_report(
     report = {
         "generated": generated.astimezone(dt.timezone.utc).isoformat(),
         "comparison_summary_json": _display_input_path(comparison_summary_path),
+        "comparison_summary_run": _comparison_summary_run_metadata(
+            comparison_summary,
+            comparison_summary_path,
+        ),
         "crop_size": {"width": crop_size[0], "height": crop_size[1]},
         "crops_per_camera": crops_per_camera,
         "camera_count": len(camera_rows),
@@ -473,6 +477,18 @@ def generate_visual_crop_report(
     if path_pedestrian_focus_report_path is not None:
         report["path_pedestrian_focus_json"] = _display_input_path(path_pedestrian_focus_report_path)
     return report
+
+
+def _comparison_summary_run_metadata(
+    comparison_summary: Mapping[str, object],
+    comparison_summary_path: Path,
+) -> dict[str, object]:
+    run_metadata: dict[str, object] = {"path": _display_input_path(comparison_summary_path)}
+    for key in ("generated_at", "style_url"):
+        value = comparison_summary.get(key)
+        if isinstance(value, str) and value:
+            run_metadata[key] = value
+    return run_metadata
 
 
 def _format_focus_number(value: object) -> str:
@@ -559,9 +575,27 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
     ]
     if report.get("contact_sheet"):
         lines.append(f"Crop contact sheet: `{report.get('contact_sheet')}`")
+    comparison_summary_run = _comparison_summary_run_markdown(report.get("comparison_summary_run"))
+    if comparison_summary_run:
+        lines.append(f"Comparison summary run: {comparison_summary_run}")
     if report.get("path_pedestrian_focus_json"):
         lines.append(f"Path/pedestrian focus input: `{report.get('path_pedestrian_focus_json')}`")
     return lines
+
+
+def _comparison_summary_run_markdown(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    path_value = value.get("path")
+    if not isinstance(path_value, str) or not path_value:
+        return ""
+    details = [
+        f"{key}={detail_value}"
+        for key in ("generated_at", "style_url")
+        if isinstance((detail_value := value.get(key)), str) and detail_value
+    ]
+    suffix = f" ({', '.join(details)})" if details else ""
+    return f"`{path_value}`{suffix}"
 
 
 def _summary_table_intro_lines() -> list[str]:
