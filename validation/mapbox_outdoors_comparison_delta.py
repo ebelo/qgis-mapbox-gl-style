@@ -28,6 +28,7 @@ DELTA_METRIC_KEYS = (
     "normalized_rms_channel_delta",
 )
 DIRECTION_BUCKETS = ("improved", "worsened", "unchanged", "unknown")
+TOP_MOVEMENT_LIMIT = 5
 
 
 class ComparisonDeltaPaths(NamedTuple):
@@ -149,6 +150,53 @@ def _direction_counts(prefix: str, directions: list[str]) -> dict[str, int]:
     return {f"{prefix}_{bucket}": directions.count(bucket) for bucket in DIRECTION_BUCKETS}
 
 
+def _metric_delta_value(row: Mapping[str, object], key: str, field: str) -> object:
+    metrics = row.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return None
+    metric = metrics.get(key)
+    if not isinstance(metric, Mapping):
+        return None
+    return metric.get(field)
+
+
+def _numeric_delta(row: Mapping[str, object], key: str) -> float | None:
+    value = _metric_delta_value(row, key, "delta")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _largest_metric_movement_rows(
+    rows: list[Mapping[str, object]],
+    *,
+    limit: int = TOP_MOVEMENT_LIMIT,
+) -> list[dict[str, object]]:
+    scored_rows: list[tuple[float, str, dict[str, object]]] = []
+    for row in rows:
+        mean_delta = _numeric_delta(row, "normalized_mean_absolute_channel_delta")
+        rms_delta = _numeric_delta(row, "normalized_rms_channel_delta")
+        deltas = [abs(delta) for delta in (mean_delta, rms_delta) if delta is not None]
+        if not deltas:
+            continue
+        score = max(deltas)
+        if score == 0:
+            continue
+        camera = row.get("camera")
+        movement = {
+            "camera": camera if isinstance(camera, str) else "-",
+            "zoom": row.get("zoom"),
+            "mean_delta": mean_delta,
+            "rms_delta": rms_delta,
+            "changed_pixel_ratio_delta": _numeric_delta(row, "changed_pixel_ratio"),
+            "mean_delta_direction": row.get("mean_delta_direction"),
+            "rms_delta_direction": row.get("rms_delta_direction"),
+        }
+        scored_rows.append((score, str(movement["camera"]), movement))
+    scored_rows.sort(key=lambda item: (-item[0], item[1]))
+    return [row for _score, _camera, row in scored_rows[:limit]]
+
+
 def _report_path(path: Path, *, artifact_base_dir: Path | None) -> str:
     if artifact_base_dir is not None:
         try:
@@ -254,6 +302,9 @@ def build_comparison_delta_report(
         | _direction_counts("rms", rms_directions),
         "cameras": rows,
     }
+    largest_metric_movements = _largest_metric_movement_rows(rows)
+    if largest_metric_movements:
+        report["largest_metric_movements"] = largest_metric_movements
     input_artifacts = {
         label: artifacts
         for label, artifacts in {
@@ -285,16 +336,6 @@ def _format_delta(value: object) -> str:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return "-"
     return f"{float(value):+.9f}"
-
-
-def _metric_delta_value(row: Mapping[str, object], key: str, field: str) -> object:
-    metrics = row.get("metrics")
-    if not isinstance(metrics, Mapping):
-        return None
-    metric = metrics.get(key)
-    if not isinstance(metric, Mapping):
-        return None
-    return metric.get(field)
 
 
 def _artifact_path_cell(row: Mapping[str, object], key: str) -> str:
@@ -331,6 +372,40 @@ def _append_input_artifacts_section(lines: list[str], report: Mapping[str, objec
     lines.append("")
 
 
+def _append_largest_metric_movements_section(lines: list[str], report: Mapping[str, object]) -> None:
+    movements = report.get("largest_metric_movements")
+    if not isinstance(movements, list) or not movements:
+        return
+    lines.extend(
+        [
+            "## Largest Metric Movements",
+            "",
+            (
+                "| Camera | z | Mean delta | RMS delta | Changed ratio delta | "
+                "Direction (mean/RMS) |"
+            ),
+            "| --- | ---: | ---: | ---: | ---: | --- |",
+        ]
+    )
+    for movement in movements:
+        if not isinstance(movement, Mapping):
+            continue
+        direction = (
+            f"{movement.get('mean_delta_direction') or '-'}/"
+            f"{movement.get('rms_delta_direction') or '-'}"
+        )
+        lines.append(
+            "| "
+            f"`{movement.get('camera', '-')}` | "
+            f"{_format_float(movement.get('zoom'), precision=2)} | "
+            f"{_format_delta(movement.get('mean_delta'))} | "
+            f"{_format_delta(movement.get('rms_delta'))} | "
+            f"{_format_delta(movement.get('changed_pixel_ratio_delta'))} | "
+            f"{direction} |"
+        )
+    lines.append("")
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
     lines = [
@@ -343,6 +418,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         "",
     ]
     _append_input_artifacts_section(lines, report)
+    _append_largest_metric_movements_section(lines, report)
     lines.extend(
         [
             "## Summary",
