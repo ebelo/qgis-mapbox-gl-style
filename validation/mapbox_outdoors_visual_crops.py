@@ -485,7 +485,10 @@ def _candidate_focus_summary(cue: Mapping[str, object]) -> str | None:
     candidate_count = cue.get("decoded_candidate_count")
     candidate_types = cue.get("candidate_types")
     if isinstance(candidate_types, list) and candidate_types:
-        return f"candidates={candidate_count} ({', '.join(str(value) for value in candidate_types[:3])})"
+        type_summary = ", ".join(str(value) for value in candidate_types[:3])
+        if candidate_count is not None:
+            return f"candidates={candidate_count} ({type_summary})"
+        return f"candidate_types={type_summary}"
     if candidate_count is not None:
         return f"candidates={candidate_count}"
     return None

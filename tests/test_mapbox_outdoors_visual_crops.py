@@ -498,6 +498,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                     "candidate_types": ["trail=69", "hiking=5"],
                                     "line_width_delta_mm": 0.15875,
                                     "line_width_ratio": 1.6,
+                                },
+                                {
+                                    "source_layer_id": "road-path-bg",
+                                    "qgis_layer_id": "road-path-bg-below-z16-outdoor",
+                                    "candidate_types": ["trail=69"],
+                                    "line_width_delta_mm": 0.079375,
                                 }
                             ],
                             "dash_mismatches": [
@@ -519,6 +525,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn("## Path/pedestrian focus cues", markdown)
         self.assertIn("road-path-trail->road-path-trail-below-z16", markdown)
         self.assertIn("candidates=74 (trail=69, hiking=5)", markdown)
+        self.assertIn("candidate_types=trail=69", markdown)
+        self.assertNotIn("candidates=None", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
 
     def test_build_summary_markdown_lists_empty_camera_status(self):
