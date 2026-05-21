@@ -922,6 +922,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     },
                     "source_sampled_controls": {
                         "line-width": 3.0,
+                        "line-width_raw_mm": 3.175,
+                        "line-width_capped": True,
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [1, 0.2],
                     },
@@ -952,6 +954,9 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                 }
             ],
         )
+        markdown = build_summary_markdown(report)
+        self.assertIn("line-width_raw_mm=3.175", markdown)
+        self.assertIn("line-width_capped=true", markdown)
 
     def test_build_path_pedestrian_focus_report_pairs_split_road_path_strokes_with_source_layer(self):
         road_report = _road_feature_report()
@@ -1052,6 +1057,29 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                 "line-color": "expression-not-sampled",
             },
         )
+
+    def test_build_path_pedestrian_focus_report_does_not_mark_minimum_width_floor_as_cap(self):
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-path",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": 0.1},
+                }
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            _road_feature_report(),
+            source_style=source_style,
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        [comparison] = camera["source_qgis_stroke_control_comparisons"]
+        self.assertEqual(comparison["source_sampled_controls"], {"line-width": 0.1})
 
     def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
         report = build_path_pedestrian_focus_report(

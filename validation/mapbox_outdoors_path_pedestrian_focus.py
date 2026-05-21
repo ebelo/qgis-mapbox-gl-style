@@ -16,9 +16,10 @@ if package_parent not in sys.path:
     sys.path.insert(0, package_parent)
 
 from qfit.mapbox_config import (  # noqa: E402
+    _MAPBOX_PIXEL_TO_MM,
+    _MAX_LINE_WIDTH_MM,
     _extract_line_dasharray_literal,
     _extract_zoom_scalar_size_at_zoom,
-    _line_width_mm_at_zoom,
     _literal_line_dasharray,
     base_mapbox_style_layer_id_for_qfit,
 )
@@ -58,6 +59,8 @@ PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
 )
 PATH_PEDESTRIAN_STROKE_CONTROL_KEYS = (
     "line-width",
+    "line-width_raw_mm",
+    "line-width_capped",
     "line-color",
     "line-dasharray",
     "line-opacity",
@@ -1038,9 +1041,7 @@ def _source_sampled_stroke_controls(
     if camera_zoom is None:
         return {}
     sampled_controls: dict[str, object] = {}
-    line_width = _line_width_mm_at_zoom(detail.get("line-width"), camera_zoom)
-    if line_width is not None:
-        sampled_controls["line-width"] = line_width
+    sampled_controls.update(_source_line_width_controls(detail.get("line-width"), camera_zoom))
     line_color = detail.get("line-color")
     if isinstance(line_color, str) and line_color:
         sampled_controls["line-color"] = line_color
@@ -1053,6 +1054,19 @@ def _source_sampled_stroke_controls(
     if line_opacity is not None:
         sampled_controls["line-opacity"] = line_opacity
     return sampled_controls
+
+
+def _source_line_width_controls(line_width_expr: object, camera_zoom: float) -> dict[str, object]:
+    line_width_px = _extract_zoom_scalar_size_at_zoom(line_width_expr, camera_zoom)
+    if line_width_px is None:
+        return {}
+    raw_width_mm = line_width_px * _MAPBOX_PIXEL_TO_MM
+    capped_width_mm = max(0.1, min(raw_width_mm, _MAX_LINE_WIDTH_MM))
+    controls: dict[str, object] = {"line-width": capped_width_mm}
+    if raw_width_mm > _MAX_LINE_WIDTH_MM + 1e-12:
+        controls["line-width_raw_mm"] = raw_width_mm
+        controls["line-width_capped"] = True
+    return controls
 
 
 def _numeric_control(value: object) -> float | None:
