@@ -457,7 +457,15 @@ def generate_visual_crop_report(
         comparison_summary,
         summary_path=comparison_summary_path,
     )
-    focus_cues_by_camera = _path_pedestrian_focus_cues_by_camera(path_pedestrian_focus_report)
+    focus_comparison_paths = _focus_comparison_summary_paths(path_pedestrian_focus_report)
+    focus_comparison_match = None
+    if focus_comparison_paths:
+        focus_comparison_match = _display_input_path(comparison_summary_path) in focus_comparison_paths
+    focus_cues_by_camera = (
+        {}
+        if focus_comparison_match is False
+        else _path_pedestrian_focus_cues_by_camera(path_pedestrian_focus_report)
+    )
     camera_rows = []
     contact_sheet_entries: list[dict[str, object]] = []
     for camera_name in _selected_camera_names(visual_artifacts_by_camera, camera_names):
@@ -502,12 +510,9 @@ def generate_visual_crop_report(
         report["path_pedestrian_focus_json"] = _display_input_path(
             path_pedestrian_focus_report_path
         )
-        focus_comparison_paths = _focus_comparison_summary_paths(path_pedestrian_focus_report)
         if focus_comparison_paths:
             report["path_pedestrian_focus_comparison_summary_jsons"] = focus_comparison_paths
-            report["path_pedestrian_focus_comparison_match"] = (
-                report["comparison_summary_json"] in focus_comparison_paths
-            )
+            report["path_pedestrian_focus_comparison_match"] = focus_comparison_match
     return report
 
 
@@ -738,6 +743,8 @@ def _summary_camera_rows(camera: Mapping[str, object]) -> list[str]:
 
 
 def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
+    if report.get("path_pedestrian_focus_comparison_match") is False:
+        return []
     rows: list[list[object]] = []
     for camera in report.get("cameras", []):
         if not isinstance(camera, Mapping):
