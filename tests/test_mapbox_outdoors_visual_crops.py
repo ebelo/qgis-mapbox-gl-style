@@ -664,7 +664,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("## Crop color metrics", summary)
             self.assertIn("## Crop color movement groups", summary)
             self.assertIn(
-                "| darker + red lower | 1 | 127.0 | 127.0 | chamonix-trails-z14-outdoors=1 |",
+                f"| darker + red lower | 1 | 127.0 | 127.0 | chamonix-trails-z14-outdoors=1 | chamonix-trails-z14-outdoors crop 1 [6,6,10,10] `{outputs['diff']}` |",
                 summary,
             )
             self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 | darker; red -127.0 |", summary)
@@ -1504,11 +1504,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             1,
         )[0]
         self.assertIn(
-            "| lighter + blue higher | 3 | 16.0 | 8.0 | geneva=2, zermatt=1 |",
+            "| lighter + blue higher | 3 | 16.0 | 8.0 | geneva=2, zermatt=1 | zermatt crop 1 |",
             movement_section,
         )
         self.assertIn(
-            "| darker + red lower | 1 | 18.0 | 6.0 | lausanne=1 |",
+            "| darker + red lower | 1 | 18.0 | 6.0 | lausanne=1 | lausanne crop 1 |",
             movement_section,
         )
         self.assertLess(
@@ -1582,6 +1582,39 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 "max_abs_rgb_delta": 16.0,
                 "qgis_minus_mapbox_luminance": 8.0,
             },
+        )
+
+    def test_build_summary_markdown_shows_stored_movement_group_representative(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 1,
+                "crop_count": 1,
+                "crop_color_movement_groups": [
+                    {
+                        "movement": "lighter + blue higher",
+                        "crop_count": 2,
+                        "max_abs_rgb_delta": 16.0,
+                        "max_abs_luminance_delta": 8.0,
+                        "cameras": {"zermatt": 2},
+                        "representative_crop": {
+                            "camera": "zermatt",
+                            "crop": 2,
+                            "box": [4, 4, 8, 8],
+                            "diff": "debug/zermatt-diff.png",
+                        },
+                    }
+                ],
+                "cameras": [],
+            }
+        )
+
+        self.assertIn(
+            "| lighter + blue higher | 2 | 16.0 | 8.0 | zermatt=2 | zermatt crop 2 [4,4,8,8] `debug/zermatt-diff.png` |",
+            markdown,
         )
 
     def test_build_summary_markdown_handles_malformed_color_delta_values(self):

@@ -1791,6 +1791,23 @@ def _crop_color_movement_group_record_float(record: Mapping[str, object], key: s
     return 0.0
 
 
+def _movement_group_representative_label(record: Mapping[str, object]) -> str:
+    representative = record.get("representative_crop")
+    if not isinstance(representative, Mapping):
+        return "-"
+    parts = [str(representative.get("camera") or "-")]
+    crop_index = representative.get("crop")
+    if crop_index is not None:
+        parts.append(f"crop {crop_index}")
+    box = representative.get("box")
+    if isinstance(box, list):
+        parts.append(json.dumps(box, ensure_ascii=True, separators=(",", ":")))
+    diff_path = representative.get("diff")
+    if isinstance(diff_path, str) and diff_path:
+        parts.append(f"`{diff_path}`")
+    return " ".join(parts)
+
+
 def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> list[list[object]]:
     return [
         [
@@ -1799,6 +1816,7 @@ def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> lis
             f"{_crop_color_movement_group_record_float(record, 'max_abs_rgb_delta'):.1f}",
             f"{_crop_color_movement_group_record_float(record, 'max_abs_luminance_delta'):.1f}",
             _joined_summary_labels(_top_count_labels(record.get("cameras"))),
+            _movement_group_representative_label(record),
         ]
         for record in _crop_color_movement_group_records(report)[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]
     ]
@@ -1818,8 +1836,8 @@ def _summary_crop_color_movement_group_lines(report: Mapping[str, object]) -> li
             "tuning a single style rule."
         ),
         "",
-        "| Movement | Crops | Max abs RGB | Max abs luminance | Cameras |",
-        "| --- | ---: | ---: | ---: | --- |",
+        "| Movement | Crops | Max abs RGB | Max abs luminance | Cameras | Representative crop |",
+        "| --- | ---: | ---: | ---: | --- | --- |",
     ]
     lines.extend(_markdown_table_row(row) for row in rows)
     return lines
