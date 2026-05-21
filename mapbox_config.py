@@ -644,10 +644,30 @@ _PATH_TYPE_FILTER_SPLIT_LAYER_IDS = {
     "road-path-bg",
 }
 _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
+    "road-path-z16-to-z18",
+    "road-path-z18-plus",
     "road-path-z16-plus",
+    "road-path-bg-z16-to-z18",
+    "road-path-bg-z18-plus",
     "road-path-bg-z16-plus",
+    "bridge-path-bg-z16-to-z18",
+    "bridge-path-bg-z18-plus",
     "bridge-path-bg-z16-plus",
 )
+_PATH_MID_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
+    "road-path-z16-to-z18",
+    "road-path-bg-z16-to-z18",
+    "bridge-path-bg-z16-to-z18",
+)
+_PATH_MAX_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES = (
+    "road-path-z18-plus",
+    "road-path-z16-plus",
+    "road-path-bg-z18-plus",
+    "road-path-bg-z16-plus",
+    "bridge-path-bg-z18-plus",
+    "bridge-path-bg-z16-plus",
+)
+_PATH_MID_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 17.0
 _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 18.0
 _PATH_LOW_ZOOM_LINE_WIDTH_LAYER_PREFIXES = ("road-path-below-z16",)
 _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_LAYER_PREFIXES = (
@@ -692,7 +712,8 @@ _PATH_TRAIL_LINE_WIDTH_LAYER_IDS = {
 }
 _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z16", None, 16.0, 15.0),
-    ("z16-plus", 16.0, None, 18.0),
+    ("z16-to-z18", 16.0, 18.0, 17.0),
+    ("z18-plus", 18.0, None, 18.0),
 )
 # Shared by trail and cycleway/piste overlays so outdoor route strokes remain
 # legible against contour/landcover-heavy Mapbox Outdoors scenes.
@@ -828,12 +849,20 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ),
 )
 _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
+    "bridge-path-bg-z16-to-z18-outdoor",
+    "bridge-path-bg-z16-to-z18-remaining",
     "bridge-path-bg-z16-plus-outdoor",
     "bridge-path-bg-z16-plus-remaining",
+    "bridge-path-bg-z18-plus-outdoor",
+    "bridge-path-bg-z18-plus-remaining",
     "bridge-pedestrian-case-z16-to-z18",
     "bridge-pedestrian-case-z18-plus",
+    "road-path-bg-z16-to-z18-outdoor",
+    "road-path-bg-z16-to-z18-remaining",
     "road-path-bg-z16-plus-outdoor",
     "road-path-bg-z16-plus-remaining",
+    "road-path-bg-z18-plus-outdoor",
+    "road-path-bg-z18-plus-remaining",
     "road-pedestrian-case-z16-to-z18",
     "road-pedestrian-case-z18-plus",
 }
@@ -854,6 +883,10 @@ _PATH_TYPE_FILTER_LOW_ZOOM_SIMPLIFIED_MATCH = [
     True,
 ]
 _PATH_TYPE_FILTER_SPLIT_ZOOM = 16.0
+_PATH_TYPE_FILTER_HIGH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("z16-to-z18", _PATH_TYPE_FILTER_SPLIT_ZOOM, 18.0),
+    ("z18-plus", 18.0, None),
+)
 _NATURAL_POINT_LABEL_LAYER_ID = "natural-point-label"
 _POI_LABEL_LAYER_ID = "poi-label"
 _GATE_LABEL_LAYER_ID = "gate-label"
@@ -2019,13 +2052,134 @@ def _zoom_band_label(zoom: float) -> str:
     return str(int(zoom)) if zoom.is_integer() else str(zoom).replace(".", "_")
 
 
+def _path_type_high_zoom_filter_layer_variants(
+    layer: dict[str, object],
+    *,
+    layer_id: str,
+    filter_value: list[object],
+    clause_index: int,
+    high_zoom_filter: object,
+) -> list[dict[str, object]]:
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    variants: list[dict[str, object]] = []
+    for suffix, band_minzoom, band_maxzoom in _PATH_TYPE_FILTER_HIGH_ZOOM_BANDS:
+        effective_zoom_band = _effective_zoom_band(
+            existing_minzoom,
+            existing_maxzoom,
+            band_minzoom,
+            band_maxzoom,
+        )
+        if effective_zoom_band is None:
+            continue
+        variant = copy.deepcopy(layer)
+        variant["id"] = f"{layer_id}-{suffix}"
+        variant["filter"] = _filter_with_replaced_clause(filter_value, clause_index, high_zoom_filter)
+        _set_zoom_bounds(variant, *effective_zoom_band)
+        variants.append(variant)
+    return variants
+
+
+def _path_type_filter_layer_with_static_clause(
+    layer: dict[str, object],
+    *,
+    filter_value: list[object],
+    clause_index: int,
+    replacement: object,
+) -> dict[str, object]:
+    variant = copy.deepcopy(layer)
+    variant["filter"] = _filter_with_replaced_clause(filter_value, clause_index, replacement)
+    return variant
+
+
+def _path_type_split_filter_layer_variants(
+    layer: dict[str, object],
+    *,
+    layer_id: str,
+    filter_value: list[object],
+    clause_index: int,
+    threshold: float,
+    low_zoom_filter: object,
+    high_zoom_filter: object,
+) -> list[dict[str, object]]:
+    zoom_label = _zoom_band_label(threshold)
+    low_layer = _path_type_filter_layer_with_static_clause(
+        layer,
+        filter_value=filter_value,
+        clause_index=clause_index,
+        replacement=low_zoom_filter,
+    )
+    low_layer["id"] = f"{layer_id}-below-z{zoom_label}"
+    low_layer["maxzoom"] = threshold
+
+    high_zoom_layers = _path_type_high_zoom_filter_layer_variants(
+        layer,
+        layer_id=layer_id,
+        filter_value=filter_value,
+        clause_index=clause_index,
+        high_zoom_filter=high_zoom_filter,
+    )
+    if high_zoom_layers:
+        return [low_layer, *high_zoom_layers]
+
+    high_layer = _path_type_filter_layer_with_static_clause(
+        layer,
+        filter_value=filter_value,
+        clause_index=clause_index,
+        replacement=high_zoom_filter,
+    )
+    high_layer["id"] = f"{layer_id}-z{zoom_label}-plus"
+    high_layer["minzoom"] = threshold
+    return [low_layer, high_layer]
+
+
+def _path_type_filter_layer_variants_for_clause(
+    layer: dict[str, object],
+    *,
+    layer_id: str,
+    filter_value: list[object],
+    clause_index: int,
+    path_type_clause: tuple[float, object, object],
+) -> list[dict[str, object]]:
+    threshold, low_zoom_filter, high_zoom_filter = path_type_clause
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    if existing_maxzoom is not None and existing_maxzoom <= threshold:
+        return [
+            _path_type_filter_layer_with_static_clause(
+                layer,
+                filter_value=filter_value,
+                clause_index=clause_index,
+                replacement=low_zoom_filter,
+            )
+        ]
+    if existing_minzoom is not None and existing_minzoom >= threshold:
+        return [
+            _path_type_filter_layer_with_static_clause(
+                layer,
+                filter_value=filter_value,
+                clause_index=clause_index,
+                replacement=high_zoom_filter,
+            )
+        ]
+    return _path_type_split_filter_layer_variants(
+        layer,
+        layer_id=layer_id,
+        filter_value=filter_value,
+        clause_index=clause_index,
+        threshold=threshold,
+        low_zoom_filter=low_zoom_filter,
+        high_zoom_filter=high_zoom_filter,
+    )
+
+
 def _path_type_filter_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
     """Split audited path filters at their Mapbox zoom threshold for QGIS.
 
     QGIS cannot parse the Mapbox ``step(['zoom'], ...)`` filter clause used by
     the Outdoors path layers.  A single representative snapshot either hides
     sidewalks/crossings at high zoom or renders them too early at mid zoom, so
-    preserve the Mapbox behavior by emitting two static zoom-band layers.
+    preserve the Mapbox behavior by emitting static zoom-band layers.
     """
     layer_id = str(layer.get("id") or "")
     if layer_id not in _PATH_TYPE_FILTER_SPLIT_LAYER_IDS or layer.get("type") != "line":
@@ -2038,30 +2192,13 @@ def _path_type_filter_layer_variants(layer: dict[str, object]) -> list[dict[str,
         path_type_clause = _path_type_zoom_step_filter_clause(clause)
         if path_type_clause is None:
             continue
-
-        threshold, low_zoom_filter, high_zoom_filter = path_type_clause
-        existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
-        existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
-        if existing_maxzoom is not None and existing_maxzoom <= threshold:
-            low_layer = copy.deepcopy(layer)
-            low_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, low_zoom_filter)
-            return [low_layer]
-        if existing_minzoom is not None and existing_minzoom >= threshold:
-            high_layer = copy.deepcopy(layer)
-            high_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, high_zoom_filter)
-            return [high_layer]
-
-        zoom_label = _zoom_band_label(threshold)
-        low_layer = copy.deepcopy(layer)
-        low_layer["id"] = f"{layer_id}-below-z{zoom_label}"
-        low_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, low_zoom_filter)
-        low_layer["maxzoom"] = threshold
-
-        high_layer = copy.deepcopy(layer)
-        high_layer["id"] = f"{layer_id}-z{zoom_label}-plus"
-        high_layer["filter"] = _filter_with_replaced_clause(filter_value, clause_index, high_zoom_filter)
-        high_layer["minzoom"] = threshold
-        return [low_layer, high_layer]
+        return _path_type_filter_layer_variants_for_clause(
+            layer,
+            layer_id=layer_id,
+            filter_value=filter_value,
+            clause_index=clause_index,
+            path_type_clause=path_type_clause,
+        )
     return None
 
 
@@ -2871,14 +3008,26 @@ def _should_sample_path_high_zoom_line_width(layer_id: object, prop: str, minzoo
     )
 
 
-def _path_dasharray_sample_zoom(layer_id: object, minzoom: object, maxzoom: object) -> float | None:
+def _path_high_zoom_line_width_sample_zoom(layer_id: object) -> float | None:
     normalized = str(layer_id or "")
-    if not any(
+    if any(
         normalized == prefix or normalized.startswith(f"{prefix}-")
-        for prefix in _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES
+        for prefix in _PATH_MID_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES
     ):
+        return _PATH_MID_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+    if any(
+        normalized == prefix or normalized.startswith(f"{prefix}-")
+        for prefix in _PATH_MAX_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES
+    ):
+        return _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+    return None
+
+
+def _path_dasharray_sample_zoom(layer_id: object, minzoom: object, maxzoom: object) -> float | None:
+    sample_zoom = _path_high_zoom_line_width_sample_zoom(layer_id)
+    if sample_zoom is None:
         return _representative_zoom_in_layer_range(minzoom, maxzoom)
-    return _zoom_in_layer_range(_PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM, minzoom, maxzoom)
+    return _zoom_in_layer_range(sample_zoom, minzoom, maxzoom)
 
 
 def _should_sample_path_low_zoom_line_width(layer_id: object, prop: str, maxzoom: object) -> bool:
@@ -2913,7 +3062,10 @@ def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: o
         target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
         low_zoom_path_background_width = True
     elif _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
-        target_sample_zoom = _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+        target_sample_zoom = (
+            _path_high_zoom_line_width_sample_zoom(layer_id)
+            or _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
+        )
         high_zoom_path_width = True
     else:
         return None

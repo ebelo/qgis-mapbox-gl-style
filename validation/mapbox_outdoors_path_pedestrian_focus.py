@@ -80,6 +80,8 @@ PATH_PEDESTRIAN_SOURCE_SPLIT_BASE_LAYER_IDS = frozenset(
 )
 PATH_PEDESTRIAN_SOURCE_SPLIT_SUFFIXES = (
     "-below-z16",
+    "-z16-to-z18",
+    "-z18-plus",
     "-z16-plus",
 )
 PATH_PEDESTRIAN_CORE_CASE_LAYER_PAIRS = (
