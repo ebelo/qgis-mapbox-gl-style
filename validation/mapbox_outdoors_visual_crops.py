@@ -52,6 +52,7 @@ CROP_IMAGE_COLUMNS = (
     ("qgis_vector_render", "QGIS"),
     ("diff", "Diff"),
 )
+CROP_COLOR_DELTA_CHANNELS = ("red", "green", "blue")
 CROP_COLOR_METRIC_KEYS = ("browser_reference", "qgis_vector_render")
 COMPARISON_CONTEXT_KEYS = (
     "status",
@@ -310,6 +311,30 @@ def _three_channel_color_values(values: Sequence[object]) -> list[float]:
     return numeric_values[:3]
 
 
+def _dominant_crop_color_delta(rgb_values: Sequence[float]) -> dict[str, object] | None:
+    if len(rgb_values) < len(CROP_COLOR_DELTA_CHANNELS):
+        return None
+    index, value = max(
+        enumerate(rgb_values[: len(CROP_COLOR_DELTA_CHANNELS)]),
+        key=lambda item: (abs(item[1]), -item[0]),
+    )
+    if value == 0:
+        return None
+    return {
+        "channel": CROP_COLOR_DELTA_CHANNELS[index],
+        "delta": round(value, 3),
+        "direction": "higher" if value > 0 else "lower",
+    }
+
+
+def _crop_luminance_delta_direction(value: float) -> str:
+    if value > 0:
+        return "lighter"
+    if value < 0:
+        return "darker"
+    return "unchanged"
+
+
 def _crop_color_delta(
     browser: Mapping[str, object],
     qgis: Mapping[str, object],
@@ -318,16 +343,23 @@ def _crop_color_delta(
     qgis_rgb = qgis.get("mean_rgb")
     if not isinstance(browser_rgb, list) or not isinstance(qgis_rgb, list):
         return None
-    return {
-        "mean_rgb": [
-            round(float(qgis_value) - float(browser_value), 3)
-            for browser_value, qgis_value in zip(browser_rgb[:3], qgis_rgb[:3])
-        ],
-        "luminance": round(
-            float(qgis.get("luminance", 0.0)) - float(browser.get("luminance", 0.0)),
-            3,
-        ),
+    mean_rgb = [
+        round(float(qgis_value) - float(browser_value), 3)
+        for browser_value, qgis_value in zip(browser_rgb[:3], qgis_rgb[:3])
+    ]
+    luminance = round(
+        float(qgis.get("luminance", 0.0)) - float(browser.get("luminance", 0.0)),
+        3,
+    )
+    delta: dict[str, object] = {
+        "mean_rgb": mean_rgb,
+        "luminance": luminance,
+        "luminance_direction": _crop_luminance_delta_direction(luminance),
     }
+    dominant_rgb_delta = _dominant_crop_color_delta(mean_rgb)
+    if dominant_rgb_delta is not None:
+        delta["dominant_rgb_delta"] = dominant_rgb_delta
+    return delta
 
 
 def _crop_color_metrics(
@@ -1514,6 +1546,22 @@ def _luminance_metric_label(metrics: object) -> str:
     return f"{value:+.1f}"
 
 
+def _dominant_color_delta_label(metrics: object) -> str:
+    if not isinstance(metrics, Mapping):
+        return "-"
+    movement = []
+    luminance_direction = metrics.get("luminance_direction")
+    if isinstance(luminance_direction, str) and luminance_direction:
+        movement.append(luminance_direction)
+    dominant_rgb_delta = metrics.get("dominant_rgb_delta")
+    if isinstance(dominant_rgb_delta, Mapping):
+        channel = dominant_rgb_delta.get("channel")
+        delta = _metric_float(dominant_rgb_delta, "delta")
+        if isinstance(channel, str) and channel and delta is not None:
+            movement.append(f"{channel} {delta:+.1f}")
+    return "; ".join(movement) if movement else "-"
+
+
 def _summary_crop_mappings(report: Mapping[str, object]) -> list[tuple[Mapping[str, object], Mapping[str, object]]]:
     crop_mappings: list[tuple[Mapping[str, object], Mapping[str, object]]] = []
     cameras = report.get("cameras")
@@ -1555,6 +1603,7 @@ def _summary_crop_color_delta_entry(
             _color_metric_label(delta, "mean_rgb"),
             _luminance_metric_label(delta),
             f"{max_abs_rgb:.1f}" if max_abs_rgb is not None else "-",
+            _dominant_color_delta_label(delta),
         ],
     )
 
@@ -1582,11 +1631,12 @@ def _summary_largest_crop_color_delta_lines(report: Mapping[str, object]) -> lis
         (
             "Ranks crop-local QGIS-minus-Mapbox color deltas by the largest absolute "
             "RGB or luminance difference, so the worst terrain, landcover, water, "
-            "or tint outliers are visible before reading every crop row."
+            "or tint outliers and their dominant color direction are visible before "
+            "reading every crop row."
         ),
         "",
-        "| Camera | Crop | QGIS-Mapbox RGB | QGIS-Mapbox luminance | Max abs RGB |",
-        "| --- | ---: | --- | ---: | ---: |",
+        "| Camera | Crop | QGIS-Mapbox RGB | QGIS-Mapbox luminance | Max abs RGB | Dominant movement |",
+        "| --- | ---: | --- | ---: | ---: | --- |",
     ]
     lines.extend(_markdown_table_row(row) for _score, _luminance_score, row in entries)
     return lines
@@ -1618,6 +1668,7 @@ def _summary_crop_color_metric_rows(report: Mapping[str, object]) -> list[list[o
                     _color_metric_label(metrics.get("qgis_vector_render"), "mean_rgb"),
                     _color_metric_label(delta, "mean_rgb"),
                     _luminance_metric_label(delta),
+                    _dominant_color_delta_label(delta),
                 ]
             )
     return rows
@@ -1633,12 +1684,12 @@ def _summary_crop_color_metric_lines(report: Mapping[str, object]) -> list[str]:
         "",
         (
             "Shows crop-local mean RGB values for the Mapbox GL and QGIS crops, plus "
-            "QGIS minus Mapbox deltas. Use this as triage context for broad terrain, "
-            "landcover, water, and tint differences."
+            "QGIS minus Mapbox deltas and dominant color direction. Use this as triage "
+            "context for broad terrain, landcover, water, and tint differences."
         ),
         "",
-        "| Camera | Crop | Mapbox mean RGB | QGIS mean RGB | QGIS-Mapbox RGB | QGIS-Mapbox luminance |",
-        "| --- | ---: | --- | --- | --- | ---: |",
+        "| Camera | Crop | Mapbox mean RGB | QGIS mean RGB | QGIS-Mapbox RGB | QGIS-Mapbox luminance | Dominant movement |",
+        "| --- | ---: | --- | --- | --- | ---: | --- |",
     ]
     lines.extend(_markdown_table_row(row) for row in rows)
     return lines

@@ -156,8 +156,8 @@ python3 validation/mapbox_outdoors_visual_crops.py \
 
 The delta context is shown only when the comparison-delta candidate summary matches the crop report's comparison summary, which keeps stale probe movement from being mixed into a newer visual crop sheet.
 
-Every crop report also includes a crop color metrics section with crop-local mean RGB values for the Mapbox GL and QGIS crops, plus QGIS-minus-Mapbox RGB and luminance deltas. Use these numbers as triage context when broad terrain, landcover, water, or tint differences dominate the hotspot sheet.
-The report also ranks the largest crop color deltas first, which keeps the worst tint and terrain outliers visible before scanning the full per-crop metrics table.
+Every crop report also includes a crop color metrics section with crop-local mean RGB values for the Mapbox GL and QGIS crops, plus QGIS-minus-Mapbox RGB/luminance deltas and the dominant color direction. Use these numbers as triage context when broad terrain, landcover, water, or tint differences dominate the hotspot sheet.
+The report also ranks the largest crop color deltas first, which keeps the worst tint and terrain outliers and their dominant movement visible before scanning the full per-crop metrics table.
 
 When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit.
 The crop report includes the global terrain/landcover and airport/special-landuse candidate counts, sample layers, and compact qfit simplification snippets for sampled controls:

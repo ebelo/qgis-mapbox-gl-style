@@ -599,6 +599,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "delta": {
                         "mean_rgb": [-127.0, -127.0, -127.0],
                         "luminance": -127.0,
+                        "luminance_direction": "darker",
+                        "dominant_rgb_delta": {
+                            "channel": "red",
+                            "delta": -127.0,
+                            "direction": "lower",
+                        },
                     },
                 },
             )
@@ -622,11 +628,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             summary = paths.summary_path.read_text(encoding="utf-8")
             self.assertIn("## Largest crop color deltas", summary)
             self.assertIn(
-                "| chamonix-trails-z14-outdoors | 1 | -127.0, -127.0, -127.0 | -127.0 | 127.0 |",
+                "| chamonix-trails-z14-outdoors | 1 | -127.0, -127.0, -127.0 | -127.0 | 127.0 | darker; red -127.0 |",
                 summary,
             )
             self.assertIn("## Crop color metrics", summary)
-            self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 |", summary)
+            self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 | darker; red -127.0 |", summary)
 
     def test_generate_visual_crop_report_marks_missing_required_artifacts(self):
         image_module, image_stat_module = _fake_image_modules()
