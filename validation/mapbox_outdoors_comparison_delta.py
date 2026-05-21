@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import sys
 from collections.abc import Mapping
@@ -29,6 +30,7 @@ DELTA_METRIC_KEYS = (
 )
 DIRECTION_BUCKETS = ("improved", "worsened", "unchanged", "unknown")
 TOP_MOVEMENT_LIMIT = 5
+DEFAULT_MOVEMENT_THRESHOLD = 0.0
 
 
 class ComparisonDeltaPaths(NamedTuple):
@@ -171,6 +173,7 @@ def _largest_metric_movement_rows(
     rows: list[Mapping[str, object]],
     *,
     limit: int = TOP_MOVEMENT_LIMIT,
+    minimum_abs_delta: float = DEFAULT_MOVEMENT_THRESHOLD,
 ) -> list[dict[str, object]]:
     scored_rows: list[tuple[float, str, dict[str, object]]] = []
     for row in rows:
@@ -180,7 +183,7 @@ def _largest_metric_movement_rows(
         if not deltas:
             continue
         score = max(deltas)
-        if score == 0:
+        if score <= minimum_abs_delta:
             continue
         camera = row.get("camera")
         movement = {
@@ -241,6 +244,7 @@ def build_comparison_delta_report(
     baseline_summary_path: Path | None = None,
     candidate_summary_path: Path | None = None,
     artifact_base_dir: Path | None = None,
+    movement_threshold: float = DEFAULT_MOVEMENT_THRESHOLD,
     now: dt.datetime | None = None,
 ) -> dict[str, object]:
     baseline_rows = _camera_rows(baseline_summary)
@@ -298,11 +302,15 @@ def build_comparison_delta_report(
         "baseline_label": baseline_label,
         "candidate_label": candidate_label,
         "camera_count": len(rows),
+        "movement_threshold": movement_threshold,
         "summary": _direction_counts("mean", mean_directions)
         | _direction_counts("rms", rms_directions),
         "cameras": rows,
     }
-    largest_metric_movements = _largest_metric_movement_rows(rows)
+    largest_metric_movements = _largest_metric_movement_rows(
+        rows,
+        minimum_abs_delta=movement_threshold,
+    )
     if largest_metric_movements:
         report["largest_metric_movements"] = largest_metric_movements
     input_artifacts = {
@@ -380,6 +388,18 @@ def _append_largest_metric_movements_section(lines: list[str], report: Mapping[s
         [
             "## Largest Metric Movements",
             "",
+        ]
+    )
+    threshold = report.get("movement_threshold")
+    if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and threshold > 0:
+        lines.extend(
+            [
+                f"Minimum absolute mean/RMS delta shown: `{threshold:.9f}`",
+                "",
+            ]
+        )
+    lines.extend(
+        [
             (
                 "| Camera | z | Mean delta | RMS delta | Changed ratio delta | "
                 "Direction (mean/RMS) |"
@@ -529,8 +549,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("candidate_summary", type=Path)
     parser.add_argument("--baseline-label", default="baseline")
     parser.add_argument("--candidate-label", default="candidate")
+    parser.add_argument(
+        "--movement-threshold",
+        type=_non_negative_float,
+        default=DEFAULT_MOVEMENT_THRESHOLD,
+        help=(
+            "Minimum absolute mean/RMS metric delta required for a camera to appear "
+            "in the Largest Metric Movements section."
+        ),
+    )
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     return parser
+
+
+def _non_negative_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Expected a numeric threshold") from exc
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("Threshold must be a finite non-negative number")
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -549,6 +588,7 @@ def main(argv: list[str] | None = None) -> int:
         baseline_summary_path=args.baseline_summary,
         candidate_summary_path=args.candidate_summary,
         artifact_base_dir=paths.run_dir,
+        movement_threshold=args.movement_threshold,
         now=now,
     )
     write_report(report, paths)

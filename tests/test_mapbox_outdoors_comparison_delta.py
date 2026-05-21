@@ -1,3 +1,4 @@
+import argparse
 import datetime as dt
 import io
 import json
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_comparison_delta import (
+    _non_negative_float,
     build_comparison_delta_paths,
     build_comparison_delta_report,
     build_run_directory,
@@ -139,6 +141,48 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
 
         self.assertEqual(report["cameras"][0]["zoom"], 12.5)
         self.assertIn("| `camera-a` | 12.50 |", build_summary_markdown(report))
+
+    def test_build_comparison_delta_report_filters_small_metric_movements(self):
+        baseline = {
+            "cameras": [
+                _camera_row("large-move", mean=0.10, rms=0.20),
+                _camera_row("small-move", mean=0.10, rms=0.20),
+            ]
+        }
+        candidate = {
+            "cameras": [
+                _camera_row("large-move", mean=0.08, rms=0.19),
+                _camera_row("small-move", mean=0.09995, rms=0.19996),
+            ]
+        }
+
+        report = build_comparison_delta_report(
+            baseline,
+            candidate,
+            movement_threshold=0.001,
+        )
+        markdown = build_summary_markdown(report)
+
+        self.assertEqual(report["movement_threshold"], 0.001)
+        self.assertEqual(
+            [row["camera"] for row in report["largest_metric_movements"]],
+            ["large-move"],
+        )
+        self.assertIn(
+            "Minimum absolute mean/RMS delta shown: `0.001000000`\n\n"
+            "| Camera | z | Mean delta | RMS delta | Changed ratio delta |",
+            markdown,
+        )
+        self.assertIn("| `large-move` |", markdown)
+        self.assertNotIn("| `small-move` | 14.25 | -0.000050000 |", markdown)
+        self.assertIn("| `small-move` | 14.25 | 0.100000000 |", markdown)
+
+    def test_non_negative_float_rejects_invalid_thresholds(self):
+        self.assertEqual(_non_negative_float("0.001"), 0.001)
+        for value in ("-0.1", "nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    _non_negative_float(value)
 
     def test_build_summary_markdown_renders_delta_table(self):
         report = build_comparison_delta_report(
@@ -292,6 +336,8 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
                             "baseline",
                             "--candidate-label",
                             "candidate",
+                            "--movement-threshold",
+                            "0.001",
                             "--output-root",
                             str(tmp_path / "delta"),
                         ]
@@ -304,6 +350,7 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
             self.assertTrue((output_dir / "summary.md").exists())
             written = json.loads((output_dir / "comparison-delta.json").read_text(encoding="utf-8"))
             self.assertEqual(written["generated_at"], "20260520T185100Z")
+            self.assertEqual(written["movement_threshold"], 0.001)
 
 
 if __name__ == "__main__":
