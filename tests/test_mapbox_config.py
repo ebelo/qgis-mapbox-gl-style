@@ -3911,6 +3911,88 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result[2]["id"], "wetland-z10-to-z10_5")
         self.assertEqual(result[3]["id"], "wetland-z10_5-plus")
 
+    def _wetland_pattern_layer(self, fill_opacity=None):
+        if fill_opacity is None:
+            fill_opacity = ["interpolate", ["linear"], ["zoom"], 10, 0, 10.5, 1]
+        return {
+            "id": "wetland-pattern",
+            "type": "fill",
+            "minzoom": 5,
+            "source-layer": "landuse_overlay",
+            "filter": ["match", ["get", "class"], ["wetland", "wetland_noveg"], True, False],
+            "paint": {
+                "fill-color": "hsl(194, 38%, 74%)",
+                "fill-opacity": fill_opacity,
+                "fill-pattern": "wetland",
+            },
+        }
+
+    def test_wetland_pattern_fill_opacity_splits_to_static_zoom_bands(self):
+        style = {"layers": [self._wetland_pattern_layer()]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 3)
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        low_layer = by_id["wetland-pattern-below-z10"]
+        mid_layer = by_id["wetland-pattern-z10-to-z10_5"]
+        high_layer = by_id["wetland-pattern-z10_5-plus"]
+        self.assertEqual(low_layer["minzoom"], 5)
+        self.assertEqual(low_layer["maxzoom"], 10.0)
+        self.assertEqual(mid_layer["minzoom"], 10.0)
+        self.assertEqual(mid_layer["maxzoom"], 10.5)
+        self.assertEqual(high_layer["minzoom"], 10.5)
+        self.assertNotIn("maxzoom", high_layer)
+        self.assertAlmostEqual(low_layer["paint"]["fill-opacity"], 0.0)
+        self.assertAlmostEqual(mid_layer["paint"]["fill-opacity"], 0.5)
+        self.assertAlmostEqual(high_layer["paint"]["fill-opacity"], 1.0)
+        for layer in result["layers"]:
+            self.assertNotIn("fill-pattern", layer["paint"])
+            self.assertEqual(layer["paint"]["fill-color"], "hsl(194, 38%, 74%)")
+            self.assertEqual(
+                layer["filter"],
+                ["match", ["get", "class"], ["wetland", "wetland_noveg"], True, False],
+            )
+
+    def test_wetland_pattern_fallback_removes_pattern_when_opacity_shape_changes(self):
+        fill_opacity = ["get", "opacity"]
+        style = {"layers": [self._wetland_pattern_layer(fill_opacity=fill_opacity)]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        layer = result["layers"][0]
+        self.assertEqual(layer["id"], "wetland-pattern")
+        self.assertEqual(layer["paint"]["fill-opacity"], fill_opacity)
+        self.assertNotIn("fill-pattern", layer["paint"])
+        self.assertEqual(layer["paint"]["fill-color"], "hsl(194, 38%, 74%)")
+
+    def test_wetland_pattern_fill_opacity_is_not_split_when_pattern_changes(self):
+        layer = self._wetland_pattern_layer()
+        layer["paint"]["fill-pattern"] = "other-pattern"
+        style = {"layers": [layer]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(len(result["layers"]), 1)
+        self.assertEqual(result["layers"][0]["id"], "wetland-pattern")
+        self.assertEqual(result["layers"][0]["paint"]["fill-pattern"], "other-pattern")
+
+    def test_wetland_pattern_helpers_keep_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+        mixed_layers = ["not-a-layer", self._wetland_pattern_layer()]
+
+        self.assertIs(
+            mapbox_config._split_wetland_pattern_fill_opacity_layers_for_qgis(unchanged_layers),
+            unchanged_layers,
+        )
+        result = mapbox_config._split_wetland_pattern_fill_opacity_layers_for_qgis(mixed_layers)
+
+        self.assertEqual(result[0], "not-a-layer")
+        self.assertEqual(result[1]["id"], "wetland-pattern-below-z10")
+        self.assertEqual(result[2]["id"], "wetland-pattern-z10-to-z10_5")
+        self.assertEqual(result[3]["id"], "wetland-pattern-z10_5-plus")
+
     def _road_pedestrian_polygon_pattern_layer(self, fill_opacity=None):
         if fill_opacity is None:
             fill_opacity = ["interpolate", ["linear"], ["zoom"], 16, 0, 17, 1]

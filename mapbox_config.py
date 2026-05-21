@@ -1452,6 +1452,17 @@ _WETLAND_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], 
     ("z10-to-z10_5", 10.0, 10.5),
     ("z10_5-plus", 10.5, None),
 )
+_WETLAND_PATTERN_LAYER_ID = "wetland-pattern"
+_WETLAND_PATTERN = "wetland"
+_WETLAND_PATTERN_QGIS_FILL_COLOR = "hsl(194, 38%, 74%)"
+_WETLAND_PATTERN_FILL_OPACITY_EXPRESSIONS = {
+    _WETLAND_PATTERN_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 10, 0, 10.5, 1],
+}
+_WETLAND_PATTERN_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float | None], ...] = (
+    ("below-z10", None, 10.0),
+    ("z10-to-z10_5", 10.0, 10.5),
+    ("z10_5-plus", 10.5, None),
+)
 _ROAD_PEDESTRIAN_POLYGON_PATTERN_LAYER_ID = "road-pedestrian-polygon-pattern"
 _ROAD_PEDESTRIAN_POLYGON_PATTERN = "pedestrian-polygon"
 _ROAD_PEDESTRIAN_POLYGON_PATTERN_QGIS_FILL_COLOR = "hsl(0, 0%, 96%)"
@@ -4518,6 +4529,53 @@ def _split_wetland_fill_opacity_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
+def _wetland_pattern_fill_opacity_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+    """Split the audited wetland pattern opacity fade into static QGIS zoom bands."""
+    variants = _zoom_expression_opacity_layer_variants(
+        layer,
+        layer_type="fill",
+        paint_property="fill-opacity",
+        expressions_by_layer_id=_WETLAND_PATTERN_FILL_OPACITY_EXPRESSIONS,
+        zoom_bands=_WETLAND_PATTERN_FILL_OPACITY_ZOOM_BANDS,
+    )
+    if variants is None:
+        fallback_layer = _wetland_pattern_fallback_layer(layer)
+        return [fallback_layer] if fallback_layer is not None else None
+    for variant in variants:
+        if not _apply_wetland_pattern_fallback(variant):
+            return None
+    return variants
+
+
+def _wetland_pattern_fallback_layer(layer: dict[str, object]) -> dict[str, object] | None:
+    if layer.get("id") != _WETLAND_PATTERN_LAYER_ID or layer.get("type") != "fill":
+        return None
+    fallback_layer = copy.deepcopy(layer)
+    return fallback_layer if _apply_wetland_pattern_fallback(fallback_layer) else None
+
+
+def _apply_wetland_pattern_fallback(layer: dict[str, object]) -> bool:
+    paint = layer.get("paint")
+    if not isinstance(paint, dict) or paint.get("fill-pattern") != _WETLAND_PATTERN:
+        return False
+    paint.pop("fill-pattern", None)
+    paint.setdefault("fill-color", _WETLAND_PATTERN_QGIS_FILL_COLOR)
+    return True
+
+
+def _split_wetland_pattern_fill_opacity_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    expanded_layers: list[object] = []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            expanded_layers.append(layer)
+            continue
+        variants = _wetland_pattern_fill_opacity_layer_variants(layer)
+        expanded_layers.extend(variants if variants is not None else [layer])
+    return expanded_layers
+
+
 def _road_pedestrian_polygon_pattern_fill_opacity_layer_variants(
     layer: dict[str, object],
 ) -> list[dict[str, object]] | None:
@@ -6471,6 +6529,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style["layers"] = _split_landuse_class_fill_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_national_park_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_wetland_fill_opacity_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_wetland_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_road_pedestrian_polygon_pattern_fill_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_rail_track_line_opacity_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_gate_fence_hedge_line_opacity_layers_for_qgis(style.get("layers"))
