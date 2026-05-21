@@ -14,6 +14,7 @@ try:
     from .mapbox_outdoors_path_pedestrian_focus import (
         COMPARISON_VISUAL_METRIC_KEYS,
         REPO_ROOT,
+        _camera_non_auxiliary_stroke_delta_rows,
         _display_input_path,
         _largest_non_auxiliary_stroke_delta_rows,
         _non_auxiliary_dash_mismatch_rows,
@@ -27,6 +28,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from mapbox_outdoors_path_pedestrian_focus import (  # type: ignore[no-redef]
         COMPARISON_VISUAL_METRIC_KEYS,
         REPO_ROOT,
+        _camera_non_auxiliary_stroke_delta_rows,
         _display_input_path,
         _largest_non_auxiliary_stroke_delta_rows,
         _non_auxiliary_dash_mismatch_rows,
@@ -103,6 +105,7 @@ class _FocusAnnotationContext:
     comparison_paths: list[str]
     comparison_match: bool | None
     cues_by_camera: dict[str, dict[str, list[dict[str, object]]]]
+    coverage_rows: list[dict[str, object]]
 
 
 def build_run_directory(
@@ -513,6 +516,57 @@ def _path_pedestrian_focus_cues_by_camera(
     return cues_by_camera
 
 
+def _path_pedestrian_focus_coverage_rows(
+    focus_report: Mapping[str, object] | None,
+) -> list[dict[str, object]]:
+    if not focus_report:
+        return []
+    cameras = focus_report.get("cameras")
+    if not isinstance(cameras, list):
+        return []
+    coverage_rows: list[dict[str, object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        camera_name = str(camera.get("camera") or "")
+        if not camera_name:
+            continue
+        stroke_rows = _camera_non_auxiliary_stroke_delta_rows(camera)
+        dash_rows = _non_auxiliary_dash_mismatch_rows([camera])
+        if not stroke_rows and not dash_rows:
+            continue
+        candidate_stroke_rows = [
+            row for row in stroke_rows if _has_decoded_candidates(row)
+        ]
+        coverage_rows.append(
+            {
+                "camera": camera_name,
+                "stroke_rows": len(stroke_rows),
+                "candidate_backed_stroke_rows": len(candidate_stroke_rows),
+                "candidate_backed_width_delta_rows": sum(
+                    1 for row in candidate_stroke_rows if _has_meaningful_width_delta(row)
+                ),
+                "candidate_backed_zero_delta_rows": sum(
+                    1 for row in candidate_stroke_rows if not _has_meaningful_width_delta(row)
+                ),
+                "zero_candidate_stroke_rows": sum(
+                    1 for row in stroke_rows if not _has_decoded_candidates(row)
+                ),
+                "source_capped_stroke_rows": sum(
+                    1 for row in stroke_rows if row.get("source_line_width_capped") is True
+                ),
+                "dash_mismatch_rows": len(dash_rows),
+                "candidate_backed_dash_rows": sum(
+                    1 for row in dash_rows if _has_decoded_candidates(row)
+                ),
+                "zero_candidate_dash_rows": sum(
+                    1 for row in dash_rows if not _has_decoded_candidates(row)
+                ),
+            }
+        )
+    return coverage_rows
+
+
 def _focus_annotation_context(
     annotations: VisualCropAnnotationInputs,
     *,
@@ -537,10 +591,16 @@ def _focus_annotation_context(
             annotations.path_pedestrian_focus_report
         )
     )
+    coverage_rows = (
+        []
+        if comparison_match is False
+        else _path_pedestrian_focus_coverage_rows(annotations.path_pedestrian_focus_report)
+    )
     return _FocusAnnotationContext(
         comparison_paths=comparison_paths,
         comparison_match=comparison_match,
         cues_by_camera=cues_by_camera,
+        coverage_rows=coverage_rows,
     )
 
 
@@ -1128,6 +1188,8 @@ def _add_visual_crop_annotation_metadata(
         report["path_pedestrian_focus_json"] = _display_input_path(
             annotations.path_pedestrian_focus_report_path
         )
+        if focus_context.coverage_rows:
+            report["path_pedestrian_focus_coverage"] = focus_context.coverage_rows
         if focus_context.comparison_paths:
             report["path_pedestrian_focus_comparison_summary_jsons"] = (
                 focus_context.comparison_paths
@@ -2058,6 +2120,51 @@ def _summary_focus_rows(report: Mapping[str, object]) -> list[list[object]]:
     ]
 
 
+def _summary_focus_coverage_lines(report: Mapping[str, object]) -> list[str]:
+    if report.get("path_pedestrian_focus_comparison_match") is False:
+        return []
+    rows = report.get("path_pedestrian_focus_coverage")
+    coverage_rows = rows if isinstance(rows, list) else []
+    if not coverage_rows:
+        return []
+    lines = [
+        "",
+        "## Path/pedestrian focus coverage",
+        "",
+        (
+            "Shows per-camera non-auxiliary path/pedestrian focus coverage before the "
+            "focus cue table filters down to meaningful candidate-backed rows."
+        ),
+        "",
+        (
+            "| Camera | Stroke rows | Candidate strokes | Candidate width deltas | "
+            "Candidate zero-delta strokes | Zero-candidate strokes | Source-capped strokes | "
+            "Dash mismatches | Candidate dashes | Zero-candidate dashes |"
+        ),
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in coverage_rows:
+        if not isinstance(row, Mapping):
+            continue
+        lines.append(
+            _markdown_table_row(
+                [
+                    row.get("camera"),
+                    row.get("stroke_rows"),
+                    row.get("candidate_backed_stroke_rows"),
+                    row.get("candidate_backed_width_delta_rows"),
+                    row.get("candidate_backed_zero_delta_rows"),
+                    row.get("zero_candidate_stroke_rows"),
+                    row.get("source_capped_stroke_rows"),
+                    row.get("dash_mismatch_rows"),
+                    row.get("candidate_backed_dash_rows"),
+                    row.get("zero_candidate_dash_rows"),
+                ]
+            )
+        )
+    return lines
+
+
 def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
     if report.get("path_pedestrian_focus_comparison_match") is False:
         return []
@@ -2265,6 +2372,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_summary_crop_color_movement_group_lines(report))
     lines.extend(_summary_crop_color_metric_lines(report))
     lines.extend(_style_audit_area_fill_focus_lines(report))
+    lines.extend(_summary_focus_coverage_lines(report))
     lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"
 

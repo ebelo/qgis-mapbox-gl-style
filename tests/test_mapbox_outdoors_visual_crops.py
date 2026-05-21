@@ -14,6 +14,7 @@ from qfit.validation.mapbox_outdoors_visual_crops import (
     VisualCropAnnotationInputs,
     _computed_crop_color_movement_group_records,
     _crop_color_metric,
+    _path_pedestrian_focus_coverage_rows,
     _three_channel_color_values,
     annotate_visual_crop_report_with_comparison_delta,
     build_run_directory,
@@ -224,6 +225,8 @@ def _path_pedestrian_focus_report(
                         "decoded_candidate_type_counts": {},
                         "source_sampled_controls": {
                             "line-width": 1.0583333333333333,
+                            "line-width_raw_mm": 1.3229166666666665,
+                            "line-width_capped": True,
                             "line-dasharray": [1, 0.25],
                         },
                         "qgis_controls": [
@@ -756,10 +759,65 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 [str(summary_path)],
             )
             self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
+            self.assertEqual(
+                report["path_pedestrian_focus_coverage"],
+                [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "stroke_rows": 3,
+                        "candidate_backed_stroke_rows": 2,
+                        "candidate_backed_width_delta_rows": 1,
+                        "candidate_backed_zero_delta_rows": 1,
+                        "zero_candidate_stroke_rows": 1,
+                        "source_capped_stroke_rows": 1,
+                        "dash_mismatch_rows": 2,
+                        "candidate_backed_dash_rows": 1,
+                        "zero_candidate_dash_rows": 1,
+                    }
+                ],
+            )
             self.assertEqual(stroke_cues[0]["source_layer_id"], "road-path-trail")
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
+
+    def test_path_pedestrian_focus_coverage_counts_all_stroke_rows(self):
+        focus_report = {
+            "cameras": [
+                {
+                    "camera": "large-focus-camera",
+                    "source_qgis_stroke_control_comparisons": [
+                        {
+                            "source_layer_id": "road-path-trail",
+                            "decoded_candidate_count": 1,
+                            "source_sampled_controls": {"line-width": 0.1},
+                            "qgis_controls": [
+                                {
+                                    "layer_id": f"road-path-trail-{index}",
+                                    "controls": {"line-width": 0.2},
+                                }
+                            ],
+                            "qgis_control_deltas": [
+                                {
+                                    "layer_id": f"road-path-trail-{index}",
+                                    "deltas": {
+                                        "line-width_delta_mm": 0.1,
+                                        "line-width_ratio": 2.0,
+                                        "line-dasharray_match": True,
+                                    },
+                                }
+                            ],
+                        }
+                        for index in range(10_001)
+                    ],
+                }
+            ]
+        }
+
+        self.assertEqual(
+            _path_pedestrian_focus_coverage_rows(focus_report)[0]["stroke_rows"],
+            10_001,
+        )
 
     def test_generate_visual_crop_report_attaches_style_audit_area_fill_focus(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -1171,6 +1229,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 ["debug/comparison/summary.json"],
             )
             self.assertIs(report["path_pedestrian_focus_comparison_match"], False)
+            self.assertNotIn("path_pedestrian_focus_coverage", report)
             self.assertNotIn("path_pedestrian_focus", report["cameras"][0])
 
     def test_generate_visual_crop_report_rejects_focus_filter_with_mismatched_focus_cues(self):
@@ -1768,6 +1827,20 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         for index in range(1, 8)
                     ],
                 ],
+                "path_pedestrian_focus_coverage": [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "stroke_rows": 3,
+                        "candidate_backed_stroke_rows": 2,
+                        "candidate_backed_width_delta_rows": 1,
+                        "candidate_backed_zero_delta_rows": 1,
+                        "zero_candidate_stroke_rows": 1,
+                        "source_capped_stroke_rows": 1,
+                        "dash_mismatch_rows": 2,
+                        "candidate_backed_dash_rows": 1,
+                        "zero_candidate_dash_rows": 1,
+                    }
+                ],
                 "cameras": [
                     {
                         "camera": "chamonix-trails-z14-outdoors",
@@ -1810,6 +1883,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
         self.assertIn("Path/pedestrian focus comparison match: `True`", markdown)
+        self.assertIn("## Path/pedestrian focus coverage", markdown)
+        self.assertIn(
+            "| chamonix-trails-z14-outdoors | 3 | 2 | 1 | 1 | 1 | 1 | 2 | 1 | 1 |",
+            markdown,
+        )
         self.assertIn("## Path/pedestrian focus cues", markdown)
         self.assertIn("| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | lighter + blue higher=2", markdown)
@@ -1906,6 +1984,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 "crops_per_camera": 1,
                 "camera_count": 1,
                 "crop_count": 0,
+                "path_pedestrian_focus_coverage": [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "stroke_rows": 1,
+                    }
+                ],
                 "cameras": [
                     {
                         "camera": "chamonix-trails-z14-outdoors",
@@ -1926,6 +2010,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
 
         self.assertIn("Path/pedestrian focus comparison match: `False`", markdown)
+        self.assertNotIn("## Path/pedestrian focus coverage", markdown)
         self.assertNotIn("## Path/pedestrian focus cues", markdown)
         self.assertNotIn("road-path-trail->road-path-trail-below-z16", markdown)
 
