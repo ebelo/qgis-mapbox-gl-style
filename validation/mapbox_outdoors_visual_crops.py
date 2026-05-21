@@ -236,10 +236,19 @@ def _contact_sheet_outputs(outputs: Mapping[str, Path]) -> dict[str, str]:
 def _selected_camera_names(
     visual_artifacts_by_camera: Mapping[str, Mapping[str, object]],
     requested_cameras: Sequence[str] | None,
+    focus_camera_names: set[str] | None = None,
 ) -> list[str]:
     if requested_cameras:
-        return [camera for camera in requested_cameras if camera in visual_artifacts_by_camera]
-    return sorted(visual_artifacts_by_camera)
+        camera_names = [
+            camera
+            for camera in requested_cameras
+            if camera in visual_artifacts_by_camera
+        ]
+    else:
+        camera_names = sorted(visual_artifacts_by_camera)
+    if focus_camera_names is None:
+        return camera_names
+    return [camera for camera in camera_names if camera in focus_camera_names]
 
 
 def _required_visual_artifacts(artifacts: Mapping[str, object]) -> bool:
@@ -460,6 +469,7 @@ def generate_visual_crop_report(
     path_pedestrian_focus_report: Mapping[str, object] | None = None,
     path_pedestrian_focus_report_path: Path | None = None,
     camera_names: Sequence[str] | None = None,
+    focus_cue_cameras_only: bool = False,
     crop_size: tuple[int, int] = DEFAULT_CROP_SIZE,
     crops_per_camera: int = DEFAULT_CROPS_PER_CAMERA,
     generated_at: dt.datetime | None = None,
@@ -483,14 +493,24 @@ def generate_visual_crop_report(
     focus_comparison_match = None
     if focus_comparison_paths:
         focus_comparison_match = _display_input_path(comparison_summary_path) in focus_comparison_paths
+    if focus_cue_cameras_only and focus_comparison_match is False:
+        raise ValueError(
+            "Focus cue camera filtering requires the path/pedestrian focus report "
+            "to match the comparison summary."
+        )
     focus_cues_by_camera = (
         {}
         if focus_comparison_match is False
         else _path_pedestrian_focus_cues_by_camera(path_pedestrian_focus_report)
     )
+    focus_camera_names = set(focus_cues_by_camera) if focus_cue_cameras_only else None
     camera_rows = []
     contact_sheet_entries: list[dict[str, object]] = []
-    for camera_name in _selected_camera_names(visual_artifacts_by_camera, camera_names):
+    for camera_name in _selected_camera_names(
+        visual_artifacts_by_camera,
+        camera_names,
+        focus_camera_names=focus_camera_names,
+    ):
         status, crops, crop_contact_entries = _camera_visual_crop_rows(
             camera_name=camera_name,
             artifacts=visual_artifacts_by_camera[camera_name],
@@ -523,6 +543,7 @@ def generate_visual_crop_report(
         ),
         "crop_size": {"width": crop_size[0], "height": crop_size[1]},
         "crops_per_camera": crops_per_camera,
+        "focus_cue_cameras_only": focus_cue_cameras_only,
         "camera_count": len(camera_rows),
         "crop_count": sum(len(row.get("crops", [])) for row in camera_rows),
         "contact_sheet": _display_input_path(contact_sheet) if contact_sheet is not None else None,
@@ -653,6 +674,8 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
         f"Focused cameras: `{report.get('camera_count')}`",
         f"Generated crops: `{report.get('crop_count')}`",
     ]
+    if report.get("focus_cue_cameras_only") is True:
+        lines.append("Camera filter: `candidate-backed path/pedestrian focus cues`")
     if report.get("contact_sheet"):
         lines.append(f"Crop contact sheet: `{report.get('contact_sheet')}`")
     comparison_summary_run = _comparison_summary_run_markdown(report.get("comparison_summary_run"))
@@ -885,6 +908,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Camera to crop. May be repeated. Defaults to all cameras with complete visual artifacts.",
     )
     parser.add_argument(
+        "--focus-cue-cameras",
+        action="store_true",
+        help=(
+            "Crop only cameras with candidate-backed path/pedestrian focus cues. "
+            "Use with --path-pedestrian-focus-json when visually inspecting focus gaps."
+        ),
+    )
+    parser.add_argument(
         "--crop-size",
         default=DEFAULT_CROP_SIZE,
         type=parse_crop_size,
@@ -916,6 +947,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.crops_per_camera <= 0:
         parser.error("--crops-per-camera must be greater than zero")
+    if args.focus_cue_cameras and args.path_pedestrian_focus_json is None:
+        parser.error("--focus-cue-cameras requires --path-pedestrian-focus-json")
     comparison_summary = _load_cli_json_object(
         parser,
         args.comparison_summary_json,
@@ -937,6 +970,7 @@ def main(argv: list[str] | None = None) -> int:
             path_pedestrian_focus_report=path_pedestrian_focus_report,
             path_pedestrian_focus_report_path=args.path_pedestrian_focus_json,
             camera_names=args.camera,
+            focus_cue_cameras_only=args.focus_cue_cameras,
             crop_size=args.crop_size,
             crops_per_camera=args.crops_per_camera,
         )

@@ -135,6 +135,15 @@ python3 validation/mapbox_outdoors_visual_crops.py \
   --path-pedestrian-focus-json debug/mapbox-outdoors-path-pedestrian-focus/<timestamp>/path-pedestrian-focus.json
 ```
 
+To inspect only cameras that still have candidate-backed path/pedestrian focus cues, add `--focus-cue-cameras`. This is useful after a global highest-delta crop run is dominated by a different camera and hides lower-scoring stroke-width or dash candidates:
+
+```bash
+python3 validation/mapbox_outdoors_visual_crops.py \
+  --comparison-summary-json debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/summary.json \
+  --path-pedestrian-focus-json debug/mapbox-outdoors-path-pedestrian-focus/<timestamp>/path-pedestrian-focus.json \
+  --focus-cue-cameras
+```
+
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
 ## Style audit before tuning

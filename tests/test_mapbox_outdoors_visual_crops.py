@@ -127,8 +127,8 @@ def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z1
     browser_path = camera_dir / "mapbox-gl-reference.png"
     qgis_path = camera_dir / "qgis-vector-render.png"
     diff_path = camera_dir / "mapbox-gl-vs-qgis-diff.png"
-    camera_dir.mkdir(parents=True)
-    summary_path.parent.mkdir(parents=True)
+    camera_dir.mkdir(parents=True, exist_ok=True)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
     _save_rgb_image(browser_path, image_module, (255, 255, 255))
     _save_rgb_image(qgis_path, image_module, (128, 128, 128))
     diff = image_module.new("RGB", (12, 12), (0, 0, 0))
@@ -490,6 +490,48 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
 
+    def test_generate_visual_crop_report_can_filter_to_focus_cue_cameras(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            second_summary, _summary_path = _write_visual_triplet(
+                root,
+                image_module,
+                camera_name="zermatt-trails-z18-outdoors",
+            )
+            comparison_summary["cameras"].append(second_summary["cameras"][0])
+            focus_path = root / "focus" / "path-pedestrian-focus.json"
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                path_pedestrian_focus_report=_path_pedestrian_focus_report(
+                    comparison_summary_jsons=[str(summary_path)]
+                ),
+                path_pedestrian_focus_report_path=focus_path,
+                focus_cue_cameras_only=True,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertIs(report["focus_cue_cameras_only"], True)
+            self.assertEqual(report["camera_count"], 1)
+            self.assertEqual(
+                [camera["camera"] for camera in report["cameras"]],
+                ["chamonix-trails-z14-outdoors"],
+            )
+            self.assertIn("path_pedestrian_focus", report["cameras"][0])
+            self.assertIn(
+                "Camera filter: `candidate-backed path/pedestrian focus cues`",
+                build_summary_markdown(report),
+            )
+
     def test_generate_visual_crop_report_filters_zero_candidate_focus_cues(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -547,6 +589,31 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
             self.assertIs(report["path_pedestrian_focus_comparison_match"], False)
             self.assertNotIn("path_pedestrian_focus", report["cameras"][0])
+
+    def test_generate_visual_crop_report_rejects_focus_filter_with_mismatched_focus_cues(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            with self.assertRaisesRegex(
+                ValueError,
+                "Focus cue camera filtering requires .* to match the comparison summary",
+            ):
+                generate_visual_crop_report(
+                    comparison_summary,
+                    comparison_summary_path=summary_path,
+                    paths=paths,
+                    path_pedestrian_focus_report=_path_pedestrian_focus_report(),
+                    path_pedestrian_focus_report_path=root / "focus" / "path-pedestrian-focus.json",
+                    focus_cue_cameras_only=True,
+                    crop_size=(4, 4),
+                    crops_per_camera=1,
+                    trusted_output_root=root / "debug",
+                    image_module=image_module,
+                    image_stat_module=image_stat_module,
+                )
 
     def test_generate_visual_crop_report_matches_focus_comparison_runs(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -978,6 +1045,19 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("--crops-per-camera must be greater than zero", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_main_requires_focus_report_for_focus_cue_camera_filter(self):
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+            main(["--comparison-summary-json", "/missing/summary.json", "--focus-cue-cameras"])
+
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn(
+            "--focus-cue-cameras requires --path-pedestrian-focus-json",
+            stderr.getvalue(),
+        )
         self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_main_reports_missing_comparison_summary_without_traceback(self):
