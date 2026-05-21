@@ -141,6 +141,14 @@ def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z1
         "cameras": [
             {
                 "camera": camera_name,
+                "status": "passed",
+                "artifact_status": "metrics_available",
+                "metrics": {
+                    "changed_pixel_ratio": 0.9820199652777778,
+                    "normalized_mean_absolute_channel_delta": 0.03523346722948439,
+                    "normalized_rms_channel_delta": 0.07608105570020197,
+                    "ssim_status": "unavailable",
+                },
                 "outputs": {
                     "browser_reference": str(browser_path),
                     "qgis_vector_render": str(qgis_path),
@@ -311,6 +319,14 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 "cameras": [
                     {
                         "camera": "chamonix-trails-z14-outdoors",
+                        "status": "passed",
+                        "artifact_status": "metrics_available",
+                        "metrics": {
+                            "changed_pixel_ratio": 0.9820199652777778,
+                            "normalized_mean_absolute_channel_delta": 0.03523346722948439,
+                            "normalized_rms_channel_delta": 0.07608105570020197,
+                            "ssim_status": "unavailable",
+                        },
                         "outputs": {
                             "browser_reference": str(browser_path),
                             "qgis_vector_render": str(qgis_path),
@@ -348,6 +364,17 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertTrue(paths.summary_path.exists())
             loaded = json.loads(paths.json_path.read_text(encoding="utf-8"))
             self.assertEqual(loaded["camera_count"], 1)
+            self.assertEqual(
+                loaded["cameras"][0]["comparison"],
+                {
+                    "artifact_status": "metrics_available",
+                    "changed_pixel_ratio": 0.9820199652777778,
+                    "normalized_mean_absolute_channel_delta": 0.03523346722948439,
+                    "normalized_rms_channel_delta": 0.07608105570020197,
+                    "ssim_status": "unavailable",
+                    "status": "passed",
+                },
+            )
 
     def test_generate_visual_crop_report_marks_missing_required_artifacts(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -558,6 +585,13 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     {
                         "camera": "zermatt-trails-z18-outdoors",
                         "status": "cropped",
+                        "comparison": {
+                            "status": "passed",
+                            "artifact_status": "metrics_available",
+                            "changed_pixel_ratio": 0.9820199652777778,
+                            "normalized_mean_absolute_channel_delta": 0.03523346722948439,
+                            "normalized_rms_channel_delta": 0.07608105570020197,
+                        },
                         "crops": [
                             {
                                 "index": 1,
@@ -583,6 +617,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
         self.assertIn("zermatt-trails-z18-outdoors", markdown)
+        self.assertIn(
+            "| zermatt-trails-z18-outdoors | passed | metrics_available | 0.9820 | 0.0352 | 0.0761 | cropped | 1 |",
+            markdown,
+        )
         self.assertIn("debug/crops/crop-sheet.jpg", markdown)
 
     def test_build_summary_markdown_lists_path_pedestrian_focus_cues(self):
@@ -686,7 +724,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
 
         self.assertIn("Crop size: `-`", markdown)
-        self.assertIn("| zermatt-piste-z17-outdoors | - | missing_diff | - | - | - | - |", markdown)
+        self.assertIn(
+            "| zermatt-piste-z17-outdoors | - | - | - | - | - | missing_diff | - | - | - | - | - | - |",
+            markdown,
+        )
 
     def test_main_writes_visual_crop_report_from_json_input(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -750,6 +791,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
             self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
+            self.assertEqual(
+                report["cameras"][0]["comparison"]["changed_pixel_ratio"],
+                0.9820199652777778,
+            )
             self.assertIn("path_pedestrian_focus", report["cameras"][0])
             self.assertTrue((report_path.parent / "crop-sheet.jpg").exists())
 

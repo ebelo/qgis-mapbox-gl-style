@@ -12,6 +12,7 @@ from typing import Any
 try:
     from .mapbox_outdoors_comparison import build_all_cameras_contact_sheet
     from .mapbox_outdoors_path_pedestrian_focus import (
+        COMPARISON_VISUAL_METRIC_KEYS,
         REPO_ROOT,
         _display_input_path,
         _largest_non_auxiliary_stroke_delta_rows,
@@ -24,6 +25,7 @@ try:
 except ImportError:  # pragma: no cover - direct script execution
     from mapbox_outdoors_comparison import build_all_cameras_contact_sheet  # type: ignore[no-redef]
     from mapbox_outdoors_path_pedestrian_focus import (  # type: ignore[no-redef]
+        COMPARISON_VISUAL_METRIC_KEYS,
         REPO_ROOT,
         _display_input_path,
         _largest_non_auxiliary_stroke_delta_rows,
@@ -45,6 +47,11 @@ CROP_IMAGE_COLUMNS = (
     ("browser_reference", "Mapbox GL"),
     ("qgis_vector_render", "QGIS"),
     ("diff", "Diff"),
+)
+COMPARISON_CONTEXT_KEYS = (
+    "status",
+    "artifact_status",
+    *COMPARISON_VISUAL_METRIC_KEYS,
 )
 
 
@@ -322,12 +329,26 @@ def _camera_row_with_focus(
     camera_name: str,
     status: str,
     crops: list[dict[str, object]],
+    comparison_context: Mapping[str, object] | None,
     focus_cues: Mapping[str, object] | None,
 ) -> dict[str, object]:
     camera_row: dict[str, object] = {"camera": camera_name, "status": status, "crops": crops}
+    if comparison_context:
+        camera_row["comparison"] = dict(comparison_context)
     if focus_cues:
         camera_row["path_pedestrian_focus"] = dict(focus_cues)
     return camera_row
+
+
+def _comparison_context_from_artifacts(artifacts: Mapping[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key in COMPARISON_CONTEXT_KEYS
+        if (
+            isinstance((value := artifacts.get(key)), (str, int, float))
+            and not isinstance(value, bool)
+        )
+    }
 
 
 def _hotspot_crop_rows(
@@ -454,6 +475,9 @@ def generate_visual_crop_report(
                 camera_name=camera_name,
                 status=status,
                 crops=crops,
+                comparison_context=_comparison_context_from_artifacts(
+                    visual_artifacts_by_camera[camera_name]
+                ),
                 focus_cues=focus_cues_by_camera.get(camera_name),
             )
         )
@@ -644,12 +668,25 @@ def _summary_table_intro_lines() -> list[str]:
         "",
         (
             "Crops are selected from the highest-delta windows in the comparison diff image, "
-            "then applied to the matching Mapbox GL, QGIS, and diff artifacts."
+            "then applied to the matching Mapbox GL, QGIS, and diff artifacts. "
+            "Comparison metric columns come from the same all-camera comparison summary."
         ),
         "",
-        "| Camera | Crop | Box | Score | Mapbox GL | QGIS render | Diff |",
-        "| --- | ---: | --- | ---: | --- | --- | --- |",
+        "| Camera | Comparison status | Artifact status | Changed ratio | Mean delta | RMS delta | Crop status | Crop | Box | Score | Mapbox GL | QGIS render | Diff |",
+        "| --- | --- | --- | ---: | ---: | ---: | --- | ---: | --- | ---: | --- | --- | --- |",
     ]
+
+
+def _comparison_context(camera: Mapping[str, object]) -> Mapping[str, object]:
+    comparison = camera.get("comparison")
+    return comparison if isinstance(comparison, Mapping) else {}
+
+
+def _comparison_context_cell(camera: Mapping[str, object], key: str) -> object:
+    value = _comparison_context(camera).get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{float(value):.4f}"
+    return value
 
 
 def _summary_crop_row(camera: Mapping[str, object], crop: Mapping[str, object]) -> str:
@@ -658,6 +695,12 @@ def _summary_crop_row(camera: Mapping[str, object], crop: Mapping[str, object]) 
     return _markdown_table_row(
         [
             camera.get("camera"),
+            _comparison_context_cell(camera, "status"),
+            _comparison_context_cell(camera, "artifact_status"),
+            _comparison_context_cell(camera, "changed_pixel_ratio"),
+            _comparison_context_cell(camera, "normalized_mean_absolute_channel_delta"),
+            _comparison_context_cell(camera, "normalized_rms_channel_delta"),
+            camera.get("status"),
             crop.get("index"),
             crop.get("box"),
             f"{float(crop.get('score', 0.0)):.0f}",
@@ -672,7 +715,25 @@ def _summary_camera_rows(camera: Mapping[str, object]) -> list[str]:
     crops = camera.get("crops")
     crop_rows = crops if isinstance(crops, list) else []
     if not crop_rows:
-        return [_markdown_table_row([camera.get("camera"), "-", camera.get("status"), "-", "-", "-", "-"])]
+        return [
+            _markdown_table_row(
+                [
+                    camera.get("camera"),
+                    _comparison_context_cell(camera, "status"),
+                    _comparison_context_cell(camera, "artifact_status"),
+                    _comparison_context_cell(camera, "changed_pixel_ratio"),
+                    _comparison_context_cell(camera, "normalized_mean_absolute_channel_delta"),
+                    _comparison_context_cell(camera, "normalized_rms_channel_delta"),
+                    camera.get("status"),
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                    "-",
+                ]
+            )
+        ]
     return [_summary_crop_row(camera, crop) for crop in crop_rows if isinstance(crop, Mapping)]
 
 
