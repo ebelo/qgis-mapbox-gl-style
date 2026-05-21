@@ -1116,6 +1116,21 @@ def _style_audit_sample_candidates(
     return [candidates[index] for index in sorted(selected_indexes)]
 
 
+def _style_audit_count_rows(
+    candidates: Sequence[Mapping[str, object]],
+    key: str,
+) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        value = candidate.get(key)
+        if value not in (None, ""):
+            counts[str(value)] = counts.get(str(value), 0) + 1
+    return [
+        {key: value, "count": count}
+        for value, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def _style_audit_filter_signature_rows(
     candidates: list[Mapping[str, object]],
 ) -> list[dict[str, object]]:
@@ -1128,6 +1143,108 @@ def _style_audit_filter_signature_rows(
         {"filter_operator_signature": signature, "count": count}
         for signature, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     ]
+
+
+def _style_audit_property_count_rows(
+    candidates: Sequence[Mapping[str, object]],
+    key: str,
+) -> list[dict[str, object]]:
+    counts: dict[str, int] = {}
+    for candidate in candidates:
+        for property_name in _string_values(candidate.get(key)):
+            counts[property_name] = counts.get(property_name, 0) + 1
+    return [
+        {"property": property_name, "count": count}
+        for property_name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
+def _numeric_zoom_bound(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _zoom_bound_from_text(value: str) -> float | None:
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def _style_audit_zoom_band_bounds(value: object) -> tuple[float | None, float | None, bool]:
+    if not isinstance(value, str):
+        return None, None, False
+    compact = value.strip().replace(" ", "")
+    if not compact or compact == "-":
+        return None, None, False
+    minimum_match = re.fullmatch(r"z(?:≥|>=)(\d+(?:\.\d+)?)", compact)
+    if minimum_match is not None:
+        return _zoom_bound_from_text(minimum_match.group(1)), None, False
+    plus_match = re.fullmatch(r"z(\d+(?:\.\d+)?)\+", compact)
+    if plus_match is not None:
+        return _zoom_bound_from_text(plus_match.group(1)), None, False
+    inclusive_maximum_match = re.fullmatch(r"z<=(\d+(?:\.\d+)?)", compact)
+    if inclusive_maximum_match is not None:
+        return None, _zoom_bound_from_text(inclusive_maximum_match.group(1)), True
+    exclusive_maximum_match = re.fullmatch(r"z<(\d+(?:\.\d+)?)", compact)
+    if exclusive_maximum_match is not None:
+        return None, _zoom_bound_from_text(exclusive_maximum_match.group(1)), False
+    range_match = re.fullmatch(
+        r"z(\d+(?:\.\d+)?)[-–]z?(\d+(?:\.\d+)?)",
+        compact,
+    )
+    if range_match is not None:
+        return (
+            _zoom_bound_from_text(range_match.group(1)),
+            _zoom_bound_from_text(range_match.group(2)),
+            False,
+        )
+    return None, None, False
+
+
+def _style_audit_candidate_zoom_bounds(
+    candidate: Mapping[str, object],
+    *,
+    style_audit_layer: Mapping[str, object] | None = None,
+) -> tuple[float | None, float | None, bool]:
+    min_zoom = _numeric_zoom_bound(candidate.get("minzoom"))
+    max_zoom = _numeric_zoom_bound(candidate.get("maxzoom"))
+    if style_audit_layer is not None:
+        min_zoom = (
+            min_zoom
+            if min_zoom is not None
+            else _numeric_zoom_bound(style_audit_layer.get("minzoom"))
+        )
+        max_zoom = (
+            max_zoom
+            if max_zoom is not None
+            else _numeric_zoom_bound(style_audit_layer.get("maxzoom"))
+        )
+    if min_zoom is not None or max_zoom is not None:
+        return min_zoom, max_zoom, False
+    return _style_audit_zoom_band_bounds(candidate.get("zoom_band"))
+
+
+def _style_audit_candidate_active_at_zoom(
+    candidate: Mapping[str, object],
+    *,
+    camera_zoom: float | None,
+    style_audit_layer: Mapping[str, object] | None = None,
+) -> bool:
+    if camera_zoom is None:
+        return True
+    min_zoom, max_zoom, max_zoom_inclusive = _style_audit_candidate_zoom_bounds(
+        candidate,
+        style_audit_layer=style_audit_layer,
+    )
+    if min_zoom is not None and camera_zoom < min_zoom:
+        return False
+    if max_zoom is None:
+        return True
+    if max_zoom_inclusive:
+        return camera_zoom <= max_zoom
+    return camera_zoom < max_zoom
 
 
 def _style_audit_area_fill_focus(
@@ -1178,6 +1295,157 @@ def _style_audit_area_fill_focus(
     return focus_rows
 
 
+def _camera_zoom_by_name(comparison_summary: Mapping[str, object]) -> dict[str, float]:
+    cameras = comparison_summary.get("cameras")
+    camera_rows = cameras if isinstance(cameras, list) else []
+    zoom_by_name: dict[str, float] = {}
+    for camera in camera_rows:
+        if not isinstance(camera, Mapping):
+            continue
+        camera_name = camera.get("camera")
+        camera_zoom = _numeric_zoom_bound(camera.get("zoom"))
+        if isinstance(camera_name, str) and camera_name and camera_zoom is not None:
+            zoom_by_name[camera_name] = camera_zoom
+    return zoom_by_name
+
+
+def _style_audit_active_area_candidates(
+    candidates: list[Mapping[str, object]],
+    *,
+    camera_zoom: float | None,
+    style_audit_layers_by_id: Mapping[str, Mapping[str, object]],
+) -> list[Mapping[str, object]]:
+    active_candidates = []
+    for candidate in candidates:
+        if _style_audit_candidate_active_at_zoom(
+            candidate,
+            camera_zoom=camera_zoom,
+            style_audit_layer=_style_audit_candidate_layer(candidate, style_audit_layers_by_id),
+        ):
+            active_candidates.append(candidate)
+    return active_candidates
+
+
+def _style_audit_area_fill_camera_area_row(
+    section: Mapping[str, object],
+    summary: Mapping[str, object],
+    *,
+    camera_zoom: float,
+    qgis_converter_warnings_by_layer: Mapping[str, Mapping[str, object]],
+    style_audit_layers_by_id: Mapping[str, Mapping[str, object]],
+    sample_limit: int,
+) -> dict[str, object] | None:
+    candidate_rows = summary.get(str(section["candidates"]))
+    if not isinstance(candidate_rows, list):
+        return None
+    candidates = _style_audit_mapping_rows(candidate_rows)
+    active_candidates = _style_audit_active_area_candidates(
+        candidates,
+        camera_zoom=camera_zoom,
+        style_audit_layers_by_id=style_audit_layers_by_id,
+    )
+    if not active_candidates:
+        return None
+    return {
+        "key": section["key"],
+        "label": section["label"],
+        "active_candidate_count": len(active_candidates),
+        "by_source_layer": _style_audit_count_rows(
+            active_candidates,
+            "source_layer",
+        ),
+        "by_type": _style_audit_count_rows(active_candidates, "type"),
+        "simplified_by_property": _style_audit_property_count_rows(
+            active_candidates,
+            "qfit_simplified_control_properties",
+        ),
+        "qgis_dependent_by_property": _style_audit_property_count_rows(
+            active_candidates,
+            "qgis_dependent_control_properties",
+        ),
+        "sample_candidates": [
+            _style_audit_candidate_sample(
+                candidate,
+                qgis_converter_warnings_by_layer=qgis_converter_warnings_by_layer,
+                style_audit_layers_by_id=style_audit_layers_by_id,
+            )
+            for candidate in _style_audit_sample_candidates(
+                active_candidates,
+                sample_limit=sample_limit,
+            )
+        ],
+    }
+
+
+def _style_audit_area_fill_camera_row(
+    camera: Mapping[str, object],
+    summary: Mapping[str, object],
+    *,
+    qgis_converter_warnings_by_layer: Mapping[str, Mapping[str, object]],
+    style_audit_layers_by_id: Mapping[str, Mapping[str, object]],
+    sample_limit: int,
+) -> dict[str, object] | None:
+    camera_name = str(camera.get("camera") or "")
+    camera_zoom = _numeric_zoom_bound(camera.get("camera_zoom"))
+    if not camera_name or camera_zoom is None:
+        return None
+    crops = camera.get("crops")
+    area_rows = [
+        area_row
+        for section in STYLE_AUDIT_AREA_FILL_SECTIONS
+        if (
+            area_row := _style_audit_area_fill_camera_area_row(
+                section,
+                summary,
+                camera_zoom=camera_zoom,
+                qgis_converter_warnings_by_layer=qgis_converter_warnings_by_layer,
+                style_audit_layers_by_id=style_audit_layers_by_id,
+                sample_limit=sample_limit,
+            )
+        )
+        is not None
+    ]
+    if not area_rows:
+        return None
+    return {
+        "camera": camera_name,
+        "camera_zoom": camera_zoom,
+        "crop_count": len(crops) if isinstance(crops, list) else 0,
+        "areas": area_rows,
+    }
+
+
+def _style_audit_area_fill_camera_focus(
+    style_audit_report: Mapping[str, object] | None,
+    camera_rows: object,
+    *,
+    sample_limit: int = DEFAULT_STYLE_AUDIT_SAMPLE_LIMIT,
+) -> list[dict[str, object]]:
+    summary = _style_audit_summary(style_audit_report)
+    cameras = camera_rows if isinstance(camera_rows, list) else []
+    if not summary or not cameras:
+        return []
+    qgis_converter_warnings_by_layer = _style_audit_qgis_converter_warnings_by_layer(
+        style_audit_report
+    )
+    style_audit_layers_by_id = _style_audit_layers_by_id(style_audit_report)
+    return [
+        focus_row
+        for camera in cameras
+        if isinstance(camera, Mapping)
+        and (
+            focus_row := _style_audit_area_fill_camera_row(
+                camera,
+                summary,
+                qgis_converter_warnings_by_layer=qgis_converter_warnings_by_layer,
+                style_audit_layers_by_id=style_audit_layers_by_id,
+                sample_limit=sample_limit,
+            )
+        )
+        is not None
+    ]
+
+
 def _camera_row_with_focus(
     *,
     camera_name: str,
@@ -1185,8 +1453,11 @@ def _camera_row_with_focus(
     crops: list[dict[str, object]],
     comparison_context: Mapping[str, object] | None,
     focus_cues: Mapping[str, object] | None,
+    camera_zoom: float | None = None,
 ) -> dict[str, object]:
     camera_row: dict[str, object] = {"camera": camera_name, "status": status, "crops": crops}
+    if camera_zoom is not None:
+        camera_row["camera_zoom"] = camera_zoom
     if comparison_context:
         camera_row["comparison"] = dict(comparison_context)
     if focus_cues:
@@ -1466,6 +1737,12 @@ def _add_visual_crop_annotation_metadata(
         area_fill_focus = _style_audit_area_fill_focus(annotations.style_audit_report)
         if area_fill_focus:
             report["style_audit_area_fill_focus"] = area_fill_focus
+        area_fill_camera_focus = _style_audit_area_fill_camera_focus(
+            annotations.style_audit_report,
+            report.get("cameras"),
+        )
+        if area_fill_camera_focus:
+            report["style_audit_area_fill_camera_focus"] = area_fill_camera_focus
     if annotations.path_pedestrian_focus_report_path is not None:
         report["path_pedestrian_focus_json"] = _display_input_path(
             annotations.path_pedestrian_focus_report_path
@@ -1511,6 +1788,7 @@ def generate_visual_crop_report(
         comparison_summary,
         summary_path=comparison_summary_path,
     )
+    camera_zoom_by_name = _camera_zoom_by_name(comparison_summary)
     annotations = annotation_inputs or VisualCropAnnotationInputs()
     focus_context = _focus_annotation_context(
         annotations,
@@ -1545,6 +1823,7 @@ def generate_visual_crop_report(
                     visual_artifacts_by_camera[camera_name]
                 ),
                 focus_cues=focus_context.cues_by_camera.get(camera_name),
+                camera_zoom=camera_zoom_by_name.get(camera_name),
             )
         )
         contact_sheet_entries.extend(crop_contact_entries)
@@ -2290,6 +2569,26 @@ def _movement_group_camera_labels(record: Mapping[str, object]) -> list[str]:
     return [*labels, f"{representative_camera}={representative_count} (representative)"]
 
 
+def _area_fill_crop_movement_labels(report: Mapping[str, object]) -> list[str]:
+    labels = []
+    for record in _crop_color_movement_group_records(report)[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]:
+        movement = record.get("movement")
+        if not isinstance(movement, str) or not movement:
+            continue
+        crop_count = record.get("crop_count")
+        label = (
+            f"{movement}={crop_count}"
+            if isinstance(crop_count, int) and not isinstance(crop_count, bool)
+            else movement
+        )
+        representative_rgb = _movement_group_representative_rgb_label(record)
+        representative_luminance = _movement_group_representative_luminance_label(record)
+        if representative_rgb != "-" or representative_luminance != "-":
+            label = f"{label} (rep {representative_rgb} / {representative_luminance})"
+        labels.append(label)
+    return labels
+
+
 def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> list[list[object]]:
     return [
         [
@@ -2786,21 +3085,22 @@ def _style_audit_area_fill_focus_lines(report: Mapping[str, object]) -> list[str
     rows = focus if isinstance(focus, list) else []
     if not rows:
         return []
+    crop_movement_label = _joined_summary_labels(_area_fill_crop_movement_labels(report))
     lines = [
         "",
         "## Style audit area-fill focus",
         "",
         (
             "Shows global terrain/landcover and airport/special-landuse candidates from the "
-            "style audit beside the crop sheet, so broad fill differences can be reviewed "
-            "without reopening the full audit."
+            "style audit beside the crop sheet, with crop-local color movement cues, so broad "
+            "fill differences can be reviewed without reopening the full audit."
         ),
         "",
         (
-            "| Area | Candidates | Source layers | Types | Simplified controls | "
+            "| Area | Report color movements | Candidates | Source layers | Types | Simplified controls | "
             "QGIS-dependent controls | Filter signatures | Sample layers |"
         ),
-        "| --- | ---: | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for row in rows:
         if not isinstance(row, Mapping):
@@ -2809,6 +3109,7 @@ def _style_audit_area_fill_focus_lines(report: Mapping[str, object]) -> list[str
             _markdown_table_row(
                 [
                     row.get("label"),
+                    crop_movement_label,
                     row.get("candidate_count"),
                     _joined_summary_labels(
                         _count_summary_labels(row.get("by_source_layer"), "source_layer")
@@ -2833,6 +3134,73 @@ def _style_audit_area_fill_focus_lines(report: Mapping[str, object]) -> list[str
     return lines
 
 
+def _style_audit_area_fill_camera_focus_lines(report: Mapping[str, object]) -> list[str]:
+    focus = report.get("style_audit_area_fill_camera_focus")
+    rows = focus if isinstance(focus, list) else []
+    if not rows:
+        return []
+    movement_group_records = _crop_color_movement_group_records(report)
+    lines = [
+        "",
+        "## Style audit area-fill camera focus",
+        "",
+        (
+            "Filters the style-audit area-fill candidates to each cropped camera's zoom, "
+            "so crop-local tint or terrain movement can be compared with layers active "
+            "at that inspection scale."
+        ),
+        "",
+        (
+            "| Camera | Zoom | Crops | Crop movement groups | Area | Active candidates | "
+            "Source layers | Types | Simplified controls | QGIS-dependent controls | "
+            "Sample active layers |"
+        ),
+        "| --- | ---: | ---: | --- | --- | ---: | --- | --- | --- | --- | --- |",
+    ]
+    for camera_focus in rows:
+        if not isinstance(camera_focus, Mapping):
+            continue
+        camera_name = camera_focus.get("camera")
+        area_rows = camera_focus.get("areas")
+        if not isinstance(area_rows, list):
+            continue
+        for area in area_rows:
+            if not isinstance(area, Mapping):
+                continue
+            lines.append(
+                _markdown_table_row(
+                    [
+                        camera_name,
+                        _format_focus_number(camera_focus.get("camera_zoom")),
+                        camera_focus.get("crop_count"),
+                        _joined_summary_labels(
+                            _focus_movement_group_labels(
+                                movement_group_records,
+                                camera_name,
+                            )
+                        ),
+                        area.get("label"),
+                        area.get("active_candidate_count"),
+                        _joined_summary_labels(
+                            _count_summary_labels(area.get("by_source_layer"), "source_layer")
+                        ),
+                        _joined_summary_labels(_count_summary_labels(area.get("by_type"), "type")),
+                        _joined_summary_labels(
+                            _count_summary_labels(area.get("simplified_by_property"), "property")
+                        ),
+                        _joined_summary_labels(
+                            _count_summary_labels(
+                                area.get("qgis_dependent_by_property"),
+                                "property",
+                            )
+                        ),
+                        _joined_summary_labels(_candidate_sample_labels(area.get("sample_candidates"))),
+                    ]
+                )
+            )
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = _summary_header_lines(report)
     include_comparison_delta = _include_comparison_delta_columns(report)
@@ -2850,6 +3218,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_summary_crop_color_movement_group_lines(report))
     lines.extend(_summary_crop_color_metric_lines(report))
     lines.extend(_style_audit_area_fill_focus_lines(report))
+    lines.extend(_style_audit_area_fill_camera_focus_lines(report))
     lines.extend(_summary_focus_coverage_lines(report))
     lines.extend(_summary_focus_coverage_sample_lines(report))
     lines.extend(_summary_focus_decoded_feature_lines(report))

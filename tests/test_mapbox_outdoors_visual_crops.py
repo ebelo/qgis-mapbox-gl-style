@@ -15,6 +15,7 @@ from qfit.validation.mapbox_outdoors_visual_crops import (
     _computed_crop_color_movement_group_records,
     _crop_color_metric,
     _path_pedestrian_focus_coverage_rows,
+    _style_audit_candidate_active_at_zoom,
     _three_channel_color_values,
     annotate_visual_crop_report_with_comparison_delta,
     build_run_directory,
@@ -143,7 +144,13 @@ def _save_rgb_image(path, image_module, color, *, size=(12, 12)):
         image.close()
 
 
-def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z14-outdoors"):
+def _write_visual_triplet(
+    root,
+    image_module,
+    *,
+    camera_name="chamonix-trails-z14-outdoors",
+    zoom=14.25,
+):
     comparison_root = root / "comparison"
     summary_path = comparison_root / "all-cameras" / "run" / "summary.json"
     camera_dir = comparison_root / camera_name / "run"
@@ -164,6 +171,7 @@ def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z1
         "cameras": [
             {
                 "camera": camera_name,
+                "zoom": zoom,
                 "status": "passed",
                 "artifact_status": "metrics_available",
                 "metrics": {
@@ -432,7 +440,7 @@ def _style_audit_report():
                     "layer": "contour",
                     "source_layer": "contour",
                     "type": "line",
-                    "zoom_band": "z11+",
+                    "zoom_band": "z≥11",
                     "terrain_landcover_palette_control_properties": [
                         "filter",
                         "paint.line-color",
@@ -459,7 +467,7 @@ def _style_audit_report():
                     "layer": "landuse-other-z10-plus-airport",
                     "source_layer": "landuse",
                     "type": "fill",
-                    "zoom_band": "z10+",
+                    "zoom_band": "z≥10",
                     "airport_special_landuse_control_properties": [
                         "filter",
                         "paint.fill-color",
@@ -529,6 +537,26 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertEqual(_three_channel_color_values([5]), [5.0, 5.0, 5.0])
         self.assertEqual(_three_channel_color_values([5, 6]), [5.0, 6.0, 0.0])
         self.assertEqual(_three_channel_color_values([5, 6, 7, 8]), [5.0, 6.0, 7.0])
+
+    def test_style_audit_candidate_active_at_zoom_respects_inclusive_upper_bound(self):
+        self.assertTrue(
+            _style_audit_candidate_active_at_zoom(
+                {"zoom_band": "z<=12"},
+                camera_zoom=12.0,
+            )
+        )
+        self.assertFalse(
+            _style_audit_candidate_active_at_zoom(
+                {"zoom_band": "z<12"},
+                camera_zoom=12.0,
+            )
+        )
+        self.assertFalse(
+            _style_audit_candidate_active_at_zoom(
+                {"zoom_band": "z<=12"},
+                camera_zoom=12.1,
+            )
+        )
 
     def test_crop_color_metric_handles_empty_stat_outputs(self):
         image_module = _FakeImageModule()
@@ -1095,6 +1123,24 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 focus[0]["filter_signatures"],
                 [{"filter_operator_signature": "all, get, match", "count": 1}],
             )
+            camera_focus = report["style_audit_area_fill_camera_focus"]
+            self.assertEqual(camera_focus[0]["camera"], "chamonix-trails-z14-outdoors")
+            self.assertEqual(camera_focus[0]["camera_zoom"], 14.25)
+            camera_focus_areas = {
+                row["key"]: row for row in camera_focus[0]["areas"]
+            }
+            self.assertEqual(
+                camera_focus_areas["terrain_landcover"]["active_candidate_count"],
+                1,
+            )
+            self.assertEqual(
+                camera_focus_areas["terrain_landcover"]["sample_candidates"][0]["layer"],
+                "contour",
+            )
+            self.assertEqual(
+                camera_focus_areas["airport_special_landuse"]["active_candidate_count"],
+                1,
+            )
             focus[0]["sample_candidates"].append({"source_layer": "landcover", "type": "fill"})
             markdown = build_summary_markdown(report)
             self.assertEqual(
@@ -1129,10 +1175,24 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
             self.assertIn("Style audit input: `", markdown)
             self.assertIn("## Style audit area-fill focus", markdown)
+            self.assertIn("## Style audit area-fill camera focus", markdown)
+            self.assertIn("Report color movements", markdown)
+            self.assertIn(
+                "darker + red lower=1 (rep -127.0, -127.0, -127.0 / -127.0)",
+                markdown,
+            )
             self.assertIn("Terrain/landcover", markdown)
             self.assertIn("landcover=1", markdown)
             self.assertIn("all, get, match=1", markdown)
             self.assertIn("landuse-other-z10-plus-airport", markdown)
+            camera_focus_markdown = markdown.split(
+                "## Style audit area-fill camera focus",
+                1,
+            )[1]
+            self.assertIn("| Camera | Zoom | Crops |", camera_focus_markdown)
+            self.assertIn("| chamonix-trails-z14-outdoors | 14.25 | 1 |", camera_focus_markdown)
+            self.assertIn("contour (contour/line", camera_focus_markdown)
+            self.assertNotIn("landcover (landcover/fill", camera_focus_markdown)
             self.assertIn(
                 "landcover (landcover/fill; filter-ops: all, get, match; controls=filter, paint.fill-color, "
                 "paint.fill-opacity; qfit=paint.fill-color, paint.fill-opacity; "
@@ -1188,7 +1248,62 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(focus[1]["candidate_count"], 0)
             self.assertEqual(focus[1]["sample_candidates"], [])
             markdown = build_summary_markdown(report)
-            self.assertIn("| Airport/special landuse | 0 | - | - | - | - | - | - |", markdown)
+            self.assertIn(
+                (
+                    "| Airport/special landuse | darker + red lower=1 "
+                    "(rep -127.0, -127.0, -127.0 / -127.0) | 0 | - | - | - | - | - | - |"
+                ),
+                markdown,
+            )
+
+    def test_generate_visual_crop_report_keeps_inclusive_upper_zoom_area_candidates(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(
+                root,
+                image_module,
+                zoom=14.25,
+            )
+            style_audit_report = _style_audit_report()
+            style_audit_report["summary"]["terrain_landcover_palette_candidates"] = [
+                {
+                    "layer": "boundary-tint",
+                    "source_layer": "landuse_overlay",
+                    "type": "fill",
+                    "zoom_band": "z<=14.25",
+                    "terrain_landcover_palette_control_properties": [
+                        "filter",
+                        "paint.fill-color",
+                    ],
+                    "qgis_dependent_control_properties": ["filter"],
+                }
+            ]
+            style_audit_report["summary"]["airport_special_landuse_candidates"] = []
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    style_audit_report=style_audit_report,
+                    style_audit_report_path=root / "style-audit" / "audit.json",
+                ),
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            camera_focus = report["style_audit_area_fill_camera_focus"][0]
+            self.assertEqual(camera_focus["camera_zoom"], 14.25)
+            self.assertEqual(camera_focus["areas"][0]["active_candidate_count"], 1)
+            self.assertEqual(
+                camera_focus["areas"][0]["sample_candidates"][0]["layer"],
+                "boundary-tint",
+            )
 
     def test_generate_visual_crop_report_samples_representative_area_fill_candidates(self):
         image_module, image_stat_module = _fake_image_modules()
