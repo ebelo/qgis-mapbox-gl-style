@@ -664,7 +664,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("## Crop color metrics", summary)
             self.assertIn("## Crop color movement groups", summary)
             self.assertIn(
-                f"| darker + red lower | 1 | 127.0 | 127.0 | chamonix-trails-z14-outdoors=1 | chamonix-trails-z14-outdoors crop 1 [6,6,10,10] `{outputs['diff']}` |",
+                (
+                    f"| darker + red lower | 1 | 127.0 | 127.0 | chamonix-trails-z14-outdoors=1 | "
+                    f"chamonix-trails-z14-outdoors crop 1 [6,6,10,10] `{outputs['diff']}` | "
+                    "-127.0, -127.0, -127.0 | -127.0 |"
+                ),
                 summary,
             )
             self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 | darker; red -127.0 |", summary)
@@ -1504,11 +1508,17 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             1,
         )[0]
         self.assertIn(
-            "| lighter + blue higher | 3 | 16.0 | 8.0 | geneva=2, zermatt=1 | zermatt crop 1 |",
+            (
+                "| lighter + blue higher | 3 | 16.0 | 8.0 | geneva=2, zermatt=1 | "
+                "zermatt crop 1 | 2.0, 0.0, 16.0 | +8.0 |"
+            ),
             movement_section,
         )
         self.assertIn(
-            "| darker + red lower | 1 | 18.0 | 6.0 | lausanne=1 | lausanne crop 1 |",
+            (
+                "| darker + red lower | 1 | 18.0 | 6.0 | lausanne=1 | lausanne crop 1 | "
+                "-18.0, -1.0, -16.0 | -6.0 |"
+            ),
             movement_section,
         )
         self.assertLess(
@@ -1613,7 +1623,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
 
         self.assertIn(
-            "| lighter + blue higher | 2 | 16.0 | 8.0 | zermatt=2 | zermatt crop 2 [4,4,8,8] `debug/zermatt-diff.png` |",
+            (
+                "| lighter + blue higher | 2 | 16.0 | 8.0 | zermatt=2 | "
+                "zermatt crop 2 [4,4,8,8] `debug/zermatt-diff.png` | - | - |"
+            ),
             markdown,
         )
 
@@ -1643,6 +1656,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                             "crop": 1,
                             "box": [210, 600, 630, 900],
                             "diff": "debug/switzerland-diff.png",
+                            "qgis_minus_mapbox_rgb": [11.8, 8.9, 1.9],
+                            "qgis_minus_mapbox_luminance": 9.0,
                         },
                     }
                 ],
@@ -1655,7 +1670,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 "| lighter + red higher | 8 | 11.8 | 9.0 | "
                 "zermatt-piste-z17-outdoors=3, geneva-airport-motorway-z14-outdoors=2, "
                 "valais-geneva-outdoors=2, switzerland-alps-z5-outdoors=1 (representative) | "
-                "switzerland-alps-z5-outdoors crop 1 [210,600,630,900] `debug/switzerland-diff.png` |"
+                "switzerland-alps-z5-outdoors crop 1 [210,600,630,900] `debug/switzerland-diff.png` | "
+                "11.8, 8.9, 1.9 | +9.0 |"
             ),
             markdown,
         )

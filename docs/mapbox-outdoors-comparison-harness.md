@@ -158,7 +158,7 @@ The delta context is shown only when the comparison-delta candidate summary matc
 
 Every crop report also includes a crop color metrics section with crop-local mean RGB values for the Mapbox GL and QGIS crops, plus QGIS-minus-Mapbox RGB/luminance deltas and the dominant color direction. Use these numbers as triage context when broad terrain, landcover, water, or tint differences dominate the hotspot sheet.
 The report also ranks the largest crop color deltas first, which keeps the worst tint and terrain outliers, crop boxes, diff crop paths, and dominant movement visible before scanning the full per-crop metrics table.
-It also groups crop movements by luminance direction and dominant RGB channel, including a representative crop for each group, so repeated tint families can be reviewed before trying a single global style lever.
+It also groups crop movements by luminance direction and dominant RGB channel, including a representative crop and its QGIS-minus-Mapbox RGB/luminance deltas for each group, so repeated tint families can be reviewed before trying a single global style lever.
 The same movement groups are stored in `visual-crops.json` under `crop_color_movement_groups`, including a representative crop for each group, for follow-up scripts that should not parse the Markdown summary.
 
 When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit.

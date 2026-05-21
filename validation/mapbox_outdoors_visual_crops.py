@@ -1808,6 +1808,33 @@ def _movement_group_representative_label(record: Mapping[str, object]) -> str:
     return " ".join(parts)
 
 
+def _movement_group_representative_rgb_label(record: Mapping[str, object]) -> str:
+    representative = record.get("representative_crop")
+    if not isinstance(representative, Mapping):
+        return "-"
+    values = representative.get("qgis_minus_mapbox_rgb")
+    if not isinstance(values, list):
+        return "-"
+    numeric_values: list[float] = []
+    for value in values[:3]:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return "-"
+        numeric_values.append(float(value))
+    if len(numeric_values) != 3:
+        return "-"
+    return ", ".join(f"{value:.1f}" for value in numeric_values)
+
+
+def _movement_group_representative_luminance_label(record: Mapping[str, object]) -> str:
+    representative = record.get("representative_crop")
+    if not isinstance(representative, Mapping):
+        return "-"
+    value = representative.get("qgis_minus_mapbox_luminance")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "-"
+    return f"{float(value):+.1f}"
+
+
 def _movement_group_camera_labels(record: Mapping[str, object]) -> list[str]:
     cameras = record.get("cameras")
     labels = _top_count_labels(cameras)
@@ -1835,6 +1862,8 @@ def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> lis
             f"{_crop_color_movement_group_record_float(record, 'max_abs_luminance_delta'):.1f}",
             _joined_summary_labels(_movement_group_camera_labels(record)),
             _movement_group_representative_label(record),
+            _movement_group_representative_rgb_label(record),
+            _movement_group_representative_luminance_label(record),
         ]
         for record in _crop_color_movement_group_records(report)[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]
     ]
@@ -1854,8 +1883,11 @@ def _summary_crop_color_movement_group_lines(report: Mapping[str, object]) -> li
             "tuning a single style rule."
         ),
         "",
-        "| Movement | Crops | Max abs RGB | Max abs luminance | Cameras | Representative crop |",
-        "| --- | ---: | ---: | ---: | --- | --- |",
+        (
+            "| Movement | Crops | Max abs RGB | Max abs luminance | Cameras | "
+            "Representative crop | Representative RGB | Representative luminance |"
+        ),
+        "| --- | ---: | ---: | ---: | --- | --- | ---: | ---: |",
     ]
     lines.extend(_markdown_table_row(row) for row in rows)
     return lines
