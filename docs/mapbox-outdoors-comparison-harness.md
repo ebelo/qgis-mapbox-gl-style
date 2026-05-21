@@ -186,6 +186,17 @@ python3 validation/mapbox_outdoors_visual_crops.py \
 
 The camera-focus table uses the comparison summary's camera zoom and Mapbox-style minzoom/maxzoom bands to keep global area-fill audit rows that are outside the cropped camera's inspection scale out of the per-camera sample list. It keeps every active layer ID visible even when the detailed sample-layer cells are capped. A follow-up active-layer detail table then lists every active area-fill candidate with compact controls and qfit simplification snippets, so unsampled layers such as pattern/tint rows can still be inspected from the crop report.
 
+To check whether a cropped area actually overlaps candidate source layers before changing rendering behavior, run the source/crop overlap diagnostic against a visual crop report:
+
+```bash
+export MAPBOX_ACCESS_TOKEN="***"
+python3 validation/mapbox_outdoors_source_crop_overlap.py \
+  --visual-crop-json debug/mapbox-outdoors-visual-crops/<timestamp>/visual-crops.json \
+  --camera zermatt-trails-z18-outdoors
+```
+
+The report fetches only the live vector tiles intersecting that camera's crop boxes, decodes the requested source layers, and counts features whose transformed lon/lat geometry bounds overlap each crop. Token-bearing tile URLs are intentionally omitted from the JSON and Markdown output. Use this when active style-audit rows such as landuse, contour, wetland, or tint-band candidates need source-layer evidence before becoming a styling slice.
+
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
 ## Style audit before tuning
