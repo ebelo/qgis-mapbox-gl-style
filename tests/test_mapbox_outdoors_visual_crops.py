@@ -620,6 +620,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 },
             )
             summary = paths.summary_path.read_text(encoding="utf-8")
+            self.assertIn("## Largest crop color deltas", summary)
+            self.assertIn(
+                "| chamonix-trails-z14-outdoors | 1 | -127.0, -127.0, -127.0 | -127.0 | 127.0 |",
+                summary,
+            )
             self.assertIn("## Crop color metrics", summary)
             self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 |", summary)
 
@@ -1314,6 +1319,97 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
         self.assertIn("debug/crops/crop-sheet.jpg", markdown)
+
+    def test_build_summary_markdown_ranks_largest_crop_color_deltas(self):
+        cameras = []
+        for index in range(1, 7):
+            cameras.append(
+                {
+                    "camera": f"camera-{index}",
+                    "status": "cropped",
+                    "crops": [
+                        {
+                            "index": 1,
+                            "box": [0, 0, 4, 4],
+                            "score": 255,
+                            "outputs": {},
+                            "color_metrics": {
+                                "delta": {
+                                    "mean_rgb": [index, 0.0, 0.0],
+                                    "luminance": 1.0,
+                                }
+                            },
+                        }
+                    ],
+                }
+            )
+
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": len(cameras),
+                "crop_count": len(cameras),
+                "cameras": cameras,
+            }
+        )
+
+        ranked_section = markdown.split("## Largest crop color deltas", 1)[1].split(
+            "## Crop color metrics",
+            1,
+        )[0]
+        self.assertIn("| camera-6 | 1 | 6.0, 0.0, 0.0 | +1.0 | 6.0 |", ranked_section)
+        self.assertIn("| camera-2 | 1 | 2.0, 0.0, 0.0 | +1.0 | 2.0 |", ranked_section)
+        self.assertLess(ranked_section.index("camera-6"), ranked_section.index("camera-2"))
+        self.assertNotIn("camera-1", ranked_section)
+        self.assertIn("| camera-1 | 1 | - | - | 1.0, 0.0, 0.0 | +1.0 |", markdown)
+
+    def test_build_summary_markdown_handles_malformed_color_delta_values(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 1,
+                "crop_count": 2,
+                "cameras": [
+                    {
+                        "camera": "bad-color",
+                        "status": "cropped",
+                        "crops": [
+                            {
+                                "index": 1,
+                                "color_metrics": {
+                                    "delta": {
+                                        "mean_rgb": ["bad", 2, 3],
+                                        "luminance": 9,
+                                    },
+                                },
+                            },
+                            {
+                                "index": 2,
+                                "color_metrics": {
+                                    "delta": {
+                                        "mean_rgb": ["bad"],
+                                        "luminance": "bad",
+                                    },
+                                },
+                            },
+                        ],
+                    },
+                ],
+            }
+        )
+
+        ranked_section = markdown.split("## Largest crop color deltas", 1)[1].split(
+            "## Crop color metrics",
+            1,
+        )[0]
+        self.assertIn("| bad-color | 1 | - | +9.0 | - |", ranked_section)
+        self.assertNotIn("| bad-color | 2 |", ranked_section)
 
     def test_build_summary_markdown_lists_path_pedestrian_focus_cues(self):
         markdown = build_summary_markdown(
