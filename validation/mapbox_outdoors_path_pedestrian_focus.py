@@ -1737,6 +1737,9 @@ def _input_artifact_markdown_lines(report: Mapping[str, object]) -> list[str]:
     source_style_json = input_artifacts.get("source_style_json")
     if isinstance(source_style_json, str) and source_style_json:
         lines.append(f"Source style input: `{source_style_json}`")
+    style_audit_json = input_artifacts.get("style_audit_json")
+    if isinstance(style_audit_json, str) and style_audit_json:
+        lines.append(f"Style audit source input: `{style_audit_json}`")
     comparison_summary_jsons = _string_list(input_artifacts.get("comparison_summary_jsons"))
     if comparison_summary_jsons:
         lines.append(f"Comparison summary inputs: `{', '.join(comparison_summary_jsons)}`")
@@ -2758,6 +2761,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Source Mapbox style JSON used to capture browser reference artifacts.",
     )
     parser.add_argument(
+        "--style-audit-json",
+        type=Path,
+        help=(
+            "Style-audit JSON whose audited source Mapbox layer records should be used "
+            "for source-vs-QGIS path/pedestrian stroke comparisons."
+        ),
+    )
+    parser.add_argument(
         "--qgis-style-json",
         action="append",
         default=[],
@@ -2808,6 +2819,17 @@ def _load_cli_json_list(parser: argparse.ArgumentParser, path: Path, *, label: s
     except ValueError as error:
         parser.error(str(error))
     raise AssertionError(ARGPARSE_EXIT_SENTINEL)
+
+
+def _load_source_style_from_audit(
+    parser: argparse.ArgumentParser,
+    path: Path,
+) -> dict[str, object]:
+    audit_report = _load_cli_json_object(parser, path, label="Style audit JSON")
+    layers = audit_report.get("layers")
+    if not isinstance(layers, list):
+        parser.error(f"Style audit JSON does not contain source layer records: {path}")
+    return {"version": 8, "layers": layers}
 
 
 def _comparison_inputs_from_cli_summary(
@@ -2878,11 +2900,14 @@ def main(argv: list[str] | None = None) -> int:
         args.road_features_json,
         label="Road features JSON",
     )
-    source_style = (
-        _load_cli_json_object(parser, args.source_style_json, label="Source style JSON")
-        if args.source_style_json is not None
-        else None
-    )
+    if args.source_style_json is not None and args.style_audit_json is not None:
+        parser.error("Use either --source-style-json or --style-audit-json, not both.")
+    if args.source_style_json is not None:
+        source_style = _load_cli_json_object(parser, args.source_style_json, label="Source style JSON")
+    elif args.style_audit_json is not None:
+        source_style = _load_source_style_from_audit(parser, args.style_audit_json)
+    else:
+        source_style = None
     qgis_style_paths_by_camera: dict[str, Path] = {}
     qgis_label_style_paths_by_camera: dict[str, Path] = {}
     visual_artifacts_by_camera: dict[str, dict[str, object]] = {}
@@ -2924,6 +2949,11 @@ def main(argv: list[str] | None = None) -> int:
             "source_style_json": (
                 _display_input_path(args.source_style_json)
                 if args.source_style_json is not None
+                else None
+            ),
+            "style_audit_json": (
+                _display_input_path(args.style_audit_json)
+                if args.style_audit_json is not None
                 else None
             ),
             "comparison_summary_jsons": [

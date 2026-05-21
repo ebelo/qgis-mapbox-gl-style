@@ -1831,6 +1831,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             input_artifacts={
                 "road_features_json": "debug/roads/road-features.json",
                 "source_style_json": "debug/source/mapbox-outdoors-v12.json",
+                "style_audit_json": "debug/style-audit/audit.json",
                 "comparison_summary_jsons": ["debug/comparison/summary.json"],
                 "comparison_summary_runs": [
                     {
@@ -1852,6 +1853,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         )
         self.assertIn("Road features input: `debug/roads/road-features.json`", markdown)
         self.assertIn("Source style input: `debug/source/mapbox-outdoors-v12.json`", markdown)
+        self.assertIn("Style audit source input: `debug/style-audit/audit.json`", markdown)
         self.assertIn("Comparison summary inputs: `debug/comparison/summary.json`", markdown)
         self.assertIn("Comparison summary runs:", markdown)
         self.assertIn(
@@ -1975,6 +1977,105 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                 ["chamonix-trails-z14-outdoors"],
             )
             self.assertEqual(report["qgis_label_style_camera_count"], 1)
+
+    def test_main_loads_source_style_from_style_audit_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            road_features_path = root / "road-features.json"
+            style_audit_path = root / "style-audit.json"
+            style_path = root / "qgis-preprocessed-style.json"
+            output_root = root / "out"
+            road_features_path.write_text(json.dumps(_road_feature_report()), encoding="utf-8")
+            style_audit_path.write_text(
+                json.dumps({"layers": _source_style()["layers"]}),
+                encoding="utf-8",
+            )
+            style_path.write_text(json.dumps(_qgis_preprocessed_style()), encoding="utf-8")
+
+            stdout = io.StringIO()
+            with patch(
+                "qfit.validation.mapbox_outdoors_path_pedestrian_focus.DEFAULT_OUTPUT_ROOT",
+                output_root,
+            ), redirect_stdout(stdout):
+                result = main(
+                    [
+                        "--road-features-json",
+                        str(road_features_path),
+                        "--style-audit-json",
+                        str(style_audit_path),
+                        "--qgis-style-json",
+                        f"chamonix-trails-z14-outdoors={style_path}",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            report_path = Path(stdout.getvalue().strip()).parent / "path-pedestrian-focus.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["source_style_camera_count"], 1)
+            self.assertEqual(report["source_style_input_count"], 1)
+            self.assertEqual(
+                report["input_artifacts"]["style_audit_json"],
+                str(style_audit_path.resolve()),
+            )
+            self.assertIsNone(report["input_artifacts"]["source_style_json"])
+            [camera] = report["cameras"]
+            self.assertEqual(
+                camera["source_path_pedestrian_visible_layer_ids"],
+                ["road-path"],
+            )
+
+    def test_main_rejects_style_audit_with_missing_layers(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            road_features_path = root / "road-features.json"
+            style_audit_path = root / "style-audit.json"
+            road_features_path.write_text(json.dumps(_road_feature_report()), encoding="utf-8")
+            style_audit_path.write_text(json.dumps({"summary": {}}), encoding="utf-8")
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--road-features-json",
+                        str(road_features_path),
+                        "--style-audit-json",
+                        str(style_audit_path),
+                    ]
+                )
+
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("Style audit JSON does not contain source layer records", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_main_rejects_source_style_and_style_audit_together(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            road_features_path = root / "road-features.json"
+            source_style_path = root / "source-style.json"
+            style_audit_path = root / "style-audit.json"
+            road_features_path.write_text(json.dumps(_road_feature_report()), encoding="utf-8")
+            source_style_path.write_text(json.dumps(_source_style()), encoding="utf-8")
+            style_audit_path.write_text(
+                json.dumps({"layers": _source_style()["layers"]}),
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "--road-features-json",
+                        str(road_features_path),
+                        "--source-style-json",
+                        str(source_style_path),
+                        "--style-audit-json",
+                        str(style_audit_path),
+                    ]
+                )
+
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("Use either --source-style-json or --style-audit-json", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_main_records_resolved_external_relative_input_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:

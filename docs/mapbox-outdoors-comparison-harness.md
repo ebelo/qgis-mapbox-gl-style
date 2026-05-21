@@ -307,6 +307,17 @@ debug/mapbox-outdoors-road-features/all-cameras/<UTC timestamp>/
 
 Use the aggregate table to compare candidate road/path feature counts across the z5-z18 camera matrix before selecting a rendering slice. Per-camera status and error columns keep the batch useful when one camera fails before tile-level diagnostics can be collected.
 
+To connect decoded road/path features with the source Mapbox style, QGIS-preprocessed style, and visual artifacts, build a path/pedestrian focus report from the road diagnostic, the matching comparison summary, and the latest style audit:
+
+```bash
+python3 validation/mapbox_outdoors_path_pedestrian_focus.py \
+  --road-features-json debug/mapbox-outdoors-road-features/all-cameras/<timestamp>/road-features.json \
+  --style-audit-json debug/mapbox-outdoors-style-audit/mapbox-outdoors-v12/<timestamp>/audit.json \
+  --comparison-summary-json debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/summary.json
+```
+
+Passing `--style-audit-json` uses the audit's source Mapbox layer records, which keeps source-vs-QGIS stroke and dash cues available without maintaining a separate downloaded style snapshot.
+
 ## PR notes
 
 For rendering-sensitive Mapbox vector-style changes, include a concise validation note such as:
