@@ -134,6 +134,37 @@ def parse_crop_size(value: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+def parse_manual_crop_box(value: str) -> tuple[str, tuple[int, int, int, int]]:
+    camera, separator, box_value = value.partition(":")
+    if not separator or not camera.strip():
+        raise argparse.ArgumentTypeError(
+            "Expected crop box CAMERA:LEFT,TOP,RIGHT,BOTTOM"
+        )
+    coordinates = box_value.split(",")
+    if len(coordinates) != 4:
+        raise argparse.ArgumentTypeError(
+            "Expected crop box CAMERA:LEFT,TOP,RIGHT,BOTTOM"
+        )
+    try:
+        left, top, right, bottom = (int(coordinate) for coordinate in coordinates)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Crop box coordinates must be integers") from exc
+    if min(left, top, right, bottom) < 0 or right <= left or bottom <= top:
+        raise argparse.ArgumentTypeError(
+            "Crop box coordinates must satisfy 0 <= left < right and 0 <= top < bottom"
+        )
+    return camera.strip(), (left, top, right, bottom)
+
+
+def _manual_crop_boxes_by_camera(
+    crop_boxes: Sequence[tuple[str, tuple[int, int, int, int]]],
+) -> dict[str, list[tuple[int, int, int, int]]]:
+    boxes_by_camera: dict[str, list[tuple[int, int, int, int]]] = {}
+    for camera, box in crop_boxes:
+        boxes_by_camera.setdefault(camera, []).append(box)
+    return boxes_by_camera
+
+
 def _axis_positions(*, image_length: int, crop_length: int, step: int) -> list[int]:
     max_start = max(0, image_length - crop_length)
     if max_start == 0:
@@ -269,6 +300,74 @@ def _write_crop_triplet(
         _crop_image(source_path=source_path, box=box, output_path=output_path, image_module=image_module)
         outputs[key] = output_path
     return outputs
+
+
+def _crop_box_score(
+    diff_path: Path,
+    box: tuple[int, int, int, int],
+    *,
+    image_module: Any,
+    image_stat_module: Any,
+) -> float:
+    with image_module.open(diff_path) as opened:
+        gray = opened.convert("L")
+        try:
+            return _diff_score(gray, box, image_stat_module)
+        finally:
+            gray.close()
+
+
+def _crop_records_from_boxes(
+    *,
+    camera_name: str,
+    artifacts: Mapping[str, object],
+    diff_path: Path,
+    paths: VisualCropPaths,
+    boxes: Sequence[tuple[int, int, int, int]],
+    selection: str,
+    starting_index: int,
+    image_module: Any,
+    image_stat_module: Any,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    crops: list[dict[str, object]] = []
+    contact_sheet_entries: list[dict[str, object]] = []
+    for offset, box in enumerate(boxes):
+        crop_index = starting_index + offset
+        outputs = _write_crop_triplet(
+            camera_name=camera_name,
+            crop_index=crop_index,
+            artifacts=artifacts,
+            box=box,
+            run_dir=paths.run_dir,
+            image_module=image_module,
+        )
+        color_metrics = _crop_color_metrics(
+            outputs=outputs,
+            image_module=image_module,
+            image_stat_module=image_stat_module,
+        )
+        crops.append(
+            {
+                "index": crop_index,
+                "box": list(box),
+                "score": _crop_box_score(
+                    diff_path,
+                    box,
+                    image_module=image_module,
+                    image_stat_module=image_stat_module,
+                ),
+                "selection": selection,
+                "outputs": _display_crop_outputs(outputs),
+                "color_metrics": color_metrics,
+            }
+        )
+        contact_sheet_entries.append(
+            {
+                "camera": f"{camera_name} crop {crop_index}",
+                "outputs": _contact_sheet_outputs(outputs),
+            }
+        )
+    return crops, contact_sheet_entries
 
 
 def _display_crop_outputs(outputs: Mapping[str, Path]) -> dict[str, str]:
@@ -496,6 +595,8 @@ def _path_pedestrian_focus_cues_by_camera(
                     "line_width_delta_mm",
                     "line_width_abs_delta_mm",
                     "line_width_ratio",
+                    "source_line_width_mm",
+                    "source_line_width_raw_mm",
                     "source_line_width_capped",
                 ),
             )
@@ -511,6 +612,8 @@ def _path_pedestrian_focus_cues_by_camera(
                     "line_width_delta_mm",
                     "line_width_abs_delta_mm",
                     "line_width_ratio",
+                    "source_line_width_mm",
+                    "source_line_width_raw_mm",
                     "source_line_width_capped",
                 ),
             )
@@ -988,6 +1091,23 @@ def _camera_row_with_focus(
     return camera_row
 
 
+def _applied_manual_crop_boxes(camera_rows: Sequence[Mapping[str, object]]) -> dict[str, list[object]]:
+    applied_boxes: dict[str, list[object]] = {}
+    for camera_row in camera_rows:
+        camera_name = camera_row.get("camera")
+        crops = camera_row.get("crops")
+        if not isinstance(camera_name, str) or not isinstance(crops, list):
+            continue
+        boxes = [
+            crop.get("box")
+            for crop in crops
+            if isinstance(crop, Mapping) and crop.get("selection") == "manual"
+        ]
+        if boxes:
+            applied_boxes[camera_name] = boxes
+    return applied_boxes
+
+
 def _comparison_context_from_artifacts(artifacts: Mapping[str, object]) -> dict[str, object]:
     return {
         key: value
@@ -1159,52 +1279,46 @@ def _hotspot_crop_rows(
     paths: VisualCropPaths,
     crop_size: tuple[int, int],
     crops_per_camera: int,
+    manual_crop_boxes: Sequence[tuple[int, int, int, int]] = (),
     image_module: Any,
     image_stat_module: Any,
 ) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
-    crops: list[dict[str, object]] = []
-    contact_sheet_entries: list[dict[str, object]] = []
-    for crop_index, crop in enumerate(
-        find_hotspot_crop_boxes(
+    hotspot_boxes = [
+        crop["box"]
+        for crop in find_hotspot_crop_boxes(
             diff_path,
             crop_size=crop_size,
             crop_count=crops_per_camera,
             image_module=image_module,
             image_stat_module=image_stat_module,
-        ),
-        start=1,
-    ):
-        box = crop["box"]
-        if not isinstance(box, tuple):
-            continue
-        outputs = _write_crop_triplet(
-            camera_name=camera_name,
-            crop_index=crop_index,
-            artifacts=artifacts,
-            box=box,
-            run_dir=paths.run_dir,
-            image_module=image_module,
         )
-        color_metrics = _crop_color_metrics(
-            outputs=outputs,
+        if isinstance(crop["box"], tuple)
+    ]
+    crops, contact_sheet_entries = _crop_records_from_boxes(
+        camera_name=camera_name,
+        artifacts=artifacts,
+        diff_path=diff_path,
+        paths=paths,
+        boxes=hotspot_boxes,
+        selection="hotspot",
+        starting_index=1,
+        image_module=image_module,
+        image_stat_module=image_stat_module,
+    )
+    if manual_crop_boxes:
+        manual_crops, manual_contact_sheet_entries = _crop_records_from_boxes(
+            camera_name=camera_name,
+            artifacts=artifacts,
+            diff_path=diff_path,
+            paths=paths,
+            boxes=manual_crop_boxes,
+            selection="manual",
+            starting_index=len(crops) + 1,
             image_module=image_module,
             image_stat_module=image_stat_module,
         )
-        crops.append(
-            {
-                "index": crop_index,
-                "box": list(box),
-                "score": crop["score"],
-                "outputs": _display_crop_outputs(outputs),
-                "color_metrics": color_metrics,
-            }
-        )
-        contact_sheet_entries.append(
-            {
-                "camera": f"{camera_name} crop {crop_index}",
-                "outputs": _contact_sheet_outputs(outputs),
-            }
-        )
+        crops.extend(manual_crops)
+        contact_sheet_entries.extend(manual_contact_sheet_entries)
     status = "cropped" if crops else "no_hotspot_crops"
     return status, crops, contact_sheet_entries
 
@@ -1216,6 +1330,7 @@ def _camera_visual_crop_rows(
     paths: VisualCropPaths,
     crop_size: tuple[int, int],
     crops_per_camera: int,
+    manual_crop_boxes: Sequence[tuple[int, int, int, int]] = (),
     image_module: Any,
     image_stat_module: Any,
 ) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
@@ -1231,6 +1346,7 @@ def _camera_visual_crop_rows(
         paths=paths,
         crop_size=crop_size,
         crops_per_camera=crops_per_camera,
+        manual_crop_boxes=manual_crop_boxes,
         image_module=image_module,
         image_stat_module=image_stat_module,
     )
@@ -1272,6 +1388,9 @@ def generate_visual_crop_report(
     focus_cue_cameras_only: bool = False,
     crop_size: tuple[int, int] = DEFAULT_CROP_SIZE,
     crops_per_camera: int = DEFAULT_CROPS_PER_CAMERA,
+    manual_crop_boxes_by_camera: (
+        Mapping[str, Sequence[tuple[int, int, int, int]]] | None
+    ) = None,
     generated_at: dt.datetime | None = None,
     trusted_output_root: Path | None = None,
     image_module: Any | None = None,
@@ -1296,6 +1415,7 @@ def generate_visual_crop_report(
         focus_cue_cameras_only=focus_cue_cameras_only,
     )
     focus_camera_names = set(focus_context.cues_by_camera) if focus_cue_cameras_only else None
+    manual_crop_boxes = manual_crop_boxes_by_camera or {}
     camera_rows = []
     contact_sheet_entries: list[dict[str, object]] = []
     for camera_name in _selected_camera_names(
@@ -1309,6 +1429,7 @@ def generate_visual_crop_report(
             paths=paths,
             crop_size=crop_size,
             crops_per_camera=crops_per_camera,
+            manual_crop_boxes=manual_crop_boxes.get(camera_name, ()),
             image_module=image_module,
             image_stat_module=image_stat_module,
         )
@@ -1341,6 +1462,9 @@ def generate_visual_crop_report(
         "contact_sheet": _display_input_path(contact_sheet) if contact_sheet is not None else None,
         "cameras": camera_rows,
     }
+    applied_manual_crop_boxes = _applied_manual_crop_boxes(camera_rows)
+    if applied_manual_crop_boxes:
+        report["manual_crop_boxes"] = applied_manual_crop_boxes
     crop_color_movement_groups = _crop_color_movement_group_records(report)
     if crop_color_movement_groups:
         report["crop_color_movement_groups"] = crop_color_movement_groups
@@ -1415,6 +1539,12 @@ def _stroke_focus_cue_summary(cue: Mapping[str, object]) -> str:
         parts.append(candidate_summary)
     if cue.get("source_line_width_capped") is True:
         parts.append("source-capped")
+        source_width = cue.get("source_line_width_mm")
+        if source_width is not None:
+            parts.append(f"cap={_format_focus_number(source_width)}mm")
+        source_raw_width = cue.get("source_line_width_raw_mm")
+        if source_raw_width is not None:
+            parts.append(f"raw={_format_focus_number(source_raw_width)}mm")
     return " ".join(parts)
 
 
@@ -1456,6 +1586,27 @@ def _summary_crop_size_label(report: Mapping[str, object]) -> str:
     return "-"
 
 
+def _manual_crop_boxes_label(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return ""
+    labels = []
+    for camera, boxes in sorted(value.items()):
+        if not isinstance(camera, str) or not isinstance(boxes, Sequence):
+            continue
+        box_labels = [
+            f"[{','.join(str(coordinate) for coordinate in box)}]"
+            for box in boxes
+            if (
+                isinstance(box, Sequence)
+                and not isinstance(box, (str, bytes))
+                and len(box) == 4
+            )
+        ]
+        if box_labels:
+            labels.append(f"{camera}: {', '.join(box_labels)}")
+    return "; ".join(labels)
+
+
 def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
     lines = [
         "# Mapbox Outdoors visual crop report",
@@ -1469,6 +1620,9 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
     ]
     if report.get("focus_cue_cameras_only") is True:
         lines.append("Camera filter: `candidate-backed path/pedestrian focus cues`")
+    manual_crop_boxes = _manual_crop_boxes_label(report.get("manual_crop_boxes"))
+    if manual_crop_boxes:
+        lines.append(f"Manual crop boxes: `{manual_crop_boxes}`")
     if report.get("contact_sheet"):
         lines.append(f"Crop contact sheet: `{report.get('contact_sheet')}`")
     comparison_summary_run = _comparison_summary_run_markdown(report.get("comparison_summary_run"))
@@ -1538,13 +1692,16 @@ def _summary_table_intro_lines(report: Mapping[str, object]) -> list[str]:
     if _include_comparison_delta_columns(report):
         headers.extend(["Mean movement", "RMS movement"])
         alignments.extend(["---:", "---:"])
-    headers.extend(["Crop status", "Crop", "Box", "Score", "Mapbox GL", "QGIS render", "Diff"])
-    alignments.extend(["---", "---:", "---", "---:", "---", "---", "---"])
+    headers.extend(
+        ["Crop status", "Crop", "Selection", "Box", "Score", "Mapbox GL", "QGIS render", "Diff"]
+    )
+    alignments.extend(["---", "---:", "---", "---", "---:", "---", "---", "---"])
     return [
         "",
         (
             "Crops are selected from the highest-delta windows in the comparison diff image, "
-            "then applied to the matching Mapbox GL, QGIS, and diff artifacts. "
+            "plus any explicit manual crop boxes, then applied to the matching Mapbox GL, QGIS, "
+            "and diff artifacts. "
             "Comparison metric columns come from the same all-camera comparison summary; "
             "movement columns come from the optional comparison-delta report."
         ),
@@ -1605,6 +1762,7 @@ def _summary_crop_row(
         [
             camera.get("status"),
             crop.get("index"),
+            crop.get("selection"),
             crop.get("box"),
             f"{float(crop.get('score', 0.0)):.0f}",
             f"`{output_paths.get('browser_reference')}`",
@@ -1638,7 +1796,7 @@ def _summary_camera_rows(
                     _comparison_delta_context_cell(camera, "rms_delta"),
                 ]
             )
-        cells.extend([camera.get("status"), "-", "-", "-", "-", "-", "-"])
+        cells.extend([camera.get("status"), "-", "-", "-", "-", "-", "-", "-"])
         return [
             _markdown_table_row(cells)
         ]
@@ -2620,6 +2778,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Number of non-overlapping high-delta crops to write per camera.",
     )
+    parser.add_argument(
+        "--crop-box",
+        action="append",
+        default=[],
+        type=parse_manual_crop_box,
+        help=(
+            "Explicit crop box as CAMERA:LEFT,TOP,RIGHT,BOTTOM. May be repeated; "
+            "use --crops-per-camera 0 for manual-only crop reports."
+        ),
+    )
     return parser
 
 
@@ -2638,8 +2806,10 @@ def _load_cli_json_object(parser: argparse.ArgumentParser, path: Path, *, label:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.crops_per_camera <= 0:
-        parser.error("--crops-per-camera must be greater than zero")
+    if args.crops_per_camera < 0:
+        parser.error("--crops-per-camera must be zero or greater")
+    if args.crops_per_camera == 0 and not args.crop_box:
+        parser.error("--crops-per-camera must be greater than zero unless --crop-box is supplied")
     if args.focus_cue_cameras and args.path_pedestrian_focus_json is None:
         parser.error("--focus-cue-cameras requires --path-pedestrian-focus-json")
     comparison_summary = _load_cli_json_object(
@@ -2684,6 +2854,7 @@ def main(argv: list[str] | None = None) -> int:
             focus_cue_cameras_only=args.focus_cue_cameras,
             crop_size=args.crop_size,
             crops_per_camera=args.crops_per_camera,
+            manual_crop_boxes_by_camera=_manual_crop_boxes_by_camera(args.crop_box),
         )
         if comparison_delta_report is not None and args.comparison_delta_json is not None:
             report = annotate_visual_crop_report_with_comparison_delta(

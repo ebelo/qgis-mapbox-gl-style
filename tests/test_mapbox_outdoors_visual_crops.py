@@ -24,6 +24,7 @@ from qfit.validation.mapbox_outdoors_visual_crops import (
     generate_visual_crop_report,
     main,
     parse_crop_size,
+    parse_manual_crop_box,
     write_report,
 )
 
@@ -480,6 +481,24 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         with self.assertRaises(argparse.ArgumentTypeError):
             parse_crop_size("320-by-240")
 
+    def test_parse_manual_crop_box_requires_camera_and_valid_coordinates(self):
+        self.assertEqual(
+            parse_manual_crop_box("zermatt-trails-z18-outdoors:8,9,320,240"),
+            ("zermatt-trails-z18-outdoors", (8, 9, 320, 240)),
+        )
+
+        invalid_values = [
+            "8,9,320,240",
+            "zermatt-trails-z18-outdoors:8,9,320",
+            "zermatt-trails-z18-outdoors:8,top,320,240",
+            "zermatt-trails-z18-outdoors:-1,9,320,240",
+            "zermatt-trails-z18-outdoors:8,9,8,240",
+            "zermatt-trails-z18-outdoors:8,9,320,9",
+        ]
+        for value in invalid_values:
+            with self.subTest(value=value), self.assertRaises(argparse.ArgumentTypeError):
+                parse_manual_crop_box(value)
+
     def test_three_channel_color_values_handles_short_stat_outputs(self):
         self.assertEqual(_three_channel_color_values([]), [0.0, 0.0, 0.0])
         self.assertEqual(_three_channel_color_values([5]), [5.0, 5.0, 5.0])
@@ -708,6 +727,86 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
             self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 | darker; red -127.0 |", summary)
 
+    def test_generate_visual_crop_report_writes_manual_crop_boxes(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            with patch(
+                "qfit.validation.mapbox_outdoors_visual_crops.build_all_cameras_contact_sheet",
+                side_effect=_fake_contact_sheet,
+            ):
+                report = generate_visual_crop_report(
+                    comparison_summary,
+                    comparison_summary_path=summary_path,
+                    paths=paths,
+                    crop_size=(4, 4),
+                    crops_per_camera=0,
+                    manual_crop_boxes_by_camera={
+                        "chamonix-trails-z14-outdoors": [(8, 8, 12, 12)]
+                    },
+                    trusted_output_root=root / "debug",
+                    image_module=image_module,
+                    image_stat_module=image_stat_module,
+                )
+            write_report(report, paths, trusted_output_root=root / "debug")
+
+            self.assertEqual(report["crop_count"], 1)
+            self.assertEqual(
+                report["manual_crop_boxes"],
+                {"chamonix-trails-z14-outdoors": [[8, 8, 12, 12]]},
+            )
+            camera = report["cameras"][0]
+            crop = camera["crops"][0]
+            self.assertEqual(camera["status"], "cropped")
+            self.assertEqual(crop["selection"], "manual")
+            self.assertEqual(crop["box"], [8, 8, 12, 12])
+            self.assertEqual(crop["score"], 255.0)
+            for path_text in crop["outputs"].values():
+                self.assertTrue(Path(path_text).exists())
+            self.assertTrue(paths.contact_sheet_path.exists())
+
+            summary = paths.summary_path.read_text(encoding="utf-8")
+            self.assertIn(
+                "Manual crop boxes: `chamonix-trails-z14-outdoors: [8,8,12,12]`",
+                summary,
+            )
+            self.assertIn(
+                "| chamonix-trails-z14-outdoors | passed | metrics_available |",
+                summary,
+            )
+            self.assertIn("| cropped | 1 | manual | [8,8,12,12] | 255 |", summary)
+
+    def test_generate_visual_crop_report_omits_unapplied_manual_crop_boxes(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                camera_names=["chamonix-trails-z14-outdoors"],
+                crop_size=(4, 4),
+                crops_per_camera=0,
+                manual_crop_boxes_by_camera={
+                    "misspelled-camera": [(8, 8, 12, 12)],
+                    "zermatt-trails-z18-outdoors": [(1, 1, 5, 5)],
+                },
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertNotIn("manual_crop_boxes", report)
+            self.assertEqual(report["crop_count"], 0)
+            self.assertEqual(report["cameras"][0]["status"], "no_hotspot_crops")
+            self.assertNotIn("Manual crop boxes:", build_summary_markdown(report))
+
     def test_generate_visual_crop_report_marks_missing_required_artifacts(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -814,23 +913,23 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                             "road-steps->road-steps delta=0mm ratio=1 candidates=3",
                             (
                                 "road-pedestrian->road-pedestrian-z18-plus delta=0mm "
-                                "ratio=1 candidates=191 source-capped"
+                                "ratio=1 candidates=191 source-capped cap=3mm raw=3.175mm"
                             ),
                         ],
                         "zero_candidate_stroke_samples": [
                             (
                                 "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
-                                "candidates=0 source-capped"
+                                "candidates=0 source-capped cap=1.058mm raw=1.323mm"
                             )
                         ],
                         "source_capped_stroke_samples": [
                             (
                                 "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
-                                "candidates=0 source-capped"
+                                "candidates=0 source-capped cap=1.058mm raw=1.323mm"
                             ),
                             (
                                 "road-pedestrian->road-pedestrian-z18-plus delta=0mm "
-                                "ratio=1 candidates=191 source-capped"
+                                "ratio=1 candidates=191 source-capped cap=3mm raw=3.175mm"
                             ),
                         ],
                         "zero_candidate_dash_samples": [
@@ -847,6 +946,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
             self.assertEqual(source_capped_cues[0]["source_layer_id"], "road-pedestrian")
             self.assertEqual(source_capped_cues[0]["candidate_types"], ["pedestrian=191"])
+            self.assertEqual(source_capped_cues[0]["source_line_width_mm"], 3.0)
+            self.assertEqual(source_capped_cues[0]["source_line_width_raw_mm"], 3.175)
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
 
@@ -1920,7 +2021,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         "source_capped_stroke_samples": [
                             (
                                 "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
-                                "candidates=0 source-capped"
+                                "candidates=0 source-capped cap=1.058mm raw=1.323mm"
                             )
                         ],
                         "zero_candidate_dash_samples": [
@@ -1961,6 +2062,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                     "candidate_types": ["pedestrian=191"],
                                     "line_width_delta_mm": 0.0,
                                     "line_width_ratio": 1.0,
+                                    "source_line_width_mm": 3.0,
+                                    "source_line_width_raw_mm": 3.175,
                                     "source_line_width_capped": True,
                                 }
                             ],
@@ -2020,7 +2123,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             "road-pedestrian->road-pedestrian-z18-plus delta=0mm ratio=1",
             markdown,
         )
-        self.assertIn("candidates=191 (pedestrian=191) source-capped", markdown)
+        self.assertIn(
+            "candidates=191 (pedestrian=191) source-capped cap=3mm",
+            markdown,
+        )
         self.assertIn("candidate_types=trail=69", markdown)
         self.assertNotIn("candidates=None", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
@@ -2180,7 +2286,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
 
         self.assertIn("Crop size: `-`", markdown)
         self.assertIn(
-            "| zermatt-piste-z17-outdoors | - | - | - | - | - | missing_diff | - | - | - | - | - | - |",
+            "| zermatt-piste-z17-outdoors | - | - | - | - | - | missing_diff | - | - | - | - | - | - | - |",
             markdown,
         )
 
@@ -2273,6 +2379,48 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("path_pedestrian_focus", report["cameras"][0])
             self.assertTrue((report_path.parent / "crop-sheet.jpg").exists())
 
+    def test_main_allows_manual_only_crop_boxes(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            summary_path.write_text(json.dumps(comparison_summary), encoding="utf-8")
+            output_root = root / "debug"
+            stdout = io.StringIO()
+
+            with patch(
+                "qfit.validation.mapbox_outdoors_visual_crops.DEFAULT_OUTPUT_ROOT",
+                output_root,
+            ), patch(
+                "qfit.validation.mapbox_outdoors_visual_crops._image_modules",
+                return_value=(image_module, image_stat_module),
+            ), patch(
+                "qfit.validation.mapbox_outdoors_visual_crops.build_all_cameras_contact_sheet",
+                side_effect=_fake_contact_sheet,
+            ), contextlib.redirect_stdout(stdout):
+                result = main(
+                    [
+                        "--comparison-summary-json",
+                        str(summary_path),
+                        "--camera",
+                        "chamonix-trails-z14-outdoors",
+                        "--crops-per-camera",
+                        "0",
+                        "--crop-box",
+                        "chamonix-trails-z14-outdoors:8,8,12,12",
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            report_path = Path(stdout.getvalue().strip()).parent / "visual-crops.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["crop_count"], 1)
+            self.assertEqual(report["cameras"][0]["crops"][0]["selection"], "manual")
+            self.assertEqual(
+                report["manual_crop_boxes"],
+                {"chamonix-trails-z14-outdoors": [[8, 8, 12, 12]]},
+            )
+
     def test_main_reports_bad_crop_count_without_traceback(self):
         stderr = io.StringIO()
 
@@ -2280,7 +2428,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             main(["--comparison-summary-json", "/missing/summary.json", "--crops-per-camera", "0"])
 
         self.assertEqual(raised.exception.code, 2)
-        self.assertIn("--crops-per-camera must be greater than zero", stderr.getvalue())
+        self.assertIn(
+            "--crops-per-camera must be greater than zero unless --crop-box is supplied",
+            stderr.getvalue(),
+        )
         self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_main_requires_focus_report_for_focus_cue_camera_filter(self):
