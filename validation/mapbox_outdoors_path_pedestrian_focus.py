@@ -35,9 +35,15 @@ DEFAULT_ROAD_FEATURES_PATH = (
     / "road-features.json"
 )
 PATH_PEDESTRIAN_LAYER_ID_MARKERS = (
+    "bridge-path",
+    "bridge-pedestrian",
+    "bridge-steps",
     "road-path",
     "road-pedestrian",
     "road-steps",
+    "tunnel-path",
+    "tunnel-pedestrian",
+    "tunnel-steps",
 )
 PATH_PEDESTRIAN_STYLE_TYPES = {"fill", "line"}
 PATH_PEDESTRIAN_LABEL_STYLE_IDS = {
@@ -71,6 +77,32 @@ PATH_PEDESTRIAN_STROKE_DELTA_KEYS = (
     "line-dasharray_match",
     "line-color_match",
     "line-opacity_delta",
+)
+PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES = ("road", "bridge", "tunnel")
+PATH_PEDESTRIAN_SOURCE_STRUCTURES_BY_PREFIX = {
+    "bridge": "bridge",
+    "tunnel": "tunnel",
+}
+PATH_PEDESTRIAN_PATH_SOURCE_LAYER_IDS = frozenset(
+    f"{prefix}-{suffix}"
+    for prefix in PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES
+    for suffix in ("path", "path-bg")
+)
+PATH_PEDESTRIAN_PATH_TRAIL_SOURCE_LAYER_IDS = frozenset(
+    f"{prefix}-path-trail" for prefix in PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES
+)
+PATH_PEDESTRIAN_PATH_CYCLEWAY_PISTE_SOURCE_LAYER_IDS = frozenset(
+    f"{prefix}-path-cycleway-piste" for prefix in PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES
+)
+PATH_PEDESTRIAN_PEDESTRIAN_SOURCE_LAYER_IDS = frozenset(
+    f"{prefix}-{suffix}"
+    for prefix in PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES
+    for suffix in ("pedestrian", "pedestrian-case")
+)
+PATH_PEDESTRIAN_STEP_SOURCE_LAYER_IDS = frozenset(
+    f"{prefix}-{suffix}"
+    for prefix in PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES
+    for suffix in ("steps", "steps-bg")
 )
 PATH_PEDESTRIAN_TRAIL_TYPES = frozenset({"hiking", "mountain_bike", "trail"})
 PATH_PEDESTRIAN_CYCLEWAY_PISTE_TYPES = frozenset({"cycleway", "piste"})
@@ -1089,9 +1121,9 @@ def _candidate_count_map(value: object) -> dict[str, int]:
 
 def _filtered_candidate_counts(value: object, allowed_types: frozenset[str]) -> dict[str, int]:
     return {
-        path_type: count
-        for path_type, count in _candidate_count_map(value).items()
-        if path_type in allowed_types
+        candidate_type: count
+        for candidate_type, count in _candidate_count_map(value).items()
+        if candidate_type in allowed_types
     }
 
 
@@ -1108,35 +1140,83 @@ def _candidate_count_summary(
     return summary
 
 
+def _source_layer_structure(source_layer_id: str) -> str | None:
+    prefix, _separator, _suffix = source_layer_id.partition("-")
+    return PATH_PEDESTRIAN_SOURCE_STRUCTURES_BY_PREFIX.get(prefix)
+
+
+def _structure_candidate_count_summary(
+    camera: Mapping[str, object],
+    source_layer_id: str,
+    structure_count_key: str,
+) -> dict[str, object] | None:
+    structure = _source_layer_structure(source_layer_id)
+    if structure is None:
+        return None
+    return _candidate_count_summary(
+        _filtered_candidate_counts(camera.get(structure_count_key), frozenset({structure}))
+    )
+
+
 def _source_layer_decoded_candidate_summary(
     camera: Mapping[str, object],
     source_layer_id: str,
 ) -> dict[str, object]:
-    if source_layer_id in {"road-pedestrian", "road-pedestrian-case"}:
+    if source_layer_id in PATH_PEDESTRIAN_PEDESTRIAN_SOURCE_LAYER_IDS:
+        if (summary := _structure_candidate_count_summary(
+            camera,
+            source_layer_id,
+            "pedestrian_line_structure_counts",
+        )) is not None:
+            return summary
         return _candidate_count_summary(
             _candidate_count_map(camera.get("pedestrian_line_type_counts")),
             total_count=_candidate_count_value(camera.get("pedestrian_line_count")),
         )
-    if source_layer_id in {"road-steps", "road-steps-bg"}:
+    if source_layer_id in PATH_PEDESTRIAN_STEP_SOURCE_LAYER_IDS:
+        if (summary := _structure_candidate_count_summary(
+            camera,
+            source_layer_id,
+            "step_line_structure_counts",
+        )) is not None:
+            return summary
         return _candidate_count_summary(
             _candidate_count_map(camera.get("step_line_structure_counts")),
             total_count=_candidate_count_value(camera.get("step_line_count")),
         )
-    if source_layer_id == "road-path-trail":
+    if source_layer_id in PATH_PEDESTRIAN_PATH_TRAIL_SOURCE_LAYER_IDS:
+        if (summary := _structure_candidate_count_summary(
+            camera,
+            source_layer_id,
+            "path_line_structure_counts",
+        )) is not None:
+            return summary
         return _candidate_count_summary(
             _filtered_candidate_counts(
                 camera.get("path_line_type_counts"),
                 PATH_PEDESTRIAN_TRAIL_TYPES,
             )
         )
-    if source_layer_id == "road-path-cycleway-piste":
+    if source_layer_id in PATH_PEDESTRIAN_PATH_CYCLEWAY_PISTE_SOURCE_LAYER_IDS:
+        if (summary := _structure_candidate_count_summary(
+            camera,
+            source_layer_id,
+            "path_line_structure_counts",
+        )) is not None:
+            return summary
         return _candidate_count_summary(
             _filtered_candidate_counts(
                 camera.get("path_line_type_counts"),
                 PATH_PEDESTRIAN_CYCLEWAY_PISTE_TYPES,
             )
         )
-    if source_layer_id in {"road-path", "road-path-bg"}:
+    if source_layer_id in PATH_PEDESTRIAN_PATH_SOURCE_LAYER_IDS:
+        if (summary := _structure_candidate_count_summary(
+            camera,
+            source_layer_id,
+            "path_line_structure_counts",
+        )) is not None:
+            return summary
         return _candidate_count_summary(
             _candidate_count_map(camera.get("path_line_type_counts")),
             total_count=_candidate_count_value(camera.get("path_line_count")),
@@ -1438,7 +1518,9 @@ def _camera_focus_row(
         "path_line_count": camera_report.get("path_line_candidate_count", 0),
         "step_line_count": camera_report.get("step_line_candidate_count", 0),
         "pedestrian_line_type_counts": _candidate_count_map(camera_report.get("pedestrian_line_type_counts")),
+        "pedestrian_line_structure_counts": _candidate_count_map(camera_report.get("pedestrian_line_structure_counts")),
         "path_line_type_counts": _candidate_count_map(camera_report.get("path_line_type_counts")),
+        "path_line_structure_counts": _candidate_count_map(camera_report.get("path_line_structure_counts")),
         "step_line_structure_counts": _candidate_count_map(camera_report.get("step_line_structure_counts")),
         "top_pedestrian_line_types": _top_count_labels(camera_report.get("pedestrian_line_type_counts")),
         "top_path_line_types": _top_count_labels(camera_report.get("path_line_type_counts")),
@@ -1959,8 +2041,14 @@ def _stroke_delta_sort_text(value: object) -> str:
     return str(value) if value else ""
 
 
-def _stroke_delta_sort_key(row: Mapping[str, object]) -> tuple[float, str, str, str]:
+def _stroke_delta_decoded_candidate_count(row: Mapping[str, object]) -> int:
+    return _candidate_count_value(row.get("decoded_candidate_count"))
+
+
+def _stroke_delta_sort_key(row: Mapping[str, object]) -> tuple[int, float, str, str, str]:
+    decoded_candidate_count = _stroke_delta_decoded_candidate_count(row)
     return (
+        0 if decoded_candidate_count > 0 else 1,
         -float(row["line_width_abs_delta_mm"]),
         _stroke_delta_sort_text(row.get("camera")),
         _stroke_delta_sort_text(row.get("source_layer_id")),
@@ -1992,8 +2080,9 @@ def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]
                 "excluding qfit-only auxiliary helper strokes such as pale casing underlays."
             ),
             (
-                "Positive deltas mean QGIS is wider than the sampled source stroke; negative deltas mean "
-                "QGIS is narrower. Use this as a priority signal, not an automatic styling change."
+                "Rows with decoded candidates sort ahead of zero-candidate rows; within each group, "
+                "positive deltas mean QGIS is wider than the sampled source stroke and negative deltas "
+                "mean QGIS is narrower. Use this as a priority signal, not an automatic styling change."
             ),
             "",
             "| Camera | Source layer | QGIS layer | Decoded candidates | Candidate types | Delta mm | Abs delta mm | Ratio |",
