@@ -156,7 +156,8 @@ python3 validation/mapbox_outdoors_visual_crops.py \
 
 The delta context is shown only when the comparison-delta candidate summary matches the crop report's comparison summary, which keeps stale probe movement from being mixed into a newer visual crop sheet.
 
-When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit so the crop report includes the global terrain/landcover and airport/special-landuse candidate counts and sample layers:
+When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit.
+The crop report includes the global terrain/landcover and airport/special-landuse candidate counts, sample layers, and compact qfit simplification snippets for sampled controls:
 
 ```bash
 python3 validation/mapbox_outdoors_visual_crops.py \

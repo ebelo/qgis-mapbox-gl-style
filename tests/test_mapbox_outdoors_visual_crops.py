@@ -295,6 +295,31 @@ def _style_audit_report():
     return {
         "layers": [
             {
+                "id": "landcover",
+                "qfit_simplifies": [
+                    {
+                        "property": "paint.fill-color",
+                        "from": (
+                            '["match",["get","class"],"wood",'
+                            '"hsla(103,50%,60%,0.8)","hsl(98,48%,67%)"]'
+                        ),
+                        "to": '"hsl(98,48%,67%)"',
+                    },
+                    {
+                        "property": "paint.fill-opacity",
+                        "from": (
+                            '["interpolate",["exponential",1.5],["zoom"],8,0.8,12,0]'
+                        ),
+                        "to": "0.8",
+                    },
+                    {
+                        "property": "layout.visibility",
+                        "from": '"visible"',
+                        "to": '"none"',
+                    },
+                ],
+            },
+            {
                 "id": "contour",
                 "qgis_converter_warnings": {
                     "by_message": [{"count": 1, "message": "Example contour warning"}],
@@ -651,6 +676,23 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "zoom_band": "z0-z12",
                     "filter_operator_signature": "all, get, match",
                     "control_properties": ["filter", "paint.fill-color", "paint.fill-opacity"],
+                    "qfit_simplifications": [
+                        {
+                            "property": "paint.fill-color",
+                            "from": (
+                                '["match",["get","class"],"wood",'
+                                '"hsla(103,50%,60%,0.8)","hsl(98,48%,67%)"]'
+                            ),
+                            "to": '"hsl(98,48%,67%)"',
+                        },
+                        {
+                            "property": "paint.fill-opacity",
+                            "from": (
+                                '["interpolate",["exponential",1.5],["zoom"],8,0.8,12,0]'
+                            ),
+                            "to": "0.8",
+                        },
+                    ],
                     "qfit_simplified_properties": ["paint.fill-color", "paint.fill-opacity"],
                     "qgis_dependent_properties": ["filter"],
                 },
@@ -662,9 +704,17 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("landuse-other-z10-plus-airport", markdown)
             self.assertIn(
                 "landcover (landcover/fill; controls=filter, paint.fill-color, "
-                "paint.fill-opacity; qfit=paint.fill-color, paint.fill-opacity; qgis=filter)",
+                "paint.fill-opacity; qfit=paint.fill-color, paint.fill-opacity; "
+                "simplifies=paint.fill-color",
                 markdown,
             )
+            self.assertIn(
+                'simplifies=paint.fill-color: ["match",["get","class"],"wood",'
+                '"hsla(103,50%,60%,0.8)","hsl(98,48%,67%)"] -> "hsl(98,48%,67%)"',
+                markdown,
+            )
+            self.assertIn(r" \| paint.fill-opacity:", markdown)
+            self.assertNotIn("layout.visibility", markdown)
             self.assertIn("unknown-layer (landcover/fill)", markdown)
             self.assertIn("qgis-warnings=Example contour warning", markdown)
             self.assertNotIn("None (", markdown)
