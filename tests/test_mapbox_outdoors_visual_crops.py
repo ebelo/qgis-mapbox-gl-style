@@ -652,6 +652,11 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("Terrain/landcover", markdown)
             self.assertIn("landcover=1", markdown)
             self.assertIn("landuse-other-z10-plus-airport", markdown)
+            self.assertIn(
+                "landcover (landcover/fill; controls=filter, paint.fill-color, "
+                "paint.fill-opacity; qfit=paint.fill-color, paint.fill-opacity; qgis=filter)",
+                markdown,
+            )
             self.assertIn("unknown-layer (landcover/fill)", markdown)
             self.assertNotIn("None (", markdown)
 

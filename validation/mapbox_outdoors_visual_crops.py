@@ -1275,6 +1275,12 @@ def _candidate_sample_label(candidate: Mapping[str, object]) -> str:
         details.append(f"{source_layer}/{layer_type}")
     if controls:
         details.append(f"controls={', '.join(controls[:4])}")
+    qfit_simplified = _string_values(candidate.get("qfit_simplified_properties"))
+    if qfit_simplified:
+        details.append(f"qfit={', '.join(qfit_simplified[:4])}")
+    qgis_dependent = _string_values(candidate.get("qgis_dependent_properties"))
+    if qgis_dependent:
+        details.append(f"qgis={', '.join(qgis_dependent[:4])}")
     detail_suffix = f" ({'; '.join(details)})" if details else ""
     return f"{layer}{detail_suffix}"
 
