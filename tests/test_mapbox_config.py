@@ -6048,11 +6048,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-steps-below-z15",
                 "road-steps-z15-to-z16",
                 "road-steps-z16-to-z17",
-                "road-steps-z17-plus",
+                "road-steps-z17-to-z18",
+                "road-steps-z18-plus",
                 "road-steps-bg-below-z15",
                 "road-steps-bg-z15-to-z16",
                 "road-steps-bg-z16-to-z17",
-                "road-steps-bg-z17-plus",
+                "road-steps-bg-z17-to-z18",
+                "road-steps-bg-z18-plus",
                 "road-path",
             ],
         )
@@ -6061,27 +6063,38 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(by_id["road-steps-below-z15"]["paint"]["line-dasharray"], [1, 0])
         self.assertEqual(by_id["road-steps-z15-to-z16"]["paint"]["line-dasharray"], [1.75, 1])
         self.assertEqual(by_id["road-steps-z16-to-z17"]["paint"]["line-dasharray"], [1, 0.75])
-        self.assertEqual(by_id["road-steps-z17-plus"]["paint"]["line-dasharray"], [0.3, 0.3])
+        self.assertEqual(by_id["road-steps-z17-to-z18"]["paint"]["line-dasharray"], [0.3, 0.3])
+        self.assertEqual(by_id["road-steps-z18-plus"]["paint"]["line-dasharray"], [0.3, 0.3])
         self.assertAlmostEqual(
-            by_id["road-steps-z17-plus"]["paint"]["line-width"],
+            by_id["road-steps-z17-to-z18"]["paint"]["line-width"],
             (
                 mapbox_config._extract_zoom_scalar_size_at_zoom(steps_width, 17.0)
                 * mapbox_config._MAPBOX_PIXEL_TO_MM
             ),
         )
         self.assertAlmostEqual(
-            by_id["road-steps-bg-z17-plus"]["paint"]["line-width"],
+            by_id["road-steps-bg-z17-to-z18"]["paint"]["line-width"],
             4.6 * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertAlmostEqual(
+            by_id["road-steps-z18-plus"]["paint"]["line-width"],
+            6 * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertAlmostEqual(
+            by_id["road-steps-bg-z18-plus"]["paint"]["line-width"],
+            7 * mapbox_config._MAPBOX_PIXEL_TO_MM,
         )
         self.assertEqual(by_id["road-steps-below-z15"]["minzoom"], 14)
         self.assertEqual(by_id["road-steps-below-z15"]["maxzoom"], 15.0)
-        self.assertEqual(by_id["road-steps-z17-plus"]["minzoom"], 17.0)
+        self.assertEqual(by_id["road-steps-z17-to-z18"]["minzoom"], 17.0)
+        self.assertEqual(by_id["road-steps-z17-to-z18"]["maxzoom"], 18.0)
+        self.assertEqual(by_id["road-steps-z18-plus"]["minzoom"], 18.0)
         self.assertEqual(
-            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-steps-z17-plus"),
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-steps-z18-plus"),
             "road-steps",
         )
         self.assertEqual(
-            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-steps-bg-z17-plus"),
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("road-steps-bg-z18-plus"),
             "road-steps-bg",
         )
 

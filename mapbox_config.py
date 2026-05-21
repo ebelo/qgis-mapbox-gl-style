@@ -697,7 +697,8 @@ _ROAD_STEPS_LINE_STYLE_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("below-z15", None, 15.0, 14.0),
     ("z15-to-z16", 15.0, 16.0, 15.0),
     ("z16-to-z17", 16.0, 17.0, 16.0),
-    ("z17-plus", 17.0, None, 17.0),
+    ("z17-to-z18", 17.0, 18.0, 17.0),
+    ("z18-plus", 18.0, None, 18.0),
 )
 _PATH_BACKGROUND_LINE_COLOR_LAYER_IDS = {
     "bridge-path-bg",
