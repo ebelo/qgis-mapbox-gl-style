@@ -672,14 +672,15 @@ _PEDESTRIAN_CASE_LINE_WIDTH_LAYER_IDS = {
     "road-pedestrian-case",
     "tunnel-pedestrian-case",
 }
-_PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX = "z16-plus"
+_PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX = "z18-plus"
 _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM = 17.0
 _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z16", None, 16.0, 14.0),
     # The live z18 pedestrian case width exceeds qfit's QGIS max line width.
-    # Sampling z17 provides a stable case/core ratio; high-zoom pedestrian pairs
-    # scale together until the case stroke reaches the QGIS cap.
-    (_PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX, 16.0, None, _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM),
+    # Keep z16-z18 at the z17 sample, then scale the z18+ pair together until
+    # the case stroke reaches the QGIS cap.
+    ("z16-to-z18", 16.0, 18.0, _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM),
+    (_PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX, 18.0, None, _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM),
 )
 _PATH_TRAIL_LINE_WIDTH_LAYER_IDS = {
     "bridge-path-cycleway-piste",
@@ -829,10 +830,12 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
 _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
     "bridge-path-bg-z16-plus-outdoor",
     "bridge-path-bg-z16-plus-remaining",
-    "bridge-pedestrian-case-z16-plus",
+    "bridge-pedestrian-case-z16-to-z18",
+    "bridge-pedestrian-case-z18-plus",
     "road-path-bg-z16-plus-outdoor",
     "road-path-bg-z16-plus-remaining",
-    "road-pedestrian-case-z16-plus",
+    "road-pedestrian-case-z16-to-z18",
+    "road-pedestrian-case-z18-plus",
 }
 _PATH_HIGH_ZOOM_PALE_CASING_SUFFIX = "pale-casing"
 _PATH_HIGH_ZOOM_PALE_CASING_COLOR = "hsl(0, 0%, 98%)"
@@ -2943,6 +2946,7 @@ def _line_width_zoom_band_layer_variants(
     zoom_bands: tuple[tuple[str, float | None, float | None, float], ...],
     line_width_scale: float = 1.0,
     line_width_scales_by_suffix: dict[str, float] | None = None,
+    clamp_sample_zoom_to_band: bool = True,
 ) -> list[dict[str, object]] | None:
     layer_id = str(layer.get("id") or "")
     paint = layer.get("paint")
@@ -2958,6 +2962,7 @@ def _line_width_zoom_band_layer_variants(
 
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    suffix_scales = line_width_scales_by_suffix or {}
     variants: list[dict[str, object]] = []
     for suffix, band_minzoom, band_maxzoom, target_zoom in zoom_bands:
         effective_zoom_band = _effective_zoom_band(
@@ -2968,17 +2973,18 @@ def _line_width_zoom_band_layer_variants(
         )
         if effective_zoom_band is None:
             continue
-        sampled_zoom = _zoom_in_layer_range(target_zoom, *effective_zoom_band)
+        sample_zoom_range = (
+            effective_zoom_band
+            if clamp_sample_zoom_to_band
+            else (existing_minzoom, existing_maxzoom)
+        )
+        sampled_zoom = _zoom_in_layer_range(target_zoom, *sample_zoom_range)
         if sampled_zoom is None:
             continue
         line_width_mm = _line_width_mm_at_zoom(line_width, sampled_zoom)
         if line_width_mm is None:
             continue
-        band_scale = (
-            line_width_scales_by_suffix.get(suffix, 1.0)
-            if line_width_scales_by_suffix is not None
-            else 1.0
-        )
+        band_scale = suffix_scales.get(suffix, 1.0)
         line_width_mm = max(
             0.1,
             min(line_width_mm * line_width_scale * band_scale, _MAX_LINE_WIDTH_MM),
@@ -3053,6 +3059,7 @@ def _pedestrian_line_width_layer_variants(
         line_width_scales_by_suffix={
             _PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX: high_zoom_scale,
         },
+        clamp_sample_zoom_to_band=False,
     )
 
 
