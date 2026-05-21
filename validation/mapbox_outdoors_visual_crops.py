@@ -42,6 +42,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-visual-crops"
 DEFAULT_CROP_SIZE = (320, 240)
 DEFAULT_CROPS_PER_CAMERA = 3
 DEFAULT_FOCUS_DASH_CUE_LIMIT = 2
+DEFAULT_FOCUS_CORE_CASE_CUE_LIMIT = 3
 DEFAULT_FOCUS_STROKE_CUE_LIMIT = 3
 DEFAULT_STYLE_AUDIT_SAMPLE_LIMIT = 5
 DEFAULT_STYLE_AUDIT_SIMPLIFICATION_LIMIT = 3
@@ -82,6 +83,26 @@ STYLE_AUDIT_AREA_FILL_SECTIONS = (
         "simplified_by_property": "airport_special_landuse_simplified_by_property",
         "qgis_dependent_by_property": "airport_special_landuse_qgis_dependent_by_property",
     },
+)
+FOCUS_STROKE_CUE_KEYS = (
+    "source_layer_id",
+    "qgis_layer_id",
+    "decoded_candidate_count",
+    "line_width_delta_mm",
+    "line_width_abs_delta_mm",
+    "line_width_ratio",
+    "source_line_width_mm",
+    "source_line_width_raw_mm",
+    "source_line_width_capped",
+)
+FOCUS_DASH_CUE_KEYS = (
+    "source_layer_id",
+    "qgis_layer_id",
+    "decoded_candidate_count",
+    "source_dasharray",
+    "qgis_dasharray",
+    "line_width_delta_mm",
+    "line_width_ratio",
 )
 
 
@@ -553,6 +574,152 @@ def _has_decoded_candidates(row: Mapping[str, object]) -> bool:
     return isinstance(candidate_types, list) and bool(candidate_types)
 
 
+def _pedestrian_core_case_cap_cues(
+    camera: Mapping[str, object],
+    *,
+    limit: int = DEFAULT_FOCUS_CORE_CASE_CUE_LIMIT,
+) -> list[dict[str, object]]:
+    relationships = camera.get("pedestrian_core_case_cap_relationships")
+    relationship_rows = relationships if isinstance(relationships, list) else []
+    cues: list[dict[str, object]] = []
+    cue_keys = (
+        "source_core_layer_id",
+        "source_case_layer_id",
+        "source_core_width_mm",
+        "source_core_raw_width_mm",
+        "source_case_width_mm",
+        "source_case_raw_width_mm",
+        "source_both_widths_capped",
+        "source_case_to_core_ratio",
+        "qgis_core_layer_id",
+        "qgis_core_width_mm",
+        "qgis_case_layer_id",
+        "qgis_case_width_mm",
+        "qgis_case_to_core_ratio",
+        "qgis_pale_casing_layer_id",
+        "qgis_pale_casing_width_mm",
+        "qgis_ratio_preserving_core_width_mm_at_cap",
+        "cap_limit_mm",
+    )
+    for relationship in relationship_rows:
+        if not isinstance(relationship, Mapping):
+            continue
+        if (
+            relationship.get("source_both_widths_capped") is not True
+            and not relationship.get("qgis_pale_casing_layer_id")
+        ):
+            continue
+        cue = {
+            key: relationship.get(key)
+            for key in cue_keys
+            if _non_empty_focus_value(relationship.get(key))
+        }
+        if cue:
+            cues.append(cue)
+        if len(cues) >= max(0, limit):
+            break
+    return cues
+
+
+def _limited_focus_cues(
+    rows: Iterable[Mapping[str, object]],
+    *,
+    row_filter: Callable[[Mapping[str, object]], bool],
+    cue_keys: Sequence[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    cue_limit = max(0, limit)
+    if cue_limit == 0:
+        return []
+    cues: list[dict[str, object]] = []
+    for row in rows:
+        if not row_filter(row):
+            continue
+        cues.append(_focus_cue_from_row(row, cue_keys))
+        if len(cues) >= cue_limit:
+            break
+    return cues
+
+
+def _is_width_focus_row(row: Mapping[str, object]) -> bool:
+    return _has_meaningful_width_delta(row) and _has_decoded_candidates(row)
+
+
+def _is_source_capped_focus_row(row: Mapping[str, object]) -> bool:
+    return row.get("source_line_width_capped") is True and _has_decoded_candidates(row)
+
+
+def _limited_width_focus_rows(
+    ranked_stroke_rows: Sequence[Mapping[str, object]],
+    *,
+    stroke_limit: int,
+) -> list[dict[str, object]]:
+    return _limited_focus_cues(
+        ranked_stroke_rows,
+        row_filter=_is_width_focus_row,
+        cue_keys=FOCUS_STROKE_CUE_KEYS,
+        limit=stroke_limit,
+    )
+
+
+def _limited_source_capped_focus_rows(
+    ranked_stroke_rows: Sequence[Mapping[str, object]],
+    *,
+    stroke_limit: int,
+) -> list[dict[str, object]]:
+    return _limited_focus_cues(
+        ranked_stroke_rows,
+        row_filter=_is_source_capped_focus_row,
+        cue_keys=FOCUS_STROKE_CUE_KEYS,
+        limit=stroke_limit,
+    )
+
+
+def _limited_dash_focus_rows(
+    camera: Mapping[str, object],
+    *,
+    dash_limit: int,
+) -> list[dict[str, object]]:
+    return _limited_focus_cues(
+        _non_auxiliary_dash_mismatch_rows([camera]),
+        row_filter=_has_decoded_candidates,
+        cue_keys=FOCUS_DASH_CUE_KEYS,
+        limit=dash_limit,
+    )
+
+
+def _path_pedestrian_focus_cues_for_camera(
+    camera: Mapping[str, object],
+    *,
+    stroke_limit: int,
+    dash_limit: int,
+) -> dict[str, list[dict[str, object]]] | None:
+    ranked_stroke_rows = _largest_non_auxiliary_stroke_delta_rows(
+        [camera],
+        limit=10_000,
+    )
+    width_rows = _limited_width_focus_rows(
+        ranked_stroke_rows,
+        stroke_limit=stroke_limit,
+    )
+    source_capped_stroke_rows = _limited_source_capped_focus_rows(
+        ranked_stroke_rows,
+        stroke_limit=stroke_limit,
+    )
+    dash_rows = _limited_dash_focus_rows(camera, dash_limit=dash_limit)
+    core_case_cap_rows = _pedestrian_core_case_cap_cues(camera)
+    if not (width_rows or source_capped_stroke_rows or core_case_cap_rows or dash_rows):
+        return None
+    cues = {
+        "stroke_width_deltas": width_rows,
+        "source_capped_strokes": source_capped_stroke_rows,
+        "dash_mismatches": dash_rows,
+    }
+    if core_case_cap_rows:
+        cues["pedestrian_core_case_caps"] = core_case_cap_rows
+    return cues
+
+
 def _path_pedestrian_focus_cues_by_camera(
     focus_report: Mapping[str, object] | None,
     *,
@@ -571,77 +738,13 @@ def _path_pedestrian_focus_cues_by_camera(
         camera_name = str(camera.get("camera") or "")
         if not camera_name:
             continue
-        ranked_stroke_rows = _largest_non_auxiliary_stroke_delta_rows(
-            [camera],
-            limit=10_000,
+        cues = _path_pedestrian_focus_cues_for_camera(
+            camera,
+            stroke_limit=stroke_limit,
+            dash_limit=dash_limit,
         )
-        width_delta_rows = [
-            row
-            for row in ranked_stroke_rows
-            if _has_meaningful_width_delta(row) and _has_decoded_candidates(row)
-        ][: max(0, stroke_limit)]
-        source_capped_rows = [
-            row
-            for row in ranked_stroke_rows
-            if row.get("source_line_width_capped") is True and _has_decoded_candidates(row)
-        ][: max(0, stroke_limit)]
-        width_rows = [
-            _focus_cue_from_row(
-                row,
-                (
-                    "source_layer_id",
-                    "qgis_layer_id",
-                    "decoded_candidate_count",
-                    "line_width_delta_mm",
-                    "line_width_abs_delta_mm",
-                    "line_width_ratio",
-                    "source_line_width_mm",
-                    "source_line_width_raw_mm",
-                    "source_line_width_capped",
-                ),
-            )
-            for row in width_delta_rows
-        ]
-        source_capped_stroke_rows = [
-            _focus_cue_from_row(
-                row,
-                (
-                    "source_layer_id",
-                    "qgis_layer_id",
-                    "decoded_candidate_count",
-                    "line_width_delta_mm",
-                    "line_width_abs_delta_mm",
-                    "line_width_ratio",
-                    "source_line_width_mm",
-                    "source_line_width_raw_mm",
-                    "source_line_width_capped",
-                ),
-            )
-            for row in source_capped_rows
-        ]
-        dash_rows = [
-            _focus_cue_from_row(
-                row,
-                (
-                    "source_layer_id",
-                    "qgis_layer_id",
-                    "decoded_candidate_count",
-                    "source_dasharray",
-                    "qgis_dasharray",
-                    "line_width_delta_mm",
-                    "line_width_ratio",
-                ),
-            )
-            for row in _non_auxiliary_dash_mismatch_rows([camera])
-            if _has_decoded_candidates(row)
-        ]
-        dash_rows = dash_rows[: max(0, dash_limit)]
-        if width_rows or source_capped_stroke_rows or dash_rows:
-            cues_by_camera[camera_name] = {
-                "stroke_width_deltas": width_rows,
-                "source_capped_strokes": source_capped_stroke_rows,
-                "dash_mismatches": dash_rows,
-            }
+        if cues is not None:
+            cues_by_camera[camera_name] = cues
     return cues_by_camera
 
 
@@ -1559,6 +1662,42 @@ def _dash_focus_cue_summary(cue: Mapping[str, object]) -> str:
     return " ".join(parts)
 
 
+def _append_mm_focus_part(parts: list[str], label: str, value: object) -> None:
+    if value is not None:
+        parts.append(f"{label}={_format_focus_number(value)}mm")
+
+
+def _append_ratio_focus_part(parts: list[str], label: str, value: object) -> None:
+    if value is not None:
+        parts.append(f"{label}={_format_focus_number(value)}")
+
+
+def _core_case_focus_cue_summary(cue: Mapping[str, object]) -> str:
+    source_pair = f"{cue.get('source_core_layer_id')}/{cue.get('source_case_layer_id')}"
+    qgis_pair = f"{cue.get('qgis_core_layer_id')}/{cue.get('qgis_case_layer_id')}"
+    parts = [f"{source_pair}->{qgis_pair}"]
+    if cue.get("source_both_widths_capped") is True:
+        parts.append("source-both-capped")
+    _append_mm_focus_part(parts, "source_core", cue.get("source_core_width_mm"))
+    _append_mm_focus_part(parts, "raw_core", cue.get("source_core_raw_width_mm"))
+    _append_mm_focus_part(parts, "source_case", cue.get("source_case_width_mm"))
+    _append_mm_focus_part(parts, "raw_case", cue.get("source_case_raw_width_mm"))
+    _append_ratio_focus_part(parts, "source_ratio", cue.get("source_case_to_core_ratio"))
+    _append_mm_focus_part(parts, "qgis_core", cue.get("qgis_core_width_mm"))
+    _append_mm_focus_part(parts, "qgis_case", cue.get("qgis_case_width_mm"))
+    _append_ratio_focus_part(parts, "qgis_ratio", cue.get("qgis_case_to_core_ratio"))
+    if cue.get("qgis_pale_casing_layer_id"):
+        parts.append(f"pale_casing={cue.get('qgis_pale_casing_layer_id')}")
+        _append_mm_focus_part(parts, "pale_width", cue.get("qgis_pale_casing_width_mm"))
+    _append_mm_focus_part(
+        parts,
+        "ratio_preserving_core_at_cap",
+        cue.get("qgis_ratio_preserving_core_width_mm_at_cap"),
+    )
+    _append_mm_focus_part(parts, "cap_limit", cue.get("cap_limit_mm"))
+    return " ".join(parts)
+
+
 def _compact_focus_value(value: object) -> str:
     if isinstance(value, list):
         return json.dumps(value, ensure_ascii=True, separators=(",", ":"))
@@ -2324,7 +2463,19 @@ def _summary_focus_row(
         "dash_mismatches",
         _dash_focus_cue_summary,
     )
-    if not stroke_summaries and not source_capped_summaries and not dash_summaries:
+    core_case_cues = focus.get("pedestrian_core_case_caps")
+    core_case_cue_rows = core_case_cues if isinstance(core_case_cues, list) else []
+    core_case_summaries = [
+        _core_case_focus_cue_summary(cue)
+        for cue in core_case_cue_rows
+        if isinstance(cue, Mapping)
+    ]
+    if (
+        not stroke_summaries
+        and not source_capped_summaries
+        and not core_case_summaries
+        and not dash_summaries
+    ):
         return None
     camera_name = camera.get("camera")
     return [
@@ -2334,6 +2485,7 @@ def _summary_focus_row(
         ),
         stroke_summaries,
         source_capped_summaries,
+        core_case_summaries,
         dash_summaries,
     ]
 
@@ -2506,9 +2658,9 @@ def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
             "",
             (
                 "| Camera | Crop movement groups | Stroke width cues | "
-                "Source-capped stroke cues | Dash mismatch cues |"
+                "Source-capped stroke cues | Core/case cap cues | Dash mismatch cues |"
             ),
-            "| --- | --- | --- | --- | --- |",
+            "| --- | --- | --- | --- | --- | --- |",
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)

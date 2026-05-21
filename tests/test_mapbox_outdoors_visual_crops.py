@@ -283,8 +283,33 @@ def _path_pedestrian_focus_report(
                         ],
                     },
                 ],
+                "pedestrian_core_case_cap_relationships": [
+                    _pedestrian_core_case_cap_relationship()
+                ],
             }
         ]
+    }
+
+
+def _pedestrian_core_case_cap_relationship():
+    return {
+        "source_core_layer_id": "road-pedestrian",
+        "source_case_layer_id": "road-pedestrian-case",
+        "cap_limit_mm": 3.0,
+        "source_core_width_mm": 3.0,
+        "source_core_raw_width_mm": 3.175,
+        "source_case_width_mm": 3.0,
+        "source_case_raw_width_mm": 3.8364583333333333,
+        "source_both_widths_capped": True,
+        "source_case_to_core_ratio": 1.0,
+        "qgis_core_layer_id": "road-pedestrian-z18-plus",
+        "qgis_core_width_mm": 1.92,
+        "qgis_case_layer_id": "road-pedestrian-case-z18-plus",
+        "qgis_case_width_mm": 2.4,
+        "qgis_case_to_core_ratio": 1.25,
+        "qgis_pale_casing_layer_id": "road-pedestrian-case-z18-plus-pale-casing",
+        "qgis_pale_casing_width_mm": 3.0,
+        "qgis_ratio_preserving_core_width_mm_at_cap": 2.4,
     }
 
 
@@ -888,6 +913,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             focus_cues = report["cameras"][0]["path_pedestrian_focus"]
             stroke_cues = focus_cues["stroke_width_deltas"]
             source_capped_cues = focus_cues["source_capped_strokes"]
+            core_case_cues = focus_cues["pedestrian_core_case_caps"]
             dash_cues = focus_cues["dash_mismatches"]
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
             self.assertEqual(
@@ -948,8 +974,56 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(source_capped_cues[0]["candidate_types"], ["pedestrian=191"])
             self.assertEqual(source_capped_cues[0]["source_line_width_mm"], 3.0)
             self.assertEqual(source_capped_cues[0]["source_line_width_raw_mm"], 3.175)
+            self.assertEqual(core_case_cues[0]["source_core_layer_id"], "road-pedestrian")
+            self.assertEqual(core_case_cues[0]["source_case_layer_id"], "road-pedestrian-case")
+            self.assertEqual(core_case_cues[0]["qgis_pale_casing_width_mm"], 3.0)
+            self.assertEqual(
+                core_case_cues[0]["qgis_ratio_preserving_core_width_mm_at_cap"],
+                2.4,
+            )
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
+
+    def test_generate_visual_crop_report_keeps_core_case_only_focus_cues(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            focus_path = root / "focus" / "path-pedestrian-focus.json"
+            focus_report = _path_pedestrian_focus_report(
+                comparison_summary_jsons=[str(summary_path)]
+            )
+            focus_report["cameras"][0]["source_qgis_stroke_control_comparisons"] = []
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    path_pedestrian_focus_report=focus_report,
+                    path_pedestrian_focus_report_path=focus_path,
+                ),
+                focus_cue_cameras_only=True,
+                crops_per_camera=0,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertEqual(report["camera_count"], 1)
+            focus_cues = report["cameras"][0]["path_pedestrian_focus"]
+            self.assertEqual(focus_cues["stroke_width_deltas"], [])
+            self.assertEqual(focus_cues["source_capped_strokes"], [])
+            self.assertEqual(focus_cues["dash_mismatches"], [])
+            self.assertEqual(
+                focus_cues["pedestrian_core_case_caps"][0]["source_core_layer_id"],
+                "road-pedestrian",
+            )
+            markdown = build_summary_markdown(report)
+            self.assertIn("## Path/pedestrian focus cues", markdown)
+            self.assertIn("Core/case cap cues", markdown)
+            self.assertIn("source-both-capped", markdown)
 
     def test_path_pedestrian_focus_coverage_counts_all_stroke_rows(self):
         focus_report = {
@@ -1351,6 +1425,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             comparisons[0]["decoded_candidate_type_counts"] = {}
             comparisons[2]["decoded_candidate_count"] = 0
             comparisons[2]["decoded_candidate_type_counts"] = {}
+            focus_report["cameras"][0]["pedestrian_core_case_cap_relationships"] = []
             paths = build_visual_crop_paths(root / "debug" / "run")
 
             report = generate_visual_crop_report(
@@ -2067,6 +2142,9 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                     "source_line_width_capped": True,
                                 }
                             ],
+                            "pedestrian_core_case_caps": [
+                                _pedestrian_core_case_cap_relationship()
+                            ],
                             "dash_mismatches": [
                                 {
                                     "source_layer_id": "bridge-path",
@@ -2109,7 +2187,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn(
             (
                 "| Camera | Crop movement groups | Stroke width cues | "
-                "Source-capped stroke cues | Dash mismatch cues |"
+                "Source-capped stroke cues | Core/case cap cues | Dash mismatch cues |"
             ),
             markdown,
         )
@@ -2129,6 +2207,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         )
         self.assertIn("candidate_types=trail=69", markdown)
         self.assertNotIn("candidates=None", markdown)
+        self.assertIn("source-both-capped", markdown)
+        self.assertIn("qgis_ratio=1.25", markdown)
+        self.assertIn("ratio_preserving_core_at_cap=2.4mm", markdown)
+        self.assertIn("pale_casing=road-pedestrian-case-z18-plus-pale-casing", markdown)
         self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
 
     def test_build_summary_markdown_handles_partial_focus_coverage_sample_rows(self):

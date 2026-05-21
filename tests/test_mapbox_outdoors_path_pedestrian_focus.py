@@ -934,6 +934,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
                         "line-dasharray": ["literal", [1, 0.2]],
                     },
+                    "layout": {
+                        "line-cap": ["step", ["zoom"], "butt", 17, "round"],
+                        "line-join": "round",
+                    },
                 }
             ],
         }
@@ -950,6 +954,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-dasharray": [1, 0.2],
                         "line-opacity": 0.65,
                     },
+                    "layout": {"line-cap": "butt", "line-join": "round"},
                 }
             ],
         }
@@ -971,6 +976,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
                         "line-dasharray": ["literal", [1, 0.2]],
+                        "line-cap": ["step", ["zoom"], "butt", 17, "round"],
+                        "line-join": "round",
                     },
                     "source_sampled_controls": {
                         "line-width": 3.0,
@@ -978,6 +985,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-width_capped": True,
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [1, 0.2],
+                        "line-cap": "round",
+                        "line-join": "round",
                     },
                     "decoded_candidate_count": 1,
                     "qgis_layer_ids": ["road-pedestrian-z18-plus"],
@@ -988,6 +997,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                                 "line-width": 2.328099173553719,
                                 "line-color": "#f6f2e8",
                                 "line-dasharray": [1, 0.2],
+                                "line-cap": "butt",
+                                "line-join": "round",
                                 "line-opacity": 0.65,
                             },
                         }
@@ -999,6 +1010,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                                 "line-width_delta_mm": -0.6719008264462811,
                                 "line-width_ratio": 0.7760330578512397,
                                 "line-dasharray_match": True,
+                                "line-cap_match": False,
+                                "line-join_match": True,
                                 "line-color_match": False,
                             },
                         }
@@ -1009,6 +1022,8 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         markdown = build_summary_markdown(report)
         self.assertIn("line-width_raw_mm=3.175", markdown)
         self.assertIn("line-width_capped=true", markdown)
+        self.assertIn('line-cap=\\"round\\"', markdown)
+        self.assertIn("line-cap_match=false", markdown)
 
     def test_build_path_pedestrian_focus_report_adds_step_structure_candidate_counts(self):
         road_report = {
@@ -1690,7 +1705,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn('"line-width=[\\"interpolate\\",[\\"linear\\"],[\\"zoom\\"],12,1,18,4]"', markdown)
         self.assertIn("## Source vs QGIS stroke controls", markdown)
         self.assertIn("Source sampled controls evaluate zoom expressions at the camera zoom", markdown)
-        self.assertIn("expression colors are marked as expression-not-sampled", markdown)
+        self.assertIn("unsampled layout expressions are marked as expression-not-sampled", markdown)
         self.assertIn("QGIS deltas compare visible QGIS controls against source sampled controls", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | road-path |", markdown)
         self.assertIn('"line-width=0.5622395833333333"', markdown)

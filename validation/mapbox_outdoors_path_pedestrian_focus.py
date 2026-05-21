@@ -21,6 +21,7 @@ from qfit.mapbox_config import (  # noqa: E402
     _extract_line_dasharray_literal,
     _extract_zoom_scalar_size_at_zoom,
     _literal_line_dasharray,
+    _step_zoom_value,
     base_mapbox_style_layer_id_for_qfit,
 )
 
@@ -63,21 +64,33 @@ PATH_PEDESTRIAN_DETAIL_PAINT_KEYS = (
     "fill-color",
     "fill-opacity",
 )
+PATH_PEDESTRIAN_DETAIL_LAYOUT_KEYS = (
+    "line-cap",
+    "line-join",
+)
 PATH_PEDESTRIAN_STROKE_CONTROL_KEYS = (
     "line-width",
     "line-width_raw_mm",
     "line-width_capped",
     "line-color",
     "line-dasharray",
+    "line-cap",
+    "line-join",
     "line-opacity",
 )
 PATH_PEDESTRIAN_STROKE_DELTA_KEYS = (
     "line-width_delta_mm",
     "line-width_ratio",
     "line-dasharray_match",
+    "line-cap_match",
+    "line-join_match",
     "line-color_match",
     "line-opacity_delta",
 )
+PATH_PEDESTRIAN_LINE_LAYOUT_CHOICES = {
+    "line-cap": frozenset({"butt", "round", "square"}),
+    "line-join": frozenset({"bevel", "round", "miter"}),
+}
 PATH_PEDESTRIAN_SOURCE_LAYER_PREFIXES = ("road", "bridge", "tunnel")
 PATH_PEDESTRIAN_SOURCE_STRUCTURES_BY_PREFIX = {
     "bridge": "bridge",
@@ -704,6 +717,11 @@ def _style_control_count(layers: Iterable[Mapping[str, object]], property_name: 
     return sum(1 for layer in layers if property_name in _layer_paint(layer))
 
 
+def _layer_layout(layer: Mapping[str, object]) -> Mapping[str, object]:
+    layout = layer.get("layout")
+    return layout if isinstance(layout, Mapping) else {}
+
+
 def _layer_detail(layer: Mapping[str, object]) -> dict[str, object]:
     detail = {
         "id": str(layer.get("id") or ""),
@@ -717,6 +735,10 @@ def _layer_detail(layer: Mapping[str, object]) -> dict[str, object]:
     for key in PATH_PEDESTRIAN_DETAIL_PAINT_KEYS:
         if key in paint:
             detail[key] = paint[key]
+    layout = _layer_layout(layer)
+    for key in PATH_PEDESTRIAN_DETAIL_LAYOUT_KEYS:
+        if key in layout:
+            detail[key] = layout[key]
     return detail
 
 
@@ -1266,7 +1288,34 @@ def _source_sampled_stroke_controls(
     line_opacity = _extract_zoom_scalar_size_at_zoom(detail.get("line-opacity"), camera_zoom)
     if line_opacity is not None:
         sampled_controls["line-opacity"] = line_opacity
+    for key, choices in PATH_PEDESTRIAN_LINE_LAYOUT_CHOICES.items():
+        if key not in detail:
+            continue
+        line_layout = _sample_line_layout_control(
+            detail.get(key),
+            camera_zoom,
+            choices=choices,
+        )
+        if line_layout is not None:
+            sampled_controls[key] = line_layout
     return sampled_controls
+
+
+def _sample_line_layout_control(
+    value: object,
+    camera_zoom: float,
+    *,
+    choices: frozenset[str],
+) -> str | None:
+    if isinstance(value, str) and value in choices:
+        return value
+    if isinstance(value, list):
+        if len(value) >= 3 and value[0] == "step" and value[1] == ["zoom"]:
+            stepped_value = _step_zoom_value(value, target_zoom=camera_zoom)
+            if isinstance(stepped_value, str) and stepped_value in choices:
+                return stepped_value
+        return UNSAMPLED_EXPRESSION_CONTROL
+    return None
 
 
 def _source_line_width_controls(line_width_expr: object, camera_zoom: float) -> dict[str, object]:
@@ -1303,6 +1352,17 @@ def _stroke_control_deltas(
     qgis_dasharray = _literal_line_dasharray(qgis_controls.get("line-dasharray"))
     if source_dasharray is not None and qgis_dasharray is not None:
         deltas["line-dasharray_match"] = qgis_dasharray == source_dasharray
+    for key in PATH_PEDESTRIAN_DETAIL_LAYOUT_KEYS:
+        source_layout = source_sampled_controls.get(key)
+        qgis_layout = qgis_controls.get(key)
+        if (
+            isinstance(source_layout, str)
+            and source_layout
+            and source_layout != UNSAMPLED_EXPRESSION_CONTROL
+            and isinstance(qgis_layout, str)
+            and qgis_layout
+        ):
+            deltas[f"{key}_match"] = qgis_layout == source_layout
     source_color = source_sampled_controls.get("line-color")
     qgis_color = qgis_controls.get("line-color")
     if (
@@ -1793,7 +1853,7 @@ def _detail_zoom_band(detail: Mapping[str, object]) -> str:
 def _detail_paint_controls(detail: Mapping[str, object]) -> list[str]:
     return [
         f"{key}={_compact_json(detail.get(key))}"
-        for key in PATH_PEDESTRIAN_DETAIL_PAINT_KEYS
+        for key in (*PATH_PEDESTRIAN_DETAIL_PAINT_KEYS, *PATH_PEDESTRIAN_DETAIL_LAYOUT_KEYS)
         if key in detail
     ]
 
@@ -1819,7 +1879,7 @@ def _visible_style_detail_markdown_lines(
             [
                 f"### {camera.get('camera')}",
                 "",
-                "| Layer | Type | Zoom band | Paint controls | Filter |",
+                "| Layer | Type | Zoom band | Paint/layout controls | Filter |",
                 MARKDOWN_SEPARATOR_5_COLUMNS,
             ]
         )
@@ -1948,9 +2008,10 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
             (
                 "Source sampled controls evaluate zoom expressions at the camera zoom; "
                 "line-width is shown in QGIS millimetres and dash arrays are the selected "
-                "Mapbox line-width-relative pattern. Literal line colors are carried through; "
-                "expression colors are marked as expression-not-sampled and remain available "
-                "in the raw source controls."
+                "Mapbox line-width-relative pattern. Literal line colors and sampled line "
+                "cap/join layout choices are carried through; expression colors and "
+                "unsampled layout expressions are marked as expression-not-sampled and remain "
+                "available in the raw source controls."
             ),
             (
                 "QGIS deltas compare visible QGIS controls against source sampled controls "

@@ -139,7 +139,7 @@ python3 validation/mapbox_outdoors_visual_crops.py \
 
 Manual boxes are recorded in `visual-crops.json`, echoed in the Markdown report header, and marked as `manual` in the crop table's selection column.
 
-When path/pedestrian styling is under review, pass the matching focus report so each crop row is annotated with the strongest per-camera stroke-width, source-capped stroke, and dash cues:
+When path/pedestrian styling is under review, pass the matching focus report so each crop row is annotated with the strongest per-camera stroke-width, source-capped stroke, pedestrian core/case cap, and dash cues:
 
 ```bash
 python3 validation/mapbox_outdoors_visual_crops.py \
@@ -147,7 +147,7 @@ python3 validation/mapbox_outdoors_visual_crops.py \
   --path-pedestrian-focus-json debug/mapbox-outdoors-path-pedestrian-focus/<timestamp>/path-pedestrian-focus.json
 ```
 
-The crop report also includes path/pedestrian focus coverage sections for that focus input. They show the raw non-auxiliary stroke and dash counts per camera, representative candidate-backed zero-delta, source-capped, and zero-candidate rows, and decoded path/step/pedestrian feature type or structure counts before the cue table filters down to meaningful candidate-backed rows. Source-capped labels include the capped source width and raw source width when both values are available. This helps explain cases where a visually suspicious camera has decoded candidates but no standard width-delta or dash cue.
+The crop report also includes path/pedestrian focus coverage sections for that focus input. They show the raw non-auxiliary stroke and dash counts per camera, representative candidate-backed zero-delta, source-capped, and zero-candidate rows, and decoded path/step/pedestrian feature type or structure counts before the cue table filters down to meaningful candidate-backed rows. Source-capped labels include the capped source width and raw source width when both values are available. Pedestrian core/case cap cues show the source core/case widths, QGIS core/case widths, pale casing width, and ratio-preserving core-width diagnostic when the focus input contains those relationships. This helps explain cases where a visually suspicious camera has decoded candidates but no standard width-delta or dash cue.
 
 To inspect only cameras that still have candidate-backed path/pedestrian focus cues, add `--focus-cue-cameras`. This is useful after a global highest-delta crop run is dominated by a different camera and hides lower-scoring stroke-width or dash candidates:
 
@@ -336,7 +336,7 @@ python3 validation/mapbox_outdoors_path_pedestrian_focus.py \
   --comparison-summary-json debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/summary.json
 ```
 
-Passing `--style-audit-json` uses the audit's source Mapbox layer records, which keeps source-vs-QGIS stroke and dash cues available without maintaining a separate downloaded style snapshot.
+Passing `--style-audit-json` uses the audit's source Mapbox layer records, which keeps source-vs-QGIS stroke, line cap/join layout, and dash cues available without maintaining a separate downloaded style snapshot.
 
 ## PR notes
 
