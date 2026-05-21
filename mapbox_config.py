@@ -2962,6 +2962,7 @@ def _line_width_zoom_band_layer_variants(
 
     existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
     existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    suffix_scales = line_width_scales_by_suffix or {}
     variants: list[dict[str, object]] = []
     for suffix, band_minzoom, band_maxzoom, target_zoom in zoom_bands:
         effective_zoom_band = _effective_zoom_band(
@@ -2983,11 +2984,7 @@ def _line_width_zoom_band_layer_variants(
         line_width_mm = _line_width_mm_at_zoom(line_width, sampled_zoom)
         if line_width_mm is None:
             continue
-        band_scale = (
-            line_width_scales_by_suffix.get(suffix, 1.0)
-            if line_width_scales_by_suffix is not None
-            else 1.0
-        )
+        band_scale = suffix_scales.get(suffix, 1.0)
         line_width_mm = max(
             0.1,
             min(line_width_mm * line_width_scale * band_scale, _MAX_LINE_WIDTH_MM),
