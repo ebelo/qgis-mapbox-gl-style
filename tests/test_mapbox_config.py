@@ -2051,7 +2051,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(result["layers"][3]["paint"]["line-dasharray"], [5, 2])
         self.assertIsInstance(style["layers"][0]["paint"]["line-dasharray"][2], list)
 
-    def test_split_high_zoom_path_layers_use_layer_zoom_for_dasharray(self):
+    def test_split_high_zoom_path_layers_use_high_zoom_dasharray(self):
         path_filter = [
             "all",
             ["==", ["get", "class"], "path"],
@@ -2091,7 +2091,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         by_id = {layer["id"]: layer for layer in result["layers"]}
         self.assertEqual(by_id["road-path-below-z16"]["paint"]["line-dasharray"], [4, 0.3])
-        self.assertEqual(by_id["road-path-z16-plus"]["paint"]["line-dasharray"], [1, 0.3])
+        self.assertEqual(by_id["road-path-z16-plus"]["paint"]["line-dasharray"], [1, 0.25])
 
     def test_ferry_line_widths_keep_lake_routes_visible(self):
         ferry_width = ["interpolate", ["exponential", 1.5], ["zoom"], 14, 0.5, 20, 1]

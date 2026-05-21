@@ -2860,6 +2860,16 @@ def _should_sample_path_high_zoom_line_width(layer_id: object, prop: str, minzoo
     )
 
 
+def _path_dasharray_sample_zoom(layer_id: object, minzoom: object, maxzoom: object) -> float | None:
+    normalized = str(layer_id or "")
+    if not any(
+        normalized == prefix or normalized.startswith(f"{prefix}-")
+        for prefix in _PATH_HIGH_ZOOM_LINE_WIDTH_LAYER_PREFIXES
+    ):
+        return _representative_zoom_in_layer_range(minzoom, maxzoom)
+    return _zoom_in_layer_range(_PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM, minzoom, maxzoom)
+
+
 def _should_sample_path_low_zoom_line_width(layer_id: object, prop: str, maxzoom: object) -> bool:
     if prop != "line-width":
         return False
@@ -6512,7 +6522,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if blur_width_mm is not None:
                         props[prop] = blur_width_mm
                 elif prop == "line-dasharray":
-                    dasharray_target_zoom = _representative_zoom_in_layer_range(
+                    dasharray_target_zoom = _path_dasharray_sample_zoom(
+                        layer_id,
                         layer.get("minzoom"),
                         layer.get("maxzoom"),
                     )
