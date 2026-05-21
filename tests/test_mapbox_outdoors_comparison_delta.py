@@ -145,37 +145,40 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
     def test_build_comparison_delta_report_filters_small_metric_movements(self):
         baseline = {
             "cameras": [
-                _camera_row("large-move", mean=0.10, rms=0.20),
-                _camera_row("small-move", mean=0.10, rms=0.20),
+                _camera_row("large-move", mean=0.50, rms=0.50),
+                _camera_row("threshold-move", mean=0.50, rms=0.50),
+                _camera_row("small-move", mean=0.50, rms=0.50),
             ]
         }
         candidate = {
             "cameras": [
-                _camera_row("large-move", mean=0.08, rms=0.19),
-                _camera_row("small-move", mean=0.09995, rms=0.19996),
+                _camera_row("large-move", mean=0.25, rms=0.375),
+                _camera_row("threshold-move", mean=0.375, rms=0.50),
+                _camera_row("small-move", mean=0.4375, rms=0.50),
             ]
         }
 
         report = build_comparison_delta_report(
             baseline,
             candidate,
-            movement_threshold=0.001,
+            movement_threshold=0.125,
         )
         markdown = build_summary_markdown(report)
 
-        self.assertEqual(report["movement_threshold"], 0.001)
+        self.assertEqual(report["movement_threshold"], 0.125)
         self.assertEqual(
             [row["camera"] for row in report["largest_metric_movements"]],
-            ["large-move"],
+            ["large-move", "threshold-move"],
         )
         self.assertIn(
-            "Minimum absolute mean/RMS delta shown: `0.001000000`\n\n"
+            "Minimum absolute mean/RMS delta shown: `0.125000000`\n\n"
             "| Camera | z | Mean delta | RMS delta | Changed ratio delta |",
             markdown,
         )
         self.assertIn("| `large-move` |", markdown)
-        self.assertNotIn("| `small-move` | 14.25 | -0.000050000 |", markdown)
-        self.assertIn("| `small-move` | 14.25 | 0.100000000 |", markdown)
+        self.assertIn("| `threshold-move` |", markdown)
+        self.assertNotIn("| `small-move` | 14.25 | -0.062500000 |", markdown)
+        self.assertIn("| `small-move` | 14.25 | 0.500000000 |", markdown)
 
     def test_non_negative_float_rejects_invalid_thresholds(self):
         self.assertEqual(_non_negative_float("0.001"), 0.001)
@@ -183,6 +186,18 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(argparse.ArgumentTypeError):
                     _non_negative_float(value)
+
+    def test_build_comparison_delta_report_keeps_exact_threshold_movements(self):
+        report = build_comparison_delta_report(
+            {"cameras": [_camera_row("threshold-move", mean=0.50, rms=0.50)]},
+            {"cameras": [_camera_row("threshold-move", mean=0.375, rms=0.50)]},
+            movement_threshold=0.125,
+        )
+
+        self.assertEqual(
+            [row["camera"] for row in report["largest_metric_movements"]],
+            ["threshold-move"],
+        )
 
     def test_build_summary_markdown_renders_delta_table(self):
         report = build_comparison_delta_report(

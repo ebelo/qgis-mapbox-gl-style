@@ -183,7 +183,7 @@ def _largest_metric_movement_rows(
         if not deltas:
             continue
         score = max(deltas)
-        if score <= minimum_abs_delta:
+        if score == 0 or score < minimum_abs_delta:
             continue
         camera = row.get("camera")
         movement = {
