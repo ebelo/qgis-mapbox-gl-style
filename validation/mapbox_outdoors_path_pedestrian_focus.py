@@ -632,10 +632,12 @@ def _label_source_layer_detail(
     return detail
 
 
-def qgis_path_pedestrian_style_summary(
+def _path_pedestrian_style_summary(
     style: Mapping[str, object],
     *,
     camera_zoom: float | None = None,
+    prefix: str,
+    status: str,
 ) -> dict[str, object]:
     layers = [layer for layer in _style_layers(style) if _is_path_pedestrian_style_layer(layer)]
     label_source_layers = [
@@ -649,116 +651,119 @@ def qgis_path_pedestrian_style_summary(
     ]
     visible_line_layers = [layer for layer in visible_layers if layer.get("type") == "line"]
     visible_fill_layers = [layer for layer in visible_layers if layer.get("type") == "fill"]
+    key_root = f"{prefix}_path_pedestrian"
     return {
-        "qgis_style_status": "available",
-        "qgis_path_pedestrian_layer_count": len(layers),
-        "qgis_path_pedestrian_line_layer_count": len(line_layers),
-        "qgis_path_pedestrian_fill_layer_count": len(fill_layers),
-        "qgis_path_pedestrian_filter_layer_count": sum(1 for layer in layers if layer.get("filter") is not None),
-        "qgis_path_pedestrian_line_width_layer_count": _style_control_count(line_layers, "line-width"),
-        "qgis_path_pedestrian_line_color_layer_count": _style_control_count(line_layers, "line-color"),
-        "qgis_path_pedestrian_fill_color_layer_count": _style_control_count(fill_layers, "fill-color"),
-        "qgis_path_pedestrian_line_dasharray_layer_count": _style_control_count(line_layers, "line-dasharray"),
-        "qgis_path_pedestrian_line_opacity_layer_count": _style_control_count(line_layers, "line-opacity"),
-        "qgis_path_pedestrian_visible_layer_count": len(visible_layers),
-        "qgis_path_pedestrian_visible_line_layer_count": len(visible_line_layers),
-        "qgis_path_pedestrian_visible_fill_layer_count": len(visible_fill_layers),
-        "qgis_path_pedestrian_visible_filter_layer_count": sum(
+        f"{prefix}_style_status": status,
+        f"{key_root}_layer_count": len(layers),
+        f"{key_root}_line_layer_count": len(line_layers),
+        f"{key_root}_fill_layer_count": len(fill_layers),
+        f"{key_root}_filter_layer_count": sum(1 for layer in layers if layer.get("filter") is not None),
+        f"{key_root}_line_width_layer_count": _style_control_count(line_layers, "line-width"),
+        f"{key_root}_line_color_layer_count": _style_control_count(line_layers, "line-color"),
+        f"{key_root}_fill_color_layer_count": _style_control_count(fill_layers, "fill-color"),
+        f"{key_root}_line_dasharray_layer_count": _style_control_count(line_layers, "line-dasharray"),
+        f"{key_root}_line_opacity_layer_count": _style_control_count(line_layers, "line-opacity"),
+        f"{key_root}_visible_layer_count": len(visible_layers),
+        f"{key_root}_visible_line_layer_count": len(visible_line_layers),
+        f"{key_root}_visible_fill_layer_count": len(visible_fill_layers),
+        f"{key_root}_visible_filter_layer_count": sum(
             1 for layer in visible_layers if layer.get("filter") is not None
         ),
-        "qgis_path_pedestrian_visible_line_width_layer_count": _style_control_count(
+        f"{key_root}_visible_line_width_layer_count": _style_control_count(
             visible_line_layers,
             "line-width",
         ),
-        "qgis_path_pedestrian_visible_line_color_layer_count": _style_control_count(
+        f"{key_root}_visible_line_color_layer_count": _style_control_count(
             visible_line_layers,
             "line-color",
         ),
-        "qgis_path_pedestrian_visible_fill_color_layer_count": _style_control_count(
+        f"{key_root}_visible_fill_color_layer_count": _style_control_count(
             visible_fill_layers,
             "fill-color",
         ),
-        "qgis_path_pedestrian_visible_line_dasharray_layer_count": _style_control_count(
+        f"{key_root}_visible_line_dasharray_layer_count": _style_control_count(
             visible_line_layers,
             "line-dasharray",
         ),
-        "qgis_path_pedestrian_visible_line_opacity_layer_count": _style_control_count(
+        f"{key_root}_visible_line_opacity_layer_count": _style_control_count(
             visible_line_layers,
             "line-opacity",
         ),
-        "qgis_path_pedestrian_layer_ids": [str(layer.get("id") or "") for layer in layers],
-        "qgis_path_pedestrian_visible_layer_ids": [str(layer.get("id") or "") for layer in visible_layers],
-        "qgis_path_pedestrian_layer_details": [_layer_detail(layer) for layer in layers],
-        "qgis_path_pedestrian_visible_layer_details": [_layer_detail(layer) for layer in visible_layers],
-        "qgis_path_pedestrian_label_source_layer_count": len(label_source_layers),
-        "qgis_path_pedestrian_visible_label_source_layer_count": len(visible_label_source_layers),
-        "qgis_path_pedestrian_label_source_details": [
+        f"{key_root}_layer_ids": [str(layer.get("id") or "") for layer in layers],
+        f"{key_root}_visible_layer_ids": [str(layer.get("id") or "") for layer in visible_layers],
+        f"{key_root}_layer_details": [_layer_detail(layer) for layer in layers],
+        f"{key_root}_visible_layer_details": [_layer_detail(layer) for layer in visible_layers],
+        f"{key_root}_label_source_layer_count": len(label_source_layers),
+        f"{key_root}_visible_label_source_layer_count": len(visible_label_source_layers),
+        f"{key_root}_label_source_details": [
             _label_source_layer_detail(layer, camera_zoom=camera_zoom) for layer in label_source_layers
         ],
-        "qgis_path_pedestrian_visible_label_source_details": [
+        f"{key_root}_visible_label_source_details": [
             _label_source_layer_detail(layer, camera_zoom=camera_zoom) for layer in visible_label_source_layers
         ],
-        "qgis_path_pedestrian_line_width_samples": _layer_control_sample(line_layers, "line-width"),
-        "qgis_path_pedestrian_line_color_samples": _layer_control_sample(line_layers, "line-color"),
-        "qgis_path_pedestrian_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),
-        "qgis_path_pedestrian_line_dasharray_samples": _layer_control_sample(line_layers, "line-dasharray"),
-        "qgis_path_pedestrian_visible_line_width_samples": _layer_control_sample(
+        f"{key_root}_line_width_samples": _layer_control_sample(line_layers, "line-width"),
+        f"{key_root}_line_color_samples": _layer_control_sample(line_layers, "line-color"),
+        f"{key_root}_fill_color_samples": _layer_control_sample(fill_layers, "fill-color"),
+        f"{key_root}_line_dasharray_samples": _layer_control_sample(line_layers, "line-dasharray"),
+        f"{key_root}_visible_line_width_samples": _layer_control_sample(
             visible_line_layers,
             "line-width",
         ),
-        "qgis_path_pedestrian_visible_line_color_samples": _layer_control_sample(
+        f"{key_root}_visible_line_color_samples": _layer_control_sample(
             visible_line_layers,
             "line-color",
         ),
-        "qgis_path_pedestrian_visible_fill_color_samples": _layer_control_sample(
+        f"{key_root}_visible_fill_color_samples": _layer_control_sample(
             visible_fill_layers,
             "fill-color",
         ),
-        "qgis_path_pedestrian_visible_line_dasharray_samples": _layer_control_sample(
+        f"{key_root}_visible_line_dasharray_samples": _layer_control_sample(
             visible_line_layers,
             "line-dasharray",
         ),
     }
 
 
+def qgis_path_pedestrian_style_summary(
+    style: Mapping[str, object],
+    *,
+    camera_zoom: float | None = None,
+) -> dict[str, object]:
+    return _path_pedestrian_style_summary(
+        style,
+        camera_zoom=camera_zoom,
+        prefix="qgis",
+        status="available",
+    )
+
+
+def source_path_pedestrian_style_summary(
+    style: Mapping[str, object],
+    *,
+    camera_zoom: float | None = None,
+) -> dict[str, object]:
+    return _path_pedestrian_style_summary(
+        style,
+        camera_zoom=camera_zoom,
+        prefix="source",
+        status="available",
+    )
+
+
+def _missing_style_summary(prefix: str) -> dict[str, object]:
+    return _path_pedestrian_style_summary(
+        {},
+        prefix=prefix,
+        status="missing",
+    )
+
+
 def _missing_qgis_style_summary() -> dict[str, object]:
-    return {
-        "qgis_style_status": "missing",
-        "qgis_path_pedestrian_layer_count": 0,
-        "qgis_path_pedestrian_line_layer_count": 0,
-        "qgis_path_pedestrian_fill_layer_count": 0,
-        "qgis_path_pedestrian_filter_layer_count": 0,
-        "qgis_path_pedestrian_line_width_layer_count": 0,
-        "qgis_path_pedestrian_line_color_layer_count": 0,
-        "qgis_path_pedestrian_fill_color_layer_count": 0,
-        "qgis_path_pedestrian_line_dasharray_layer_count": 0,
-        "qgis_path_pedestrian_line_opacity_layer_count": 0,
-        "qgis_path_pedestrian_visible_layer_count": 0,
-        "qgis_path_pedestrian_visible_line_layer_count": 0,
-        "qgis_path_pedestrian_visible_fill_layer_count": 0,
-        "qgis_path_pedestrian_visible_filter_layer_count": 0,
-        "qgis_path_pedestrian_visible_line_width_layer_count": 0,
-        "qgis_path_pedestrian_visible_line_color_layer_count": 0,
-        "qgis_path_pedestrian_visible_fill_color_layer_count": 0,
-        "qgis_path_pedestrian_visible_line_dasharray_layer_count": 0,
-        "qgis_path_pedestrian_visible_line_opacity_layer_count": 0,
-        "qgis_path_pedestrian_layer_ids": [],
-        "qgis_path_pedestrian_visible_layer_ids": [],
-        "qgis_path_pedestrian_layer_details": [],
-        "qgis_path_pedestrian_visible_layer_details": [],
-        "qgis_path_pedestrian_label_source_layer_count": 0,
-        "qgis_path_pedestrian_visible_label_source_layer_count": 0,
-        "qgis_path_pedestrian_label_source_details": [],
-        "qgis_path_pedestrian_visible_label_source_details": [],
-        "qgis_path_pedestrian_line_width_samples": [],
-        "qgis_path_pedestrian_line_color_samples": [],
-        "qgis_path_pedestrian_fill_color_samples": [],
-        "qgis_path_pedestrian_line_dasharray_samples": [],
-        "qgis_path_pedestrian_visible_line_width_samples": [],
-        "qgis_path_pedestrian_visible_line_color_samples": [],
-        "qgis_path_pedestrian_visible_fill_color_samples": [],
-        "qgis_path_pedestrian_visible_line_dasharray_samples": [],
-    }
+    return _missing_style_summary("qgis")
+
+
+def _missing_source_style_summary() -> dict[str, object]:
+    return _missing_style_summary("source")
 
 
 def _label_style_rows(label_styles: Iterable[object]) -> list[dict[str, object]]:
@@ -963,6 +968,7 @@ def _duplicate_label_diagnostic(camera: Mapping[str, object]) -> dict[str, objec
 def _camera_focus_row(
     camera_report: Mapping[str, object],
     *,
+    source_style: Mapping[str, object] | None,
     qgis_style: Mapping[str, object] | None,
     qgis_label_styles: Iterable[object] | None,
 ) -> dict[str, object]:
@@ -987,6 +993,11 @@ def _camera_focus_row(
         "top_step_signatures": _top_count_labels(camera_report.get("step_line_signature_counts")),
     }
     camera_zoom = _numeric_zoom(camera_report.get("camera_zoom"))
+    row.update(
+        source_path_pedestrian_style_summary(source_style, camera_zoom=camera_zoom)
+        if source_style is not None
+        else _missing_source_style_summary()
+    )
     row.update(
         qgis_path_pedestrian_style_summary(qgis_style, camera_zoom=camera_zoom)
         if qgis_style is not None
@@ -1017,9 +1028,46 @@ def _json_safe_artifacts(input_artifacts: Mapping[str, object]) -> dict[str, obj
     return {str(key): _json_safe_artifact_value(value) for key, value in input_artifacts.items()}
 
 
+def _focus_camera_reports(road_feature_report: Mapping[str, object]) -> list[Mapping[str, object]]:
+    camera_reports = road_feature_report.get("cameras")
+    if not isinstance(camera_reports, list):
+        return []
+    return [camera_report for camera_report in camera_reports if isinstance(camera_report, Mapping)]
+
+
+def _is_path_pedestrian_focus_camera(camera_report: Mapping[str, object]) -> bool:
+    return camera_report.get("status") == "decoded" and _has_path_pedestrian_focus(camera_report)
+
+
+def _build_camera_focus_rows(
+    road_feature_report: Mapping[str, object],
+    *,
+    source_style: Mapping[str, object] | None,
+    qgis_styles: Mapping[str, Mapping[str, object]],
+    qgis_label_styles: Mapping[str, Iterable[object]],
+    visual_artifacts: Mapping[str, Mapping[str, object]],
+) -> list[dict[str, object]]:
+    rows = []
+    for camera_report in _focus_camera_reports(road_feature_report):
+        if not _is_path_pedestrian_focus_camera(camera_report):
+            continue
+        camera_name = str(camera_report.get("camera") or "")
+        row = _camera_focus_row(
+            camera_report,
+            source_style=source_style,
+            qgis_style=qgis_styles.get(camera_name),
+            qgis_label_styles=qgis_label_styles.get(camera_name),
+        )
+        if camera_name in visual_artifacts:
+            row["visual_artifacts"] = _json_safe_artifact_value(visual_artifacts[camera_name])
+        rows.append(row)
+    return rows
+
+
 def build_path_pedestrian_focus_report(
     road_feature_report: Mapping[str, object],
     *,
+    source_style: Mapping[str, object] | None = None,
     qgis_styles_by_camera: Mapping[str, Mapping[str, object]] | None = None,
     qgis_label_styles_by_camera: Mapping[str, Iterable[object]] | None = None,
     visual_artifacts_by_camera: Mapping[str, Mapping[str, object]] | None = None,
@@ -1029,24 +1077,16 @@ def build_path_pedestrian_focus_report(
     qgis_styles = qgis_styles_by_camera or {}
     qgis_label_styles = qgis_label_styles_by_camera or {}
     visual_artifacts = visual_artifacts_by_camera or {}
-    camera_reports = road_feature_report.get("cameras")
-    source_rows = camera_reports if isinstance(camera_reports, list) else []
-    rows = []
-    for camera_report in source_rows:
-        if not isinstance(camera_report, Mapping):
-            continue
-        if camera_report.get("status") != "decoded" or not _has_path_pedestrian_focus(camera_report):
-            continue
-        camera_name = str(camera_report.get("camera") or "")
-        row = _camera_focus_row(
-            camera_report,
-            qgis_style=qgis_styles.get(camera_name),
-            qgis_label_styles=qgis_label_styles.get(camera_name),
-        )
-        if camera_name in visual_artifacts:
-            row["visual_artifacts"] = _json_safe_artifact_value(visual_artifacts[camera_name])
-        rows.append(row)
+    rows = _build_camera_focus_rows(
+        road_feature_report,
+        source_style=source_style,
+        qgis_styles=qgis_styles,
+        qgis_label_styles=qgis_label_styles,
+        visual_artifacts=visual_artifacts,
+    )
     generated = generated_at or dt.datetime.now(dt.timezone.utc)
+    source_style_input_count = 1 if source_style is not None else 0
+    source_matched_camera_count = sum(1 for row in rows if row.get("source_style_status") == "available")
     qgis_matched_camera_count = sum(1 for row in rows if row.get("qgis_style_status") == "available")
     qgis_label_matched_camera_count = sum(
         1 for row in rows if row.get("qgis_label_style_status") == "available"
@@ -1057,6 +1097,8 @@ def build_path_pedestrian_focus_report(
         "style_owner": road_feature_report.get("style_owner"),
         "style_id": road_feature_report.get("style_id"),
         "camera_count": len(rows),
+        "source_style_camera_count": source_matched_camera_count,
+        "source_style_input_count": source_style_input_count,
         "qgis_style_camera_count": qgis_matched_camera_count,
         "qgis_style_input_count": len(qgis_styles),
         "qgis_label_style_camera_count": qgis_label_matched_camera_count,
@@ -1126,6 +1168,9 @@ def _input_artifact_markdown_lines(report: Mapping[str, object]) -> list[str]:
     road_features_json = input_artifacts.get("road_features_json")
     if isinstance(road_features_json, str) and road_features_json:
         lines.append(f"Road features input: `{road_features_json}`")
+    source_style_json = input_artifacts.get("source_style_json")
+    if isinstance(source_style_json, str) and source_style_json:
+        lines.append(f"Source style input: `{source_style_json}`")
     comparison_summary_jsons = _string_list(input_artifacts.get("comparison_summary_jsons"))
     if comparison_summary_jsons:
         lines.append(f"Comparison summary inputs: `{', '.join(comparison_summary_jsons)}`")
@@ -1158,13 +1203,18 @@ def _detail_paint_controls(detail: Mapping[str, object]) -> list[str]:
     ]
 
 
-def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
-    lines = ["", "## Visible QGIS layer details", ""]
+def _visible_style_detail_markdown_lines(
+    cameras: Iterable[object],
+    *,
+    detail_key: str,
+    title: str,
+) -> list[str]:
+    lines = ["", title, ""]
     detail_row_count = 0
     for camera in cameras:
         if not isinstance(camera, Mapping):
             continue
-        details = camera.get("qgis_path_pedestrian_visible_layer_details")
+        details = camera.get(detail_key)
         detail_rows = details if isinstance(details, list) else []
         mapping_rows = [detail for detail in detail_rows if isinstance(detail, Mapping)]
         if not mapping_rows:
@@ -1192,6 +1242,22 @@ def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
             )
         lines.append("")
     return lines if detail_row_count else []
+
+
+def _visible_source_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    return _visible_style_detail_markdown_lines(
+        cameras,
+        detail_key="source_path_pedestrian_visible_layer_details",
+        title="## Visible source Mapbox layer details",
+    )
+
+
+def _visible_detail_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    return _visible_style_detail_markdown_lines(
+        cameras,
+        detail_key="qgis_path_pedestrian_visible_layer_details",
+        title="## Visible QGIS layer details",
+    )
 
 
 def _label_detail_zoom_band(detail: Mapping[str, object]) -> str:
@@ -1400,6 +1466,8 @@ def _duplicate_label_diagnostic_markdown_lines(cameras: Iterable[object]) -> lis
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     cameras = report.get("cameras")
     rows = cameras if isinstance(cameras, list) else []
+    source_style_input_count = report.get("source_style_input_count", 0)
+    source_style_denominator = report.get("camera_count", 0) if source_style_input_count else 0
     lines = [
         "# Mapbox Outdoors path/pedestrian focus",
         "",
@@ -1407,6 +1475,10 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         f"Road feature generated: {report.get('road_feature_generated')}",
         f"Style: {report.get('style_owner')}/{report.get('style_id')}",
         f"Focused cameras: {report.get('camera_count')}",
+        (
+            "Source style cameras: "
+            f"{report.get('source_style_camera_count', 0)}/{source_style_denominator} matched"
+        ),
         (
             "QGIS preprocessed style cameras: "
             f"{report.get('qgis_style_camera_count')}/{report.get('qgis_style_input_count', 0)} matched"
@@ -1428,7 +1500,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 "style layers that can render path, pedestrian, trail, piste, or step features."
             ),
             (
-                "Visible QGIS counts apply the camera zoom to style-layer minzoom/maxzoom, "
+                "Visible source and QGIS counts apply the camera zoom to style-layer minzoom/maxzoom, "
                 "so zoom-banded preprocessing can be reviewed against the layers active in each camera."
             ),
             "",
@@ -1490,6 +1562,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         )
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
+    lines.extend(_visible_source_detail_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
     lines.extend(_visible_label_thinning_markdown_lines(rows))
     lines.extend(_visible_label_detail_markdown_lines(rows))
@@ -1539,6 +1612,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_ROAD_FEATURES_PATH,
         help="Path to all-camera road-features.json.",
+    )
+    parser.add_argument(
+        "--source-style-json",
+        type=Path,
+        help="Source Mapbox style JSON used to capture browser reference artifacts.",
     )
     parser.add_argument(
         "--qgis-style-json",
@@ -1643,6 +1721,11 @@ def main(argv: list[str] | None = None) -> int:
         args.road_features_json,
         label="Road features JSON",
     )
+    source_style = (
+        _load_cli_json_object(parser, args.source_style_json, label="Source style JSON")
+        if args.source_style_json is not None
+        else None
+    )
     qgis_style_paths_by_camera: dict[str, Path] = {}
     qgis_label_style_paths_by_camera: dict[str, Path] = {}
     visual_artifacts_by_camera: dict[str, dict[str, object]] = {}
@@ -1666,11 +1749,17 @@ def main(argv: list[str] | None = None) -> int:
     }
     report = build_path_pedestrian_focus_report(
         road_feature_report,
+        source_style=source_style,
         qgis_styles_by_camera=qgis_styles_by_camera,
         qgis_label_styles_by_camera=qgis_label_styles_by_camera,
         visual_artifacts_by_camera=_display_visual_artifacts_by_camera(visual_artifacts_by_camera),
         input_artifacts={
             "road_features_json": _display_input_path(args.road_features_json),
+            "source_style_json": (
+                _display_input_path(args.source_style_json)
+                if args.source_style_json is not None
+                else None
+            ),
             "comparison_summary_jsons": [_display_input_path(path) for path in args.comparison_summary_json],
             "qgis_style_cameras": sorted(qgis_style_paths_by_camera),
             "qgis_label_style_cameras": sorted(qgis_label_style_paths_by_camera),
