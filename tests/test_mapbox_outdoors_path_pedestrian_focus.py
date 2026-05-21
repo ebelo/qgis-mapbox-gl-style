@@ -959,6 +959,59 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("line-width_raw_mm=3.175", markdown)
         self.assertIn("line-width_capped=true", markdown)
 
+    def test_build_path_pedestrian_focus_report_adds_step_structure_candidate_counts(self):
+        road_report = {
+            "generated": "2026-05-20T01:09:13+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "cameras": [
+                {
+                    "status": "decoded",
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "camera_zoom": 18.0,
+                    "tile_zoom": 18,
+                    "step_line_candidate_count": 3,
+                    "step_line_structure_counts": {"none": 2, "bridge": 1},
+                }
+            ],
+        }
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-steps",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": 2},
+                }
+            ],
+        }
+        qgis_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-steps-z18-plus",
+                    "type": "line",
+                    "minzoom": 18,
+                    "paint": {"line-width": 1.0},
+                }
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            road_report,
+            source_style=source_style,
+            qgis_styles_by_camera={"zermatt-trails-z18-outdoors": qgis_style},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        [comparison] = camera["source_qgis_stroke_control_comparisons"]
+        self.assertEqual(comparison["decoded_candidate_count"], 3)
+        self.assertEqual(comparison["decoded_candidate_type_counts"], {"none": 2, "bridge": 1})
+        markdown = build_summary_markdown(report)
+        self.assertIn('types={\\"bridge\\":1,\\"none\\":2}', markdown)
+
     def test_build_path_pedestrian_focus_report_pairs_split_road_path_strokes_with_source_layer(self):
         road_report = _road_feature_report()
         road_report["cameras"][0]["camera_zoom"] = 18.0

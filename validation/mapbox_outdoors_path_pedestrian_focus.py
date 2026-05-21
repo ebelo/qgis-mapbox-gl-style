@@ -1118,7 +1118,10 @@ def _source_layer_decoded_candidate_summary(
             total_count=_candidate_count_value(camera.get("pedestrian_line_count")),
         )
     if source_layer_id in {"road-steps", "road-steps-bg"}:
-        return {"decoded_candidate_count": _candidate_count_value(camera.get("step_line_count"))}
+        return _candidate_count_summary(
+            _candidate_count_map(camera.get("step_line_structure_counts")),
+            total_count=_candidate_count_value(camera.get("step_line_count")),
+        )
     if source_layer_id == "road-path-trail":
         return _candidate_count_summary(
             _filtered_candidate_counts(
