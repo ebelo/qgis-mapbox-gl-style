@@ -1997,7 +1997,30 @@ def _candidate_backed_focus_summaries(
     ]
 
 
-def _summary_focus_row(camera: object) -> list[object] | None:
+def _focus_movement_group_labels(
+    report: Mapping[str, object],
+    camera_name: object,
+) -> list[str]:
+    if not isinstance(camera_name, str) or not camera_name:
+        return []
+    labels: list[str] = []
+    for record in _crop_color_movement_group_records(report)[
+        :DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT
+    ]:
+        movement = record.get("movement")
+        cameras = record.get("cameras")
+        if not isinstance(movement, str) or not isinstance(cameras, Mapping):
+            continue
+        count = cameras.get(camera_name)
+        if isinstance(count, int) and not isinstance(count, bool):
+            labels.append(f"{movement}={count}")
+    return labels
+
+
+def _summary_focus_row(
+    report: Mapping[str, object],
+    camera: object,
+) -> list[object] | None:
     if not isinstance(camera, Mapping):
         return None
     focus = camera.get("path_pedestrian_focus")
@@ -2015,14 +2038,20 @@ def _summary_focus_row(camera: object) -> list[object] | None:
     )
     if not stroke_summaries and not dash_summaries:
         return None
-    return [camera.get("camera"), stroke_summaries, dash_summaries]
+    camera_name = camera.get("camera")
+    return [
+        camera_name,
+        _joined_summary_labels(_focus_movement_group_labels(report, camera_name)),
+        stroke_summaries,
+        dash_summaries,
+    ]
 
 
 def _summary_focus_rows(report: Mapping[str, object]) -> list[list[object]]:
     return [
         row
         for camera in report.get("cameras", [])
-        if (row := _summary_focus_row(camera)) is not None
+        if (row := _summary_focus_row(report, camera)) is not None
     ]
 
 
@@ -2038,11 +2067,12 @@ def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
             (
                 "Shows the strongest per-camera path/pedestrian stroke cues from the focus report "
                 "next to visual hotspots, so crop review can distinguish candidate-backed style gaps "
-                "from capped-width or zero-candidate artifacts."
+                "from capped-width or zero-candidate artifacts and relate those cues to crop-local "
+                "color movement families."
             ),
             "",
-            "| Camera | Stroke width cues | Dash mismatch cues |",
-            "| --- | --- | --- |",
+            "| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |",
+            "| --- | --- | --- | --- |",
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)
