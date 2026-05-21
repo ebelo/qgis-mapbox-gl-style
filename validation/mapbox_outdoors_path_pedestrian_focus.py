@@ -19,6 +19,7 @@ from qfit.mapbox_config import (  # noqa: E402
     _extract_line_dasharray_literal,
     _extract_zoom_scalar_size_at_zoom,
     _line_width_mm_at_zoom,
+    _literal_line_dasharray,
     base_mapbox_style_layer_id_for_qfit,
 )
 
@@ -60,6 +61,13 @@ PATH_PEDESTRIAN_STROKE_CONTROL_KEYS = (
     "line-color",
     "line-dasharray",
     "line-opacity",
+)
+PATH_PEDESTRIAN_STROKE_DELTA_KEYS = (
+    "line-width_delta_mm",
+    "line-width_ratio",
+    "line-dasharray_match",
+    "line-color_match",
+    "line-opacity_delta",
 )
 PATH_PEDESTRIAN_SOURCE_SPLIT_BASE_LAYER_IDS = frozenset(
     {
@@ -106,6 +114,7 @@ COMPARISON_VISUAL_METRIC_KEYS = (
 )
 MARKDOWN_SEPARATOR_5_COLUMNS = "| --- | --- | --- | --- | --- |"
 MARKDOWN_SEPARATOR_6_COLUMNS = "| --- | --- | --- | --- | --- | --- |"
+MARKDOWN_SEPARATOR_7_COLUMNS = "| --- | --- | --- | --- | --- | --- | --- |"
 UNSAMPLED_EXPRESSION_CONTROL = "expression-not-sampled"
 ARGPARSE_EXIT_SENTINEL = "argparse error should exit"
 
@@ -1046,6 +1055,44 @@ def _source_sampled_stroke_controls(
     return sampled_controls
 
 
+def _numeric_control(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _stroke_control_deltas(
+    source_sampled_controls: Mapping[str, object],
+    qgis_controls: Mapping[str, object],
+) -> dict[str, object]:
+    deltas: dict[str, object] = {}
+    source_width = _numeric_control(source_sampled_controls.get("line-width"))
+    qgis_width = _numeric_control(qgis_controls.get("line-width"))
+    if source_width is not None and qgis_width is not None:
+        deltas["line-width_delta_mm"] = qgis_width - source_width
+        if source_width:
+            deltas["line-width_ratio"] = qgis_width / source_width
+    source_dasharray = _literal_line_dasharray(source_sampled_controls.get("line-dasharray"))
+    qgis_dasharray = _literal_line_dasharray(qgis_controls.get("line-dasharray"))
+    if source_dasharray is not None and qgis_dasharray is not None:
+        deltas["line-dasharray_match"] = qgis_dasharray == source_dasharray
+    source_color = source_sampled_controls.get("line-color")
+    qgis_color = qgis_controls.get("line-color")
+    if (
+        isinstance(source_color, str)
+        and source_color
+        and source_color != UNSAMPLED_EXPRESSION_CONTROL
+        and isinstance(qgis_color, str)
+        and qgis_color
+    ):
+        deltas["line-color_match"] = qgis_color == source_color
+    source_opacity = _numeric_control(source_sampled_controls.get("line-opacity"))
+    qgis_opacity = _numeric_control(qgis_controls.get("line-opacity"))
+    if source_opacity is not None and qgis_opacity is not None:
+        deltas["line-opacity_delta"] = qgis_opacity - source_opacity
+    return deltas
+
+
 def _qgis_stroke_details_by_source_id(
     qgis_details: Iterable[Mapping[str, object]],
 ) -> dict[str, list[Mapping[str, object]]]:
@@ -1066,16 +1113,27 @@ def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> lis
     for source_detail in source_details:
         source_id = str(source_detail.get("id") or "")
         matched_details = qgis_details_by_source_id.get(source_id, [])
+        source_sampled_controls = _source_sampled_stroke_controls(source_detail, camera_zoom)
         comparisons.append(
             {
                 "source_layer_id": source_id,
                 "source_controls": _stroke_controls(source_detail),
-                "source_sampled_controls": _source_sampled_stroke_controls(source_detail, camera_zoom),
+                "source_sampled_controls": source_sampled_controls,
                 "qgis_layer_ids": [str(detail.get("id") or "") for detail in matched_details],
                 "qgis_controls": [
                     {
                         "layer_id": str(detail.get("id") or ""),
                         "controls": _stroke_controls(detail),
+                    }
+                    for detail in matched_details
+                ],
+                "qgis_control_deltas": [
+                    {
+                        "layer_id": str(detail.get("id") or ""),
+                        "deltas": _stroke_control_deltas(
+                            source_sampled_controls,
+                            _stroke_controls(detail),
+                        ),
                     }
                     for detail in matched_details
                 ],
@@ -1394,6 +1452,31 @@ def _qgis_stroke_control_summaries(comparison: Mapping[str, object]) -> list[str
     return summaries
 
 
+def _qgis_stroke_delta_summaries(comparison: Mapping[str, object]) -> list[str]:
+    delta_rows = comparison.get("qgis_control_deltas")
+    rows = delta_rows if isinstance(delta_rows, list) else []
+    summaries = []
+    for delta_row in rows:
+        if not isinstance(delta_row, Mapping):
+            continue
+        layer_id = str(delta_row.get("layer_id") or "")
+        deltas = delta_row.get("deltas")
+        delta_summary = _stroke_delta_summaries(deltas)
+        if layer_id and delta_summary:
+            summaries.append(f"{layer_id}: {', '.join(delta_summary)}")
+    return summaries
+
+
+def _stroke_delta_summaries(deltas: object) -> list[str]:
+    if not isinstance(deltas, Mapping):
+        return []
+    return [
+        f"{key}={_compact_json(deltas.get(key))}"
+        for key in PATH_PEDESTRIAN_STROKE_DELTA_KEYS
+        if key in deltas
+    ]
+
+
 def _stroke_control_summaries(controls: object) -> list[str]:
     if not isinstance(controls, Mapping):
         return []
@@ -1422,6 +1505,7 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
                     _stroke_control_summaries(comparison.get("source_sampled_controls")),
                     comparison.get("qgis_layer_ids"),
                     _qgis_stroke_control_summaries(comparison),
+                    _qgis_stroke_delta_summaries(comparison),
                 ]
             )
     if not rows:
@@ -1440,10 +1524,15 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
                 "expression colors are marked as expression-not-sampled and remain available "
                 "in the raw source controls."
             ),
+            (
+                "QGIS deltas compare visible QGIS controls against source sampled controls "
+                "where both sides are directly comparable; line-width deltas are QGIS minus "
+                "source in millimetres."
+            ),
             "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
             "",
-            "| Camera | Source layer | Source controls | Source sampled controls | QGIS layer ids | QGIS controls |",
-            MARKDOWN_SEPARATOR_6_COLUMNS,
+            "| Camera | Source layer | Source controls | Source sampled controls | QGIS layer ids | QGIS controls | QGIS deltas |",
+            MARKDOWN_SEPARATOR_7_COLUMNS,
         ]
     )
     lines.extend(_markdown_table_row(row) for row in rows)

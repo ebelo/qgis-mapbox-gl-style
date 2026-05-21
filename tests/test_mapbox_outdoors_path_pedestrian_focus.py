@@ -834,6 +834,17 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                             },
                         }
                     ],
+                    "qgis_control_deltas": [
+                        {
+                            "layer_id": "road-path",
+                            "deltas": {
+                                "line-width_delta_mm": 0.9377604166666667,
+                                "line-width_ratio": 2.667901806391848,
+                                "line-dasharray_match": False,
+                                "line-color_match": False,
+                            },
+                        }
+                    ],
                 }
             ],
         )
@@ -863,6 +874,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     "paint": {
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                        "line-dasharray": ["literal", [1, 0.2]],
                     },
                 }
             ],
@@ -877,6 +889,13 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     "paint": {
                         "line-color": "#f6f2e8",
                         "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                        "line-dasharray": [
+                            "step",
+                            ["zoom"],
+                            ["literal", [1, 0]],
+                            16,
+                            ["literal", [1, 0.2]],
+                        ],
                         "line-opacity": 0.65,
                     },
                 }
@@ -899,10 +918,12 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                     "source_controls": {
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                        "line-dasharray": ["literal", [1, 0.2]],
                     },
                     "source_sampled_controls": {
                         "line-width": 3.0,
                         "line-color": "hsl(0, 0%, 95%)",
+                        "line-dasharray": [1, 0.2],
                     },
                     "qgis_layer_ids": ["road-pedestrian-z16-plus"],
                     "qgis_controls": [
@@ -911,8 +932,21 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                             "controls": {
                                 "line-color": "#f6f2e8",
                                 "line-width": ["interpolate", ["linear"], ["zoom"], 14, 0.5, 18, 12],
+                                "line-dasharray": [
+                                    "step",
+                                    ["zoom"],
+                                    ["literal", [1, 0]],
+                                    16,
+                                    ["literal", [1, 0.2]],
+                                ],
                                 "line-opacity": 0.65,
                             },
+                        }
+                    ],
+                    "qgis_control_deltas": [
+                        {
+                            "layer_id": "road-pedestrian-z16-plus",
+                            "deltas": {"line-color_match": False},
                         }
                     ],
                 }
@@ -968,6 +1002,20 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                         "line-width": 1.0583333333333333,
                         "line-color": "hsl(0, 0%, 95%)",
                         "line-dasharray": [1, 0.3],
+                    },
+                }
+            ],
+        )
+        self.assertEqual(
+            comparisons["road-path"]["qgis_control_deltas"],
+            [
+                {
+                    "layer_id": "road-path-z16-plus",
+                    "deltas": {
+                        "line-width_delta_mm": 0.0,
+                        "line-width_ratio": 1.0,
+                        "line-dasharray_match": True,
+                        "line-color_match": True,
                     },
                 }
             ],
@@ -1132,12 +1180,15 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         self.assertIn("## Source vs QGIS stroke controls", markdown)
         self.assertIn("Source sampled controls evaluate zoom expressions at the camera zoom", markdown)
         self.assertIn("expression colors are marked as expression-not-sampled", markdown)
+        self.assertIn("QGIS deltas compare visible QGIS controls against source sampled controls", markdown)
         self.assertIn("| chamonix-trails-z14-outdoors | road-path |", markdown)
         self.assertIn('"line-width=0.5622395833333333"', markdown)
         self.assertIn('"line-dasharray=[4,0.3]"', markdown)
         self.assertIn('["road-path"]', markdown)
         self.assertIn('road-path: line-width=1.5', markdown)
         self.assertIn('line-dasharray=[1,1]', markdown)
+        self.assertIn("road-path: line-width_delta_mm=0.9377604166666667", markdown)
+        self.assertIn("line-dasharray_match=false", markdown)
         self.assertIn("## Visible QGIS layer details", markdown)
         self.assertIn("### chamonix-trails-z14-outdoors", markdown)
         self.assertIn("| road-path | line | 12<=z<16 |", markdown)
@@ -1236,6 +1287,7 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
                                 "source_controls": {"line-width": 1.0},
                                 "qgis_layer_ids": [],
                                 "qgis_controls": [],
+                                "qgis_control_deltas": [],
                             }
                         ],
                     }
@@ -1247,7 +1299,10 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
             "Rows with empty QGIS columns identify source strokes with no visible QGIS counterpart.",
             markdown,
         )
-        self.assertIn("| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] | [] |", markdown)
+        self.assertIn(
+            "| unmatched-source-stroke | road-path | [\"line-width=1.0\"] | [] | [] | [] | [] |",
+            markdown,
+        )
 
     def test_build_summary_markdown_handles_no_focus_rows(self):
         markdown = build_summary_markdown({"generated": "now", "cameras": []})
