@@ -1998,15 +1998,13 @@ def _candidate_backed_focus_summaries(
 
 
 def _focus_movement_group_labels(
-    report: Mapping[str, object],
+    movement_group_records: Sequence[Mapping[str, object]],
     camera_name: object,
 ) -> list[str]:
     if not isinstance(camera_name, str) or not camera_name:
         return []
     labels: list[str] = []
-    for record in _crop_color_movement_group_records(report)[
-        :DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT
-    ]:
+    for record in movement_group_records:
         movement = record.get("movement")
         cameras = record.get("cameras")
         if not isinstance(movement, str) or not isinstance(cameras, Mapping):
@@ -2014,11 +2012,13 @@ def _focus_movement_group_labels(
         count = cameras.get(camera_name)
         if isinstance(count, int) and not isinstance(count, bool):
             labels.append(f"{movement}={count}")
+            if len(labels) >= DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT:
+                break
     return labels
 
 
 def _summary_focus_row(
-    report: Mapping[str, object],
+    movement_group_records: Sequence[Mapping[str, object]],
     camera: object,
 ) -> list[object] | None:
     if not isinstance(camera, Mapping):
@@ -2041,17 +2041,20 @@ def _summary_focus_row(
     camera_name = camera.get("camera")
     return [
         camera_name,
-        _joined_summary_labels(_focus_movement_group_labels(report, camera_name)),
+        _joined_summary_labels(
+            _focus_movement_group_labels(movement_group_records, camera_name)
+        ),
         stroke_summaries,
         dash_summaries,
     ]
 
 
 def _summary_focus_rows(report: Mapping[str, object]) -> list[list[object]]:
+    movement_group_records = _crop_color_movement_group_records(report)
     return [
         row
         for camera in report.get("cameras", [])
-        if (row := _summary_focus_row(report, camera)) is not None
+        if (row := _summary_focus_row(movement_group_records, camera)) is not None
     ]
 
 

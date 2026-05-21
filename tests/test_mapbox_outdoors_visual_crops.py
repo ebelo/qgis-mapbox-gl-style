@@ -1757,9 +1757,16 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         for index in range(3, 9)
                     ],
                     {
-                        "movement": "hidden ninth movement",
+                        "movement": "camera movement below global top",
                         "cameras": {"chamonix-trails-z14-outdoors": 1},
                     },
+                    *[
+                        {
+                            "movement": f"extra chamonix movement {index}",
+                            "cameras": {"chamonix-trails-z14-outdoors": 1},
+                        }
+                        for index in range(1, 8)
+                    ],
                 ],
                 "cameras": [
                     {
@@ -1805,8 +1812,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn("Path/pedestrian focus comparison match: `True`", markdown)
         self.assertIn("## Path/pedestrian focus cues", markdown)
         self.assertIn("| Camera | Crop movement groups | Stroke width cues | Dash mismatch cues |", markdown)
-        self.assertIn("| chamonix-trails-z14-outdoors | lighter + blue higher=2 |", markdown)
-        self.assertNotIn("hidden ninth movement=1", markdown)
+        self.assertIn("| chamonix-trails-z14-outdoors | lighter + blue higher=2", markdown)
+        self.assertIn("camera movement below global top=1", markdown)
+        self.assertIn("extra chamonix movement 6=1", markdown)
+        self.assertNotIn("extra chamonix movement 7=1", markdown)
         self.assertIn("road-path-trail->road-path-trail-below-z16", markdown)
         self.assertIn("candidates=74 (trail=69, hiking=5)", markdown)
         self.assertIn("candidate_types=trail=69", markdown)
