@@ -1131,6 +1131,19 @@ def _style_audit_count_rows(
     ]
 
 
+def _style_audit_candidate_layer_ids(
+    candidates: Sequence[Mapping[str, object]],
+) -> list[str]:
+    seen: set[str] = set()
+    layer_ids: list[str] = []
+    for candidate in candidates:
+        layer_id = candidate.get("layer")
+        if isinstance(layer_id, str) and layer_id and layer_id not in seen:
+            seen.add(layer_id)
+            layer_ids.append(layer_id)
+    return layer_ids
+
+
 def _style_audit_filter_signature_rows(
     candidates: list[Mapping[str, object]],
 ) -> list[dict[str, object]]:
@@ -1350,6 +1363,7 @@ def _style_audit_area_fill_camera_area_row(
         "key": section["key"],
         "label": section["label"],
         "active_candidate_count": len(active_candidates),
+        "active_layers": _style_audit_candidate_layer_ids(active_candidates),
         "by_source_layer": _style_audit_count_rows(
             active_candidates,
             "source_layer",
@@ -3152,10 +3166,10 @@ def _style_audit_area_fill_camera_focus_lines(report: Mapping[str, object]) -> l
         "",
         (
             "| Camera | Zoom | Crops | Crop movement groups | Area | Active candidates | "
-            "Source layers | Types | Simplified controls | QGIS-dependent controls | "
+            "Active layers | Source layers | Types | Simplified controls | QGIS-dependent controls | "
             "Sample active layers |"
         ),
-        "| --- | ---: | ---: | --- | --- | ---: | --- | --- | --- | --- | --- |",
+        "| --- | ---: | ---: | --- | --- | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for camera_focus in rows:
         if not isinstance(camera_focus, Mapping):
@@ -3181,6 +3195,7 @@ def _style_audit_area_fill_camera_focus_lines(report: Mapping[str, object]) -> l
                         ),
                         area.get("label"),
                         area.get("active_candidate_count"),
+                        _joined_summary_labels(_string_values(area.get("active_layers"))),
                         _joined_summary_labels(
                             _count_summary_labels(area.get("by_source_layer"), "source_layer")
                         ),

@@ -176,7 +176,7 @@ It also groups crop movements by luminance direction and dominant RGB channel, i
 The same movement groups are stored in `visual-crops.json` under `crop_color_movement_groups`, including a representative crop for each group, for follow-up scripts that should not parse the Markdown summary.
 
 When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit.
-The crop report includes the global terrain/landcover and airport/special-landuse candidate counts, crop-local color movement cues, camera-zoom-filtered active area-fill candidates, filter-operator signatures, sample-layer filter signatures, and compact qfit simplification snippets for sampled controls:
+The crop report includes the global terrain/landcover and airport/special-landuse candidate counts, crop-local color movement cues, camera-zoom-filtered active area-fill candidate counts and layer IDs, filter-operator signatures, sample-layer filter signatures, and compact qfit simplification snippets for sampled controls:
 
 ```bash
 python3 validation/mapbox_outdoors_visual_crops.py \
@@ -184,7 +184,7 @@ python3 validation/mapbox_outdoors_visual_crops.py \
   --style-audit-json debug/mapbox-outdoors-style-audit/mapbox-outdoors-v12/<timestamp>/audit.json
 ```
 
-The camera-focus table uses the comparison summary's camera zoom and Mapbox-style minzoom/maxzoom bands to keep global area-fill audit rows that are outside the cropped camera's inspection scale out of the per-camera sample list.
+The camera-focus table uses the comparison summary's camera zoom and Mapbox-style minzoom/maxzoom bands to keep global area-fill audit rows that are outside the cropped camera's inspection scale out of the per-camera sample list. It keeps every active layer ID visible even when the detailed sample-layer cells are capped.
 
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 

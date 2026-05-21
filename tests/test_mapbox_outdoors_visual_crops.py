@@ -1134,12 +1134,20 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 1,
             )
             self.assertEqual(
+                camera_focus_areas["terrain_landcover"]["active_layers"],
+                ["contour"],
+            )
+            self.assertEqual(
                 camera_focus_areas["terrain_landcover"]["sample_candidates"][0]["layer"],
                 "contour",
             )
             self.assertEqual(
                 camera_focus_areas["airport_special_landuse"]["active_candidate_count"],
                 1,
+            )
+            self.assertEqual(
+                camera_focus_areas["airport_special_landuse"]["active_layers"],
+                ["landuse-other-z10-plus-airport"],
             )
             focus[0]["sample_candidates"].append({"source_layer": "landcover", "type": "fill"})
             markdown = build_summary_markdown(report)
@@ -1190,6 +1198,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 1,
             )[1]
             self.assertIn("| Camera | Zoom | Crops |", camera_focus_markdown)
+            self.assertIn("Active layers", camera_focus_markdown)
             self.assertIn("| chamonix-trails-z14-outdoors | 14.25 | 1 |", camera_focus_markdown)
             self.assertIn("contour (contour/line", camera_focus_markdown)
             self.assertNotIn("landcover (landcover/fill", camera_focus_markdown)
@@ -1333,6 +1342,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "type": "line",
                 },
                 {"layer": "pitch-outline", "source_layer": "landuse", "type": "line"},
+                {"layer": "wetland", "source_layer": "landuse_overlay", "type": "fill"},
             ]
             paths = build_visual_crop_paths(root / "debug" / "run")
 
@@ -1362,12 +1372,33 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "national-park_tint-band",
                 ],
             )
-            self.assertNotIn("wetland (", build_summary_markdown(report))
-            self.assertIn("wetland-pattern", build_summary_markdown(report))
-            self.assertIn("contour-line", build_summary_markdown(report))
+            terrain_camera_focus = report["style_audit_area_fill_camera_focus"][0]["areas"][0]
+            self.assertEqual(terrain_camera_focus["active_candidate_count"], 9)
+            self.assertEqual(
+                terrain_camera_focus["active_layers"],
+                [
+                    "landcover",
+                    "landuse",
+                    "national-park",
+                    "wetland",
+                    "wetland-pattern",
+                    "contour-line",
+                    "national-park_tint-band",
+                    "pitch-outline",
+                ],
+            )
+            markdown = build_summary_markdown(report)
+            camera_focus_md = markdown.split(
+                "## Style audit area-fill camera focus",
+                1,
+            )[1]
+            self.assertNotIn("wetland (", markdown)
+            self.assertIn("wetland-pattern", markdown)
+            self.assertIn("wetland-pattern, contour-line", camera_focus_md)
+            self.assertIn("contour-line", markdown)
             self.assertIn(
                 "qgis-warnings=Could not retrieve sprite 'wetland'",
-                build_summary_markdown(report),
+                markdown,
             )
 
     def test_generate_visual_crop_report_attaches_matching_comparison_delta_context(self):
