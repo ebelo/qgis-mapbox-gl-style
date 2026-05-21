@@ -51,6 +51,7 @@ CROP_IMAGE_COLUMNS = (
     ("qgis_vector_render", "QGIS"),
     ("diff", "Diff"),
 )
+CROP_COLOR_METRIC_KEYS = ("browser_reference", "qgis_vector_render")
 COMPARISON_CONTEXT_KEYS = (
     "status",
     "artifact_status",
@@ -265,6 +266,91 @@ def _write_crop_triplet(
 
 def _display_crop_outputs(outputs: Mapping[str, Path]) -> dict[str, str]:
     return {key: _display_input_path(path) for key, path in outputs.items()}
+
+
+def _crop_color_metric(
+    *,
+    image_path: Path,
+    image_module: Any,
+    image_stat_module: Any,
+) -> dict[str, object]:
+    with image_module.open(image_path) as image:
+        rgb_image = image.convert("RGB")
+        try:
+            stat = image_stat_module.Stat(rgb_image)
+            mean_values = list(getattr(stat, "mean", []))
+            if not mean_values:
+                pixel_count = max(1, rgb_image.width * rgb_image.height)
+                mean_values = [value / pixel_count for value in getattr(stat, "sum", [])]
+            mean_values = _three_channel_color_values(mean_values)
+            mean_rgb = [round(float(value), 3) for value in mean_values[:3]]
+            luminance = round(
+                (0.2126 * mean_rgb[0]) + (0.7152 * mean_rgb[1]) + (0.0722 * mean_rgb[2]),
+                3,
+            )
+            return {"mean_rgb": mean_rgb, "luminance": luminance}
+        finally:
+            if rgb_image is not image:
+                rgb_image.close()
+
+
+def _three_channel_color_values(values: Sequence[object]) -> list[float]:
+    numeric_values = [
+        float(value)
+        for value in values
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    if not numeric_values:
+        return [0.0, 0.0, 0.0]
+    if len(numeric_values) == 1:
+        return [numeric_values[0], numeric_values[0], numeric_values[0]]
+    if len(numeric_values) == 2:
+        return [numeric_values[0], numeric_values[1], 0.0]
+    return numeric_values[:3]
+
+
+def _crop_color_delta(
+    browser: Mapping[str, object],
+    qgis: Mapping[str, object],
+) -> dict[str, object] | None:
+    browser_rgb = browser.get("mean_rgb")
+    qgis_rgb = qgis.get("mean_rgb")
+    if not isinstance(browser_rgb, list) or not isinstance(qgis_rgb, list):
+        return None
+    return {
+        "mean_rgb": [
+            round(float(qgis_value) - float(browser_value), 3)
+            for browser_value, qgis_value in zip(browser_rgb[:3], qgis_rgb[:3])
+        ],
+        "luminance": round(
+            float(qgis.get("luminance", 0.0)) - float(browser.get("luminance", 0.0)),
+            3,
+        ),
+    }
+
+
+def _crop_color_metrics(
+    *,
+    outputs: Mapping[str, Path],
+    image_module: Any,
+    image_stat_module: Any,
+) -> dict[str, object]:
+    metrics = {
+        key: _crop_color_metric(
+            image_path=outputs[key],
+            image_module=image_module,
+            image_stat_module=image_stat_module,
+        )
+        for key in CROP_COLOR_METRIC_KEYS
+        if key in outputs
+    }
+    browser = metrics.get("browser_reference")
+    qgis = metrics.get("qgis_vector_render")
+    if isinstance(browser, Mapping) and isinstance(qgis, Mapping):
+        delta = _crop_color_delta(browser, qgis)
+        if delta is not None:
+            metrics["delta"] = delta
+    return metrics
 
 
 def _contact_sheet_outputs(outputs: Mapping[str, Path]) -> dict[str, str]:
@@ -927,12 +1013,18 @@ def _hotspot_crop_rows(
             run_dir=paths.run_dir,
             image_module=image_module,
         )
+        color_metrics = _crop_color_metrics(
+            outputs=outputs,
+            image_module=image_module,
+            image_stat_module=image_stat_module,
+        )
         crops.append(
             {
                 "index": crop_index,
                 "box": list(box),
                 "score": crop["score"],
                 "outputs": _display_crop_outputs(outputs),
+                "color_metrics": color_metrics,
             }
         )
         contact_sheet_entries.append(
@@ -1384,6 +1476,76 @@ def _summary_camera_rows(
     ]
 
 
+def _color_metric_label(metrics: object, key: str) -> str:
+    if not isinstance(metrics, Mapping):
+        return "-"
+    values = metrics.get(key)
+    if not isinstance(values, list):
+        return "-"
+    return ", ".join(f"{float(value):.1f}" for value in values[:3])
+
+
+def _luminance_metric_label(metrics: object) -> str:
+    if not isinstance(metrics, Mapping):
+        return "-"
+    value = metrics.get("luminance")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "-"
+    return f"{float(value):+.1f}"
+
+
+def _summary_crop_color_metric_rows(report: Mapping[str, object]) -> list[list[object]]:
+    rows: list[list[object]] = []
+    cameras = report.get("cameras")
+    if not isinstance(cameras, list):
+        return rows
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        crops = camera.get("crops")
+        if not isinstance(crops, list):
+            continue
+        for crop in crops:
+            if not isinstance(crop, Mapping):
+                continue
+            metrics = crop.get("color_metrics")
+            if not isinstance(metrics, Mapping):
+                continue
+            delta = metrics.get("delta")
+            rows.append(
+                [
+                    camera.get("camera"),
+                    crop.get("index"),
+                    _color_metric_label(metrics.get("browser_reference"), "mean_rgb"),
+                    _color_metric_label(metrics.get("qgis_vector_render"), "mean_rgb"),
+                    _color_metric_label(delta, "mean_rgb"),
+                    _luminance_metric_label(delta),
+                ]
+            )
+    return rows
+
+
+def _summary_crop_color_metric_lines(report: Mapping[str, object]) -> list[str]:
+    rows = _summary_crop_color_metric_rows(report)
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Crop color metrics",
+        "",
+        (
+            "Shows crop-local mean RGB values for the Mapbox GL and QGIS crops, plus "
+            "QGIS minus Mapbox deltas. Use this as triage context for broad terrain, "
+            "landcover, water, and tint differences."
+        ),
+        "",
+        "| Camera | Crop | Mapbox mean RGB | QGIS mean RGB | QGIS-Mapbox RGB | QGIS-Mapbox luminance |",
+        "| --- | ---: | --- | --- | --- | ---: |",
+    ]
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def _candidate_backed_focus_summaries(
     focus: Mapping[str, object],
     cue_key: str,
@@ -1617,6 +1779,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 include_comparison_delta=include_comparison_delta,
             )
         )
+    lines.extend(_summary_crop_color_metric_lines(report))
     lines.extend(_style_audit_area_fill_focus_lines(report))
     lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"

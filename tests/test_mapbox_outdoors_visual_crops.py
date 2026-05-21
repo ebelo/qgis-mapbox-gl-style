@@ -12,6 +12,8 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_visual_crops import (
     VisualCropAnnotationInputs,
+    _crop_color_metric,
+    _three_channel_color_values,
     annotate_visual_crop_report_with_comparison_delta,
     build_run_directory,
     build_summary_markdown,
@@ -96,6 +98,22 @@ class _FakeImageStatModule:
     class Stat:
         def __init__(self, image):
             self.sum = [image.brightness_sum()]
+            pixel_count = max(1, image.width * image.height)
+            self.mean = [self.sum[0] / pixel_count]
+
+
+class _EmptyColorStatModule:
+    class Stat:
+        def __init__(self, _image):
+            self.mean = []
+
+
+class _TwoChannelColorSumStatModule:
+    class Stat:
+        def __init__(self, image):
+            pixel_count = max(1, image.width * image.height)
+            self.mean = []
+            self.sum = [10.0 * pixel_count, 20.0 * pixel_count]
 
 
 def _fake_image_modules():
@@ -426,6 +444,42 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         with self.assertRaises(argparse.ArgumentTypeError):
             parse_crop_size("320-by-240")
 
+    def test_three_channel_color_values_handles_short_stat_outputs(self):
+        self.assertEqual(_three_channel_color_values([]), [0.0, 0.0, 0.0])
+        self.assertEqual(_three_channel_color_values([5]), [5.0, 5.0, 5.0])
+        self.assertEqual(_three_channel_color_values([5, 6]), [5.0, 6.0, 0.0])
+        self.assertEqual(_three_channel_color_values([5, 6, 7, 8]), [5.0, 6.0, 7.0])
+
+    def test_crop_color_metric_handles_empty_stat_outputs(self):
+        image_module = _FakeImageModule()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "crop.png"
+            _save_rgb_image(image_path, image_module, (5, 5, 5))
+
+            metric = _crop_color_metric(
+                image_path=image_path,
+                image_module=image_module,
+                image_stat_module=_EmptyColorStatModule,
+            )
+
+        self.assertEqual(metric["mean_rgb"], [0.0, 0.0, 0.0])
+        self.assertEqual(metric["luminance"], 0.0)
+
+    def test_crop_color_metric_pads_two_channel_fallback_stats(self):
+        image_module = _FakeImageModule()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            image_path = Path(tmpdir) / "crop.png"
+            _save_rgb_image(image_path, image_module, (5, 5, 5))
+
+            metric = _crop_color_metric(
+                image_path=image_path,
+                image_module=image_module,
+                image_stat_module=_TwoChannelColorSumStatModule,
+            )
+
+        self.assertEqual(metric["mean_rgb"], [10.0, 20.0, 0.0])
+        self.assertEqual(metric["luminance"], 16.43)
+
     def test_find_hotspot_crop_boxes_prefers_bright_non_overlapping_regions(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -531,6 +585,23 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             outputs = crop["outputs"]
             for path_text in outputs.values():
                 self.assertTrue((Path.cwd() / path_text).exists())
+            self.assertEqual(
+                crop["color_metrics"],
+                {
+                    "browser_reference": {
+                        "mean_rgb": [255.0, 255.0, 255.0],
+                        "luminance": 255.0,
+                    },
+                    "qgis_vector_render": {
+                        "mean_rgb": [128.0, 128.0, 128.0],
+                        "luminance": 128.0,
+                    },
+                    "delta": {
+                        "mean_rgb": [-127.0, -127.0, -127.0],
+                        "luminance": -127.0,
+                    },
+                },
+            )
             self.assertEqual(report["crop_count"], 1)
             self.assertTrue(paths.contact_sheet_path.exists())
             self.assertTrue(paths.json_path.exists())
@@ -548,6 +619,9 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "status": "passed",
                 },
             )
+            summary = paths.summary_path.read_text(encoding="utf-8")
+            self.assertIn("## Crop color metrics", summary)
+            self.assertIn("| chamonix-trails-z14-outdoors | 1 | 255.0, 255.0, 255.0 | 128.0, 128.0, 128.0 | -127.0, -127.0, -127.0 | -127.0 |", summary)
 
     def test_generate_visual_crop_report_marks_missing_required_artifacts(self):
         image_module, image_stat_module = _fake_image_modules()
