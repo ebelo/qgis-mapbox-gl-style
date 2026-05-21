@@ -849,16 +849,12 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ),
 )
 _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
-    "bridge-path-bg-z16-to-z18-outdoor",
-    "bridge-path-bg-z16-to-z18-remaining",
     "bridge-path-bg-z16-plus-outdoor",
     "bridge-path-bg-z16-plus-remaining",
     "bridge-path-bg-z18-plus-outdoor",
     "bridge-path-bg-z18-plus-remaining",
     "bridge-pedestrian-case-z16-to-z18",
     "bridge-pedestrian-case-z18-plus",
-    "road-path-bg-z16-to-z18-outdoor",
-    "road-path-bg-z16-to-z18-remaining",
     "road-path-bg-z16-plus-outdoor",
     "road-path-bg-z16-plus-remaining",
     "road-path-bg-z18-plus-outdoor",
@@ -3077,6 +3073,7 @@ def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: o
         width is not None
         and high_zoom_path_width
         and _path_background_line_color_base_layer_id(layer_id) is not None
+        and target_sample_zoom == _PATH_HIGH_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
     ):
         width *= _PATH_HIGH_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
     if width is not None and low_zoom_path_background_width:
@@ -3158,7 +3155,10 @@ def _path_trail_line_width_layer_variants(layer: dict[str, object]) -> list[dict
         layer,
         layer_ids=_PATH_TRAIL_LINE_WIDTH_LAYER_IDS,
         zoom_bands=_PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS,
-        line_width_scale=_PATH_TRAIL_LINE_WIDTH_QGIS_SCALE,
+        line_width_scales_by_suffix={
+            "below-z16": _PATH_TRAIL_LINE_WIDTH_QGIS_SCALE,
+            "z18-plus": _PATH_TRAIL_LINE_WIDTH_QGIS_SCALE,
+        },
     )
 
 
