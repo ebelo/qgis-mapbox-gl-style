@@ -1617,6 +1617,49 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
 
+    def test_build_summary_markdown_keeps_representative_camera_visible(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 4,
+                "crop_count": 8,
+                "crop_color_movement_groups": [
+                    {
+                        "movement": "lighter + red higher",
+                        "crop_count": 8,
+                        "max_abs_rgb_delta": 11.8,
+                        "max_abs_luminance_delta": 9.0,
+                        "cameras": {
+                            "zermatt-piste-z17-outdoors": 3,
+                            "geneva-airport-motorway-z14-outdoors": 2,
+                            "valais-geneva-outdoors": 2,
+                            "switzerland-alps-z5-outdoors": 1,
+                        },
+                        "representative_crop": {
+                            "camera": "switzerland-alps-z5-outdoors",
+                            "crop": 1,
+                            "box": [210, 600, 630, 900],
+                            "diff": "debug/switzerland-diff.png",
+                        },
+                    }
+                ],
+                "cameras": [],
+            }
+        )
+
+        self.assertIn(
+            (
+                "| lighter + red higher | 8 | 11.8 | 9.0 | "
+                "zermatt-piste-z17-outdoors=3, geneva-airport-motorway-z14-outdoors=2, "
+                "valais-geneva-outdoors=2, switzerland-alps-z5-outdoors=1 (representative) | "
+                "switzerland-alps-z5-outdoors crop 1 [210,600,630,900] `debug/switzerland-diff.png` |"
+            ),
+            markdown,
+        )
+
     def test_build_summary_markdown_handles_malformed_color_delta_values(self):
         markdown = build_summary_markdown(
             {

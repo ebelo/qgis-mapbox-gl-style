@@ -1808,6 +1808,24 @@ def _movement_group_representative_label(record: Mapping[str, object]) -> str:
     return " ".join(parts)
 
 
+def _movement_group_camera_labels(record: Mapping[str, object]) -> list[str]:
+    cameras = record.get("cameras")
+    labels = _top_count_labels(cameras)
+    representative = record.get("representative_crop")
+    if not isinstance(representative, Mapping) or not isinstance(cameras, Mapping):
+        return labels
+    representative_camera = representative.get("camera")
+    if not isinstance(representative_camera, str) or not representative_camera:
+        return labels
+    representative_count = cameras.get(representative_camera)
+    if not isinstance(representative_count, int) or isinstance(representative_count, bool):
+        return labels
+    prefix = f"{representative_camera}="
+    if any(label.startswith(prefix) for label in labels):
+        return labels
+    return [*labels, f"{representative_camera}={representative_count} (representative)"]
+
+
 def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> list[list[object]]:
     return [
         [
@@ -1815,7 +1833,7 @@ def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> lis
             record.get("crop_count"),
             f"{_crop_color_movement_group_record_float(record, 'max_abs_rgb_delta'):.1f}",
             f"{_crop_color_movement_group_record_float(record, 'max_abs_luminance_delta'):.1f}",
-            _joined_summary_labels(_top_count_labels(record.get("cameras"))),
+            _joined_summary_labels(_movement_group_camera_labels(record)),
             _movement_group_representative_label(record),
         ]
         for record in _crop_color_movement_group_records(report)[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]
