@@ -667,12 +667,19 @@ _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "tunnel-pedestrian",
     "tunnel-pedestrian-case",
 }
+_PEDESTRIAN_CASE_LINE_WIDTH_LAYER_IDS = {
+    "bridge-pedestrian-case",
+    "road-pedestrian-case",
+    "tunnel-pedestrian-case",
+}
+_PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX = "z16-plus"
+_PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM = 17.0
 _PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, float], ...] = (
     ("below-z16", None, 16.0, 14.0),
     # The live z18 pedestrian case width exceeds qfit's QGIS max line width.
-    # Sampling z17 restores high-zoom prominence while preserving the case/core
-    # width relationship instead of clamping both strokes to the same value.
-    ("z16-plus", 16.0, None, 17.0),
+    # Sampling z17 provides a stable case/core ratio; high-zoom pedestrian pairs
+    # scale together until the case stroke reaches the QGIS cap.
+    (_PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX, 16.0, None, _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM),
 )
 _PATH_TRAIL_LINE_WIDTH_LAYER_IDS = {
     "bridge-path-cycleway-piste",
@@ -2935,6 +2942,7 @@ def _line_width_zoom_band_layer_variants(
     layer_ids: set[str],
     zoom_bands: tuple[tuple[str, float | None, float | None, float], ...],
     line_width_scale: float = 1.0,
+    line_width_scales_by_suffix: dict[str, float] | None = None,
 ) -> list[dict[str, object]] | None:
     layer_id = str(layer.get("id") or "")
     paint = layer.get("paint")
@@ -2966,7 +2974,15 @@ def _line_width_zoom_band_layer_variants(
         line_width_mm = _line_width_mm_at_zoom(line_width, sampled_zoom)
         if line_width_mm is None:
             continue
-        line_width_mm = max(0.1, min(line_width_mm * line_width_scale, _MAX_LINE_WIDTH_MM))
+        band_scale = (
+            line_width_scales_by_suffix.get(suffix, 1.0)
+            if line_width_scales_by_suffix is not None
+            else 1.0
+        )
+        line_width_mm = max(
+            0.1,
+            min(line_width_mm * line_width_scale * band_scale, _MAX_LINE_WIDTH_MM),
+        )
 
         variant = copy.deepcopy(layer)
         variant["id"] = f"{layer_id}-{suffix}"
@@ -2995,12 +3011,48 @@ def _split_path_trail_line_width_layers_for_qgis(layers: object) -> object:
     )
 
 
-def _pedestrian_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
+def _pedestrian_pair_base_layer_id(layer_id: str) -> str:
+    return layer_id[: -len("-case")] if layer_id.endswith("-case") else layer_id
+
+
+def _pedestrian_high_zoom_cap_scales_by_base_layer_id(layers: list[object]) -> dict[str, float]:
+    scales: dict[str, float] = {}
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        layer_id = str(layer.get("id") or "")
+        paint = layer.get("paint")
+        if (
+            layer_id not in _PEDESTRIAN_CASE_LINE_WIDTH_LAYER_IDS
+            or layer.get("type") != "line"
+            or not isinstance(paint, dict)
+        ):
+            continue
+        line_width = paint.get("line-width")
+        if not isinstance(line_width, list):
+            continue
+        case_width_mm = _line_width_mm_at_zoom(line_width, _PEDESTRIAN_HIGH_ZOOM_SAMPLE_ZOOM)
+        if case_width_mm is not None and case_width_mm < _MAX_LINE_WIDTH_MM:
+            scales[_pedestrian_pair_base_layer_id(layer_id)] = _MAX_LINE_WIDTH_MM / case_width_mm
+    return scales
+
+
+def _pedestrian_line_width_layer_variants(
+    layer: dict[str, object],
+    *,
+    high_zoom_cap_scales_by_base_layer_id: dict[str, float],
+) -> list[dict[str, object]] | None:
     """Split audited pedestrian widths into static QGIS zoom bands."""
+    layer_id = str(layer.get("id") or "")
+    base_layer_id = _pedestrian_pair_base_layer_id(layer_id)
+    high_zoom_scale = high_zoom_cap_scales_by_base_layer_id.get(base_layer_id, 1.0)
     return _line_width_zoom_band_layer_variants(
         layer,
         layer_ids=_PEDESTRIAN_LINE_WIDTH_LAYER_IDS,
         zoom_bands=_PEDESTRIAN_LINE_WIDTH_ZOOM_BANDS,
+        line_width_scales_by_suffix={
+            _PEDESTRIAN_HIGH_ZOOM_WIDTH_BAND_SUFFIX: high_zoom_scale,
+        },
     )
 
 
@@ -3018,9 +3070,15 @@ def _split_line_width_zoom_band_layers_for_qgis(layers: object, *, variants_for_
 
 
 def _split_pedestrian_line_width_layers_for_qgis(layers: object) -> object:
+    if not isinstance(layers, list):
+        return layers
+    high_zoom_cap_scales_by_base_layer_id = _pedestrian_high_zoom_cap_scales_by_base_layer_id(layers)
     return _split_line_width_zoom_band_layers_for_qgis(
         layers,
-        variants_for_layer=_pedestrian_line_width_layer_variants,
+        variants_for_layer=lambda layer: _pedestrian_line_width_layer_variants(
+            layer,
+            high_zoom_cap_scales_by_base_layer_id=high_zoom_cap_scales_by_base_layer_id,
+        ),
     )
 
 

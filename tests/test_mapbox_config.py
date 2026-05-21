@@ -5920,14 +5920,21 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._extract_zoom_scalar_size_at_zoom(pedestrian_width, 14.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
-        pedestrian_high_mm = (
+        pedestrian_high_unscaled_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(pedestrian_width, 17.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
-        case_high_mm = (
+        pedestrian_high_unpaired_mm = min(
+            pedestrian_high_unscaled_mm,
+            mapbox_config._MAX_LINE_WIDTH_MM,
+        )
+        case_high_unscaled_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(case_width, 17.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
+        high_zoom_cap_scale = mapbox_config._MAX_LINE_WIDTH_MM / case_high_unscaled_mm
+        pedestrian_high_mm = pedestrian_high_unscaled_mm * high_zoom_cap_scale
+        case_high_mm = mapbox_config._MAX_LINE_WIDTH_MM
 
         self.assertAlmostEqual(
             by_id["road-pedestrian-below-z16"]["paint"]["line-width"],
@@ -5940,6 +5947,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(
             by_id["road-pedestrian-case-z16-plus"]["paint"]["line-width"],
             case_high_mm,
+        )
+        self.assertAlmostEqual(
+            by_id["bridge-pedestrian-z16-plus"]["paint"]["line-width"],
+            pedestrian_high_unpaired_mm,
         )
         self.assertEqual(
             by_id["road-pedestrian-case-z16-plus-pale-casing"]["paint"],
@@ -5954,6 +5965,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             by_id["road-pedestrian-case-z16-plus"].get("filter"),
         )
         self.assertGreater(case_high_mm, pedestrian_high_mm)
+        self.assertAlmostEqual(
+            case_high_mm / pedestrian_high_mm,
+            case_high_unscaled_mm / pedestrian_high_unscaled_mm,
+        )
         self.assertEqual(by_id["road-pedestrian-below-z16"]["maxzoom"], 16.0)
         self.assertEqual(by_id["road-pedestrian-z16-plus"]["minzoom"], 16.0)
         self.assertEqual(by_id["road-pedestrian-case-below-z16"]["minzoom"], 14)
