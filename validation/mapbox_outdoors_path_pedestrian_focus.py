@@ -81,6 +81,34 @@ PATH_PEDESTRIAN_SOURCE_SPLIT_SUFFIXES = (
     "-below-z16",
     "-z16-plus",
 )
+PATH_PEDESTRIAN_CORE_CASE_LAYER_PAIRS = (
+    ("road-pedestrian", "road-pedestrian-case"),
+    ("bridge-pedestrian", "bridge-pedestrian-case"),
+    ("tunnel-pedestrian", "tunnel-pedestrian-case"),
+)
+PATH_PEDESTRIAN_PALE_CASING_SUFFIX = "-pale-casing"
+PATH_PEDESTRIAN_CORE_CASE_SOURCE_KEYS = (
+    "source_both_widths_capped",
+    "source_case_to_core_ratio",
+    "source_case_over_core_mm",
+    "source_core_width_mm",
+    "source_case_width_mm",
+    "source_core_raw_width_mm",
+    "source_case_raw_width_mm",
+    "source_core_capped",
+    "source_case_capped",
+)
+PATH_PEDESTRIAN_CORE_CASE_QGIS_KEYS = (
+    "qgis_case_to_core_ratio",
+    "qgis_case_over_core_mm",
+    "qgis_ratio_preserving_core_width_mm_at_cap",
+    "qgis_core_width_mm",
+    "qgis_case_width_mm",
+    "qgis_pale_casing_width_mm",
+    "qgis_core_layer_id",
+    "qgis_case_layer_id",
+    "qgis_pale_casing_layer_id",
+)
 TOP_COUNT_LIMIT = 3
 SAMPLE_LAYER_LIMIT = 8
 DUPLICATE_LABEL_CATEGORY_KEYS = (
@@ -1156,6 +1184,145 @@ def _source_qgis_stroke_control_comparisons(camera: Mapping[str, object]) -> lis
     return comparisons
 
 
+def _comparison_by_source_id(
+    comparisons: Iterable[Mapping[str, object]],
+) -> dict[str, Mapping[str, object]]:
+    return {
+        str(comparison.get("source_layer_id") or ""): comparison
+        for comparison in comparisons
+        if comparison.get("source_layer_id")
+    }
+
+
+def _source_line_width_summary(
+    comparison: Mapping[str, object],
+    *,
+    prefix: str,
+) -> dict[str, object]:
+    controls = comparison.get("source_sampled_controls")
+    if not isinstance(controls, Mapping):
+        return {}
+    width = _numeric_control(controls.get("line-width"))
+    if width is None:
+        return {}
+    summary: dict[str, object] = {f"source_{prefix}_width_mm": width}
+    raw_width = _numeric_control(controls.get("line-width_raw_mm"))
+    if raw_width is not None:
+        summary[f"source_{prefix}_raw_width_mm"] = raw_width
+    summary[f"source_{prefix}_capped"] = controls.get("line-width_capped") is True
+    return summary
+
+
+def _qgis_line_width_summary(
+    comparison: Mapping[str, object],
+    *,
+    prefix: str,
+    include_layer_suffix: str | None = None,
+    exclude_layer_suffix: str | None = None,
+) -> dict[str, object]:
+    qgis_controls = comparison.get("qgis_controls")
+    control_rows = qgis_controls if isinstance(qgis_controls, list) else []
+    for control_row in control_rows:
+        if not isinstance(control_row, Mapping):
+            continue
+        layer_id = str(control_row.get("layer_id") or "")
+        if include_layer_suffix is not None and not layer_id.endswith(include_layer_suffix):
+            continue
+        if exclude_layer_suffix is not None and layer_id.endswith(exclude_layer_suffix):
+            continue
+        controls = control_row.get("controls")
+        if not isinstance(controls, Mapping):
+            continue
+        width = _numeric_control(controls.get("line-width"))
+        if width is None:
+            continue
+        return {f"qgis_{prefix}_layer_id": layer_id, f"qgis_{prefix}_width_mm": width}
+    return {}
+
+
+def _width_relationship(numerator: object, denominator: object) -> float | None:
+    numerator_value = _numeric_control(numerator)
+    denominator_value = _numeric_control(denominator)
+    if numerator_value is None or denominator_value is None or denominator_value == 0:
+        return None
+    return numerator_value / denominator_value
+
+
+def _add_source_core_case_relationship_fields(relationship: dict[str, object]) -> None:
+    core_width = _numeric_control(relationship.get("source_core_width_mm"))
+    case_width = _numeric_control(relationship.get("source_case_width_mm"))
+    if core_width is not None and case_width is not None:
+        relationship["source_both_widths_capped"] = (
+            relationship.get("source_core_capped") is True
+            and relationship.get("source_case_capped") is True
+        )
+        relationship["source_case_over_core_mm"] = case_width - core_width
+        source_ratio = _width_relationship(case_width, core_width)
+        if source_ratio is not None:
+            relationship["source_case_to_core_ratio"] = source_ratio
+
+
+def _add_qgis_core_case_relationship_fields(relationship: dict[str, object]) -> None:
+    core_width = _numeric_control(relationship.get("qgis_core_width_mm"))
+    case_width = _numeric_control(relationship.get("qgis_case_width_mm"))
+    if core_width is None or case_width is None:
+        return
+    relationship["qgis_case_over_core_mm"] = case_width - core_width
+    qgis_ratio = _width_relationship(case_width, core_width)
+    if qgis_ratio is not None:
+        relationship["qgis_case_to_core_ratio"] = qgis_ratio
+    if relationship.get("source_both_widths_capped") is True and qgis_ratio:
+        relationship["qgis_ratio_preserving_core_width_mm_at_cap"] = _MAX_LINE_WIDTH_MM / qgis_ratio
+
+
+def _pedestrian_core_case_cap_relationships(
+    camera: Mapping[str, object],
+) -> list[dict[str, object]]:
+    comparisons = camera.get("source_qgis_stroke_control_comparisons")
+    comparison_rows = comparisons if isinstance(comparisons, list) else []
+    comparisons_by_source_id = _comparison_by_source_id(
+        comparison for comparison in comparison_rows if isinstance(comparison, Mapping)
+    )
+    relationships: list[dict[str, object]] = []
+    for core_layer_id, case_layer_id in PATH_PEDESTRIAN_CORE_CASE_LAYER_PAIRS:
+        core_comparison = comparisons_by_source_id.get(core_layer_id)
+        case_comparison = comparisons_by_source_id.get(case_layer_id)
+        if core_comparison is None or case_comparison is None:
+            continue
+        relationship: dict[str, object] = {
+            "source_core_layer_id": core_layer_id,
+            "source_case_layer_id": case_layer_id,
+            "cap_limit_mm": _MAX_LINE_WIDTH_MM,
+        }
+        relationship.update(_source_line_width_summary(core_comparison, prefix="core"))
+        relationship.update(_source_line_width_summary(case_comparison, prefix="case"))
+        relationship.update(
+            _qgis_line_width_summary(
+                core_comparison,
+                prefix="core",
+                exclude_layer_suffix=PATH_PEDESTRIAN_PALE_CASING_SUFFIX,
+            )
+        )
+        relationship.update(
+            _qgis_line_width_summary(
+                case_comparison,
+                prefix="case",
+                exclude_layer_suffix=PATH_PEDESTRIAN_PALE_CASING_SUFFIX,
+            )
+        )
+        relationship.update(
+            _qgis_line_width_summary(
+                case_comparison,
+                prefix="pale_casing",
+                include_layer_suffix=PATH_PEDESTRIAN_PALE_CASING_SUFFIX,
+            )
+        )
+        _add_source_core_case_relationship_fields(relationship)
+        _add_qgis_core_case_relationship_fields(relationship)
+        relationships.append(relationship)
+    return relationships
+
+
 def _camera_focus_row(
     camera_report: Mapping[str, object],
     *,
@@ -1201,6 +1368,7 @@ def _camera_focus_row(
     )
     row["duplicate_label_diagnostic"] = _duplicate_label_diagnostic(row)
     row["source_qgis_stroke_control_comparisons"] = _source_qgis_stroke_control_comparisons(row)
+    row["pedestrian_core_case_cap_relationships"] = _pedestrian_core_case_cap_relationships(row)
     return row
 
 
@@ -1553,6 +1721,68 @@ def _source_qgis_stroke_control_markdown_lines(cameras: Iterable[object]) -> lis
     return lines
 
 
+def _core_case_relationship_summary(
+    relationship: Mapping[str, object],
+    keys: Iterable[str],
+) -> list[str]:
+    return [
+        f"{key}={_compact_json(relationship.get(key))}"
+        for key in keys
+        if key in relationship
+    ]
+
+
+def _pedestrian_core_case_cap_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows: list[list[object]] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            continue
+        relationships = camera.get("pedestrian_core_case_cap_relationships")
+        relationship_rows = relationships if isinstance(relationships, list) else []
+        for relationship in relationship_rows:
+            if not isinstance(relationship, Mapping):
+                continue
+            rows.append(
+                [
+                    camera.get("camera"),
+                    (
+                        f"{relationship.get('source_core_layer_id')}/"
+                        f"{relationship.get('source_case_layer_id')}"
+                    ),
+                    _core_case_relationship_summary(
+                        relationship,
+                        PATH_PEDESTRIAN_CORE_CASE_SOURCE_KEYS,
+                    ),
+                    _core_case_relationship_summary(
+                        relationship,
+                        PATH_PEDESTRIAN_CORE_CASE_QGIS_KEYS,
+                    ),
+                    f"cap_limit_mm={_compact_json(relationship.get('cap_limit_mm'))}",
+                ]
+            )
+    if not rows:
+        return []
+    lines = ["", "## Pedestrian core/case cap relationships", ""]
+    lines.extend(
+        [
+            (
+                "Compares pedestrian core and casing widths when source Mapbox widths "
+                "approach or exceed qfit's QGIS line-width cap."
+            ),
+            (
+                "The QGIS ratio-preserving core width is diagnostic only; it shows the "
+                "core width that would preserve the current QGIS case/core ratio if the "
+                "case stroke hit the cap."
+            ),
+            "",
+            "| Camera | Source pair | Source relationship | QGIS relationship | Cap |",
+            MARKDOWN_SEPARATOR_5_COLUMNS,
+        ]
+    )
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def _label_detail_zoom_band(detail: Mapping[str, object]) -> str:
     minzoom = detail.get("min_zoom_level")
     maxzoom = detail.get("max_zoom_level")
@@ -1856,6 +2086,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
     lines.extend(_source_qgis_stroke_control_markdown_lines(rows))
+    lines.extend(_pedestrian_core_case_cap_markdown_lines(rows))
     lines.extend(_visible_source_detail_markdown_lines(rows))
     lines.extend(_visible_detail_markdown_lines(rows))
     lines.extend(_visible_label_thinning_markdown_lines(rows))

@@ -1081,6 +1081,103 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         [comparison] = camera["source_qgis_stroke_control_comparisons"]
         self.assertEqual(comparison["source_sampled_controls"], {"line-width": 0.1})
 
+    def test_build_path_pedestrian_focus_report_summarizes_pedestrian_cap_relationship(self):
+        road_report = {
+            "generated": "2026-05-20T01:09:13+00:00",
+            "style_owner": "mapbox",
+            "style_id": "outdoors-v12",
+            "cameras": [
+                {
+                    "status": "decoded",
+                    "camera": "zermatt-trails-z18-outdoors",
+                    "camera_zoom": 18.0,
+                    "tile_zoom": 18,
+                    "pedestrian_line_candidate_count": 1,
+                }
+            ],
+        }
+        source_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-pedestrian",
+                    "type": "line",
+                    "minzoom": 12,
+                    "paint": {"line-width": 12},
+                },
+                {
+                    "id": "road-pedestrian-case",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {"line-width": 14.5},
+                },
+            ],
+        }
+        qgis_style = {
+            "version": 8,
+            "layers": [
+                {
+                    "id": "road-pedestrian-case-z16-plus-pale-casing",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {"line-width": 3.0},
+                },
+                {
+                    "id": "road-pedestrian-case-z16-plus",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {"line-width": 2.4},
+                },
+                {
+                    "id": "road-pedestrian-z16-plus",
+                    "type": "line",
+                    "minzoom": 16,
+                    "paint": {"line-width": 1.92},
+                },
+            ],
+        }
+
+        report = build_path_pedestrian_focus_report(
+            road_report,
+            source_style=source_style,
+            qgis_styles_by_camera={"zermatt-trails-z18-outdoors": qgis_style},
+            generated_at=dt.datetime(2026, 5, 20, 1, 35, tzinfo=dt.timezone.utc),
+        )
+
+        [camera] = report["cameras"]
+        self.assertEqual(
+            camera["pedestrian_core_case_cap_relationships"],
+            [
+                {
+                    "source_core_layer_id": "road-pedestrian",
+                    "source_case_layer_id": "road-pedestrian-case",
+                    "cap_limit_mm": 3.0,
+                    "source_core_width_mm": 3.0,
+                    "source_core_raw_width_mm": 3.175,
+                    "source_core_capped": True,
+                    "source_case_width_mm": 3.0,
+                    "source_case_raw_width_mm": 3.8364583333333333,
+                    "source_case_capped": True,
+                    "source_both_widths_capped": True,
+                    "source_case_over_core_mm": 0.0,
+                    "source_case_to_core_ratio": 1.0,
+                    "qgis_core_layer_id": "road-pedestrian-z16-plus",
+                    "qgis_core_width_mm": 1.92,
+                    "qgis_case_layer_id": "road-pedestrian-case-z16-plus",
+                    "qgis_case_width_mm": 2.4,
+                    "qgis_pale_casing_layer_id": "road-pedestrian-case-z16-plus-pale-casing",
+                    "qgis_pale_casing_width_mm": 3.0,
+                    "qgis_case_over_core_mm": 0.48,
+                    "qgis_case_to_core_ratio": 1.25,
+                    "qgis_ratio_preserving_core_width_mm_at_cap": 2.4,
+                }
+            ],
+        )
+        markdown = build_summary_markdown(report)
+        self.assertIn("## Pedestrian core/case cap relationships", markdown)
+        self.assertIn("source_both_widths_capped=true", markdown)
+        self.assertIn("qgis_ratio_preserving_core_width_mm_at_cap=2.4", markdown)
+
     def test_build_path_pedestrian_focus_report_adds_visual_artifacts_to_focused_cameras(self):
         report = build_path_pedestrian_focus_report(
             _road_feature_report(),
