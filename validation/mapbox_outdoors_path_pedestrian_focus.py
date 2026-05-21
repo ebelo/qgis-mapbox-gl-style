@@ -72,6 +72,7 @@ PATH_PEDESTRIAN_STROKE_DELTA_KEYS = (
     "line-color_match",
     "line-opacity_delta",
 )
+PATH_PEDESTRIAN_LARGEST_STROKE_DELTA_LIMIT = 12
 PATH_PEDESTRIAN_SOURCE_SPLIT_BASE_LAYER_IDS = frozenset(
     {
         "road-path",
@@ -1777,6 +1778,141 @@ def _qgis_auxiliary_stroke_markdown_lines(cameras: Iterable[object]) -> list[str
     return lines
 
 
+def _comparison_auxiliary_layer_ids(comparison: Mapping[str, object]) -> set[str]:
+    auxiliary_layer_values = comparison.get("qgis_auxiliary_layer_ids")
+    if not isinstance(auxiliary_layer_values, list):
+        return set()
+    return {str(layer_id) for layer_id in auxiliary_layer_values if layer_id}
+
+
+def _comparison_delta_rows(comparison: Mapping[str, object]) -> list[object]:
+    delta_rows = comparison.get("qgis_control_deltas")
+    return delta_rows if isinstance(delta_rows, list) else []
+
+
+def _non_auxiliary_stroke_delta_row(
+    *,
+    camera: Mapping[str, object],
+    comparison: Mapping[str, object],
+    delta_row: object,
+    auxiliary_layer_ids: set[str],
+) -> dict[str, object] | None:
+    if not isinstance(delta_row, Mapping):
+        return None
+    layer_id = str(delta_row.get("layer_id") or "")
+    if (
+        not layer_id
+        or layer_id in auxiliary_layer_ids
+        or _is_auxiliary_qgis_stroke_layer_id(layer_id)
+    ):
+        return None
+    deltas = delta_row.get("deltas")
+    if not isinstance(deltas, Mapping):
+        return None
+    width_delta = _numeric_control(deltas.get("line-width_delta_mm"))
+    if width_delta is None:
+        return None
+    return {
+        "camera": camera.get("camera"),
+        "source_layer_id": comparison.get("source_layer_id"),
+        "qgis_layer_id": layer_id,
+        "line_width_delta_mm": width_delta,
+        "line_width_abs_delta_mm": abs(width_delta),
+        "line_width_ratio": _numeric_control(deltas.get("line-width_ratio")),
+    }
+
+
+def _camera_source_qgis_stroke_comparisons(camera: object) -> list[Mapping[str, object]]:
+    if not isinstance(camera, Mapping):
+        return []
+    comparisons = camera.get("source_qgis_stroke_control_comparisons")
+    comparison_rows = comparisons if isinstance(comparisons, list) else []
+    return [
+        comparison
+        for comparison in comparison_rows
+        if isinstance(comparison, Mapping) and bool(comparison.get("source_layer_id"))
+    ]
+
+
+def _camera_non_auxiliary_stroke_delta_rows(camera: object) -> list[dict[str, object]]:
+    if not isinstance(camera, Mapping):
+        return []
+    rows: list[dict[str, object]] = []
+    for comparison in _camera_source_qgis_stroke_comparisons(camera):
+        auxiliary_layer_ids = _comparison_auxiliary_layer_ids(comparison)
+        for delta_row in _comparison_delta_rows(comparison):
+            ranked_row = _non_auxiliary_stroke_delta_row(
+                camera=camera,
+                comparison=comparison,
+                delta_row=delta_row,
+                auxiliary_layer_ids=auxiliary_layer_ids,
+            )
+            if ranked_row is not None:
+                rows.append(ranked_row)
+    return rows
+
+
+def _stroke_delta_sort_text(value: object) -> str:
+    return str(value) if value else ""
+
+
+def _stroke_delta_sort_key(row: Mapping[str, object]) -> tuple[float, str, str, str]:
+    return (
+        -float(row["line_width_abs_delta_mm"]),
+        _stroke_delta_sort_text(row.get("camera")),
+        _stroke_delta_sort_text(row.get("source_layer_id")),
+        _stroke_delta_sort_text(row.get("qgis_layer_id")),
+    )
+
+
+def _largest_non_auxiliary_stroke_delta_rows(
+    cameras: Iterable[object],
+    *,
+    limit: int = PATH_PEDESTRIAN_LARGEST_STROKE_DELTA_LIMIT,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for camera in cameras:
+        rows.extend(_camera_non_auxiliary_stroke_delta_rows(camera))
+    rows.sort(key=_stroke_delta_sort_key)
+    return rows[:limit]
+
+
+def _largest_non_auxiliary_stroke_delta_markdown_lines(cameras: Iterable[object]) -> list[str]:
+    rows = _largest_non_auxiliary_stroke_delta_rows(cameras)
+    if not rows:
+        return []
+    lines = ["", "## Largest non-auxiliary stroke width deltas", ""]
+    lines.extend(
+        [
+            (
+                "Ranks directly comparable QGIS stroke widths against sampled Mapbox source controls, "
+                "excluding qfit-only auxiliary helper strokes such as pale casing underlays."
+            ),
+            (
+                "Positive deltas mean QGIS is wider than the sampled source stroke; negative deltas mean "
+                "QGIS is narrower. Use this as a priority signal, not an automatic styling change."
+            ),
+            "",
+            "| Camera | Source layer | QGIS layer | Delta mm | Abs delta mm | Ratio |",
+            MARKDOWN_SEPARATOR_6_COLUMNS,
+        ]
+    )
+    lines.extend(
+        _markdown_table_row(
+            [
+                row.get("camera"),
+                row.get("source_layer_id"),
+                row.get("qgis_layer_id"),
+                row.get("line_width_delta_mm"),
+                row.get("line_width_abs_delta_mm"),
+                row.get("line_width_ratio"),
+            ]
+        )
+        for row in rows
+    )
+    return lines
+
+
 def _core_case_relationship_summary(
     relationship: Mapping[str, object],
     keys: Iterable[str],
@@ -2142,6 +2278,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_visual_artifact_markdown_lines(rows))
     lines.extend(_duplicate_label_diagnostic_markdown_lines(rows))
     lines.extend(_source_qgis_stroke_control_markdown_lines(rows))
+    lines.extend(_largest_non_auxiliary_stroke_delta_markdown_lines(rows))
     lines.extend(_qgis_auxiliary_stroke_markdown_lines(rows))
     lines.extend(_pedestrian_core_case_cap_markdown_lines(rows))
     lines.extend(_visible_source_detail_markdown_lines(rows))
