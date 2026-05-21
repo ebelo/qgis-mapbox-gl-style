@@ -184,7 +184,7 @@ python3 validation/mapbox_outdoors_visual_crops.py \
   --style-audit-json debug/mapbox-outdoors-style-audit/mapbox-outdoors-v12/<timestamp>/audit.json
 ```
 
-The camera-focus table uses the comparison summary's camera zoom and Mapbox-style minzoom/maxzoom bands to keep global area-fill audit rows that are outside the cropped camera's inspection scale out of the per-camera sample list. It keeps every active layer ID visible even when the detailed sample-layer cells are capped.
+The camera-focus table uses the comparison summary's camera zoom and Mapbox-style minzoom/maxzoom bands to keep global area-fill audit rows that are outside the cropped camera's inspection scale out of the per-camera sample list. It keeps every active layer ID visible even when the detailed sample-layer cells are capped. A follow-up active-layer detail table then lists every active area-fill candidate with compact controls and qfit simplification snippets, so unsampled layers such as pattern/tint rows can still be inspected from the crop report.
 
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 

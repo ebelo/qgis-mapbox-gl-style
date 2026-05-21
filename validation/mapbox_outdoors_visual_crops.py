@@ -1364,6 +1364,14 @@ def _style_audit_area_fill_camera_area_row(
         "label": section["label"],
         "active_candidate_count": len(active_candidates),
         "active_layers": _style_audit_candidate_layer_ids(active_candidates),
+        "active_candidate_details": [
+            _style_audit_candidate_sample(
+                candidate,
+                qgis_converter_warnings_by_layer=qgis_converter_warnings_by_layer,
+                style_audit_layers_by_id=style_audit_layers_by_id,
+            )
+            for candidate in active_candidates
+        ],
         "by_source_layer": _style_audit_count_rows(
             active_candidates,
             "source_layer",
@@ -1400,10 +1408,12 @@ def _style_audit_area_fill_camera_row(
     sample_limit: int,
 ) -> dict[str, object] | None:
     camera_name = str(camera.get("camera") or "")
+    crops = camera.get("crops")
+    if not isinstance(crops, list) or not crops:
+        return None
     camera_zoom = _numeric_zoom_bound(camera.get("camera_zoom"))
     if not camera_name or camera_zoom is None:
         return None
-    crops = camera.get("crops")
     area_rows = [
         area_row
         for section in STYLE_AUDIT_AREA_FILL_SECTIONS
@@ -3216,6 +3226,104 @@ def _style_audit_area_fill_camera_focus_lines(report: Mapping[str, object]) -> l
     return lines
 
 
+def _candidate_source_type_label(candidate: Mapping[str, object]) -> str:
+    source_layer = candidate.get("source_layer")
+    layer_type = candidate.get("type")
+    if source_layer is None and layer_type is None:
+        return "-"
+    return f"{source_layer or '-'}/{layer_type or '-'}"
+
+
+def _style_audit_area_fill_candidate_detail_header_lines() -> list[str]:
+    return [
+        "",
+        "## Style audit area-fill active layer details",
+        "",
+        (
+            "Lists every camera-zoom-active area-fill candidate with compact style-audit "
+            "controls, so active layers hidden behind the camera-focus sample cap remain "
+            "visible during crop attribution."
+        ),
+        "",
+        (
+            "| Camera | Zoom | Area | Layer | Source/type | Zoom band | Controls | "
+            "Simplified controls | QGIS-dependent controls | Qfit simplifications |"
+        ),
+        "| --- | ---: | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+
+def _style_audit_area_fill_candidate_detail_row(
+    *,
+    camera_focus: Mapping[str, object],
+    area: Mapping[str, object],
+    candidate: Mapping[str, object],
+) -> str:
+    return _markdown_table_row(
+        [
+            camera_focus.get("camera"),
+            _format_focus_number(camera_focus.get("camera_zoom")),
+            area.get("label"),
+            candidate.get("layer"),
+            _candidate_source_type_label(candidate),
+            candidate.get("zoom_band"),
+            _joined_summary_labels(_string_values(candidate.get("control_properties"))),
+            _joined_summary_labels(_string_values(candidate.get("qfit_simplified_properties"))),
+            _joined_summary_labels(_string_values(candidate.get("qgis_dependent_properties"))),
+            _joined_summary_labels(_candidate_qfit_simplification_labels(candidate)),
+        ]
+    )
+
+
+def _style_audit_area_fill_candidate_detail_area_lines(
+    *,
+    camera_focus: Mapping[str, object],
+    area: Mapping[str, object],
+) -> list[str]:
+    candidates = area.get("active_candidate_details")
+    if not isinstance(candidates, list):
+        return []
+    return [
+        _style_audit_area_fill_candidate_detail_row(
+            camera_focus=camera_focus,
+            area=area,
+            candidate=candidate,
+        )
+        for candidate in candidates
+        if isinstance(candidate, Mapping)
+    ]
+
+
+def _style_audit_area_fill_candidate_detail_camera_lines(
+    camera_focus: Mapping[str, object],
+) -> list[str]:
+    area_rows = camera_focus.get("areas")
+    if not isinstance(area_rows, list):
+        return []
+    lines: list[str] = []
+    for area in area_rows:
+        if isinstance(area, Mapping):
+            lines.extend(
+                _style_audit_area_fill_candidate_detail_area_lines(
+                    camera_focus=camera_focus,
+                    area=area,
+                )
+            )
+    return lines
+
+
+def _style_audit_area_fill_candidate_detail_lines(report: Mapping[str, object]) -> list[str]:
+    focus = report.get("style_audit_area_fill_camera_focus")
+    rows = focus if isinstance(focus, list) else []
+    if not rows:
+        return []
+    lines = _style_audit_area_fill_candidate_detail_header_lines()
+    for camera_focus in rows:
+        if isinstance(camera_focus, Mapping):
+            lines.extend(_style_audit_area_fill_candidate_detail_camera_lines(camera_focus))
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = _summary_header_lines(report)
     include_comparison_delta = _include_comparison_delta_columns(report)
@@ -3234,6 +3342,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines.extend(_summary_crop_color_metric_lines(report))
     lines.extend(_style_audit_area_fill_focus_lines(report))
     lines.extend(_style_audit_area_fill_camera_focus_lines(report))
+    lines.extend(_style_audit_area_fill_candidate_detail_lines(report))
     lines.extend(_summary_focus_coverage_lines(report))
     lines.extend(_summary_focus_coverage_sample_lines(report))
     lines.extend(_summary_focus_decoded_feature_lines(report))

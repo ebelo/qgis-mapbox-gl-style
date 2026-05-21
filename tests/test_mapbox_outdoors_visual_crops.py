@@ -12,6 +12,7 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_visual_crops import (
     VisualCropAnnotationInputs,
+    _candidate_source_type_label,
     _computed_crop_color_movement_group_records,
     _crop_color_metric,
     _path_pedestrian_focus_coverage_rows,
@@ -558,6 +559,18 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             )
         )
 
+    def test_candidate_source_type_label_handles_missing_fields(self):
+        self.assertEqual(
+            _candidate_source_type_label({"source_layer": "landuse_overlay", "type": "fill"}),
+            "landuse_overlay/fill",
+        )
+        self.assertEqual(
+            _candidate_source_type_label({"source_layer": "landuse_overlay"}),
+            "landuse_overlay/-",
+        )
+        self.assertEqual(_candidate_source_type_label({"type": "fill"}), "-/fill")
+        self.assertEqual(_candidate_source_type_label({}), "-")
+
     def test_crop_color_metric_handles_empty_stat_outputs(self):
         image_module = _FakeImageModule()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -908,6 +921,33 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(report["cameras"][0]["status"], "no_hotspot_crops")
             self.assertEqual(report["cameras"][0]["crops"], [])
 
+    def test_generate_visual_crop_report_skips_area_fill_camera_focus_without_crops(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    style_audit_report=_style_audit_report(),
+                    style_audit_report_path=root / "style-audit" / "audit.json",
+                ),
+                crop_size=(4, 4),
+                crops_per_camera=0,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            self.assertEqual(report["crop_count"], 0)
+            self.assertIn("style_audit_area_fill_focus", report)
+            self.assertNotIn("style_audit_area_fill_camera_focus", report)
+            self.assertNotIn("Style audit area-fill camera focus", build_summary_markdown(report))
+
     def test_generate_visual_crop_report_attaches_path_pedestrian_focus_cues(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1138,6 +1178,10 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 ["contour"],
             )
             self.assertEqual(
+                camera_focus_areas["terrain_landcover"]["active_candidate_details"][0]["layer"],
+                "contour",
+            )
+            self.assertEqual(
                 camera_focus_areas["terrain_landcover"]["sample_candidates"][0]["layer"],
                 "contour",
             )
@@ -1184,6 +1228,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("Style audit input: `", markdown)
             self.assertIn("## Style audit area-fill focus", markdown)
             self.assertIn("## Style audit area-fill camera focus", markdown)
+            self.assertIn("## Style audit area-fill active layer details", markdown)
             self.assertIn("Report color movements", markdown)
             self.assertIn(
                 "darker + red lower=1 (rep -127.0, -127.0, -127.0 / -127.0)",
@@ -1202,6 +1247,18 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("| chamonix-trails-z14-outdoors | 14.25 | 1 |", camera_focus_markdown)
             self.assertIn("contour (contour/line", camera_focus_markdown)
             self.assertNotIn("landcover (landcover/fill", camera_focus_markdown)
+            active_detail_markdown = markdown.split(
+                "## Style audit area-fill active layer details",
+                1,
+            )[1]
+            self.assertIn(
+                "| chamonix-trails-z14-outdoors | 14.25 | Terrain/landcover |",
+                active_detail_markdown,
+            )
+            self.assertIn(
+                "| chamonix-trails-z14-outdoors | 14.25 | Airport/special landuse |",
+                active_detail_markdown,
+            )
             self.assertIn(
                 "landcover (landcover/fill; filter-ops: all, get, match; controls=filter, paint.fill-color, "
                 "paint.fill-opacity; qfit=paint.fill-color, paint.fill-opacity; "
@@ -1387,12 +1444,37 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "pitch-outline",
                 ],
             )
+            self.assertEqual(
+                [
+                    candidate["layer"]
+                    for candidate in terrain_camera_focus["active_candidate_details"]
+                ],
+                [
+                    "landcover",
+                    "landuse",
+                    "national-park",
+                    "wetland",
+                    "wetland-pattern",
+                    "contour-line",
+                    "national-park_tint-band",
+                    "pitch-outline",
+                    "wetland",
+                ],
+            )
             markdown = build_summary_markdown(report)
             camera_focus_md = markdown.split(
                 "## Style audit area-fill camera focus",
                 1,
             )[1]
-            self.assertNotIn("wetland (", markdown)
+            active_detail_md = markdown.split(
+                "## Style audit area-fill active layer details",
+                1,
+            )[1]
+            self.assertIn(
+                "| chamonix-trails-z14-outdoors | 14.25 | Terrain/landcover | "
+                "wetland | landuse_overlay/fill |",
+                active_detail_md,
+            )
             self.assertIn("wetland-pattern", markdown)
             self.assertIn("wetland-pattern, contour-line", camera_focus_md)
             self.assertIn("contour-line", markdown)
