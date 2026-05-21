@@ -832,7 +832,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("all, get, match=1", markdown)
             self.assertIn("landuse-other-z10-plus-airport", markdown)
             self.assertIn(
-                "landcover (landcover/fill; controls=filter, paint.fill-color, "
+                "landcover (landcover/fill; filter-ops: all, get, match; controls=filter, paint.fill-color, "
                 "paint.fill-opacity; qfit=paint.fill-color, paint.fill-opacity; "
                 "simplifies=paint.fill-color",
                 markdown,

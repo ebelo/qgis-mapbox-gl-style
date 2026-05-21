@@ -162,7 +162,7 @@ It also groups crop movements by luminance direction and dominant RGB channel, i
 The same movement groups are stored in `visual-crops.json` under `crop_color_movement_groups`, including a representative crop for each group, for follow-up scripts that should not parse the Markdown summary.
 
 When reviewing broad landcover, terrain, airport, or other area-fill differences, pass the latest style audit.
-The crop report includes the global terrain/landcover and airport/special-landuse candidate counts, filter-operator signatures, sample layers, and compact qfit simplification snippets for sampled controls:
+The crop report includes the global terrain/landcover and airport/special-landuse candidate counts, filter-operator signatures, sample-layer filter signatures, and compact qfit simplification snippets for sampled controls:
 
 ```bash
 python3 validation/mapbox_outdoors_visual_crops.py \

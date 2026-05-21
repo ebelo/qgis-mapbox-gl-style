@@ -2082,6 +2082,9 @@ def _candidate_sample_label(candidate: Mapping[str, object]) -> str:
     details = []
     if source_layer is not None or layer_type is not None:
         details.append(f"{source_layer}/{layer_type}")
+    filter_signature = candidate.get("filter_operator_signature")
+    if isinstance(filter_signature, str) and filter_signature:
+        details.append(f"filter-ops: {filter_signature}")
     if controls:
         details.append(f"controls={', '.join(controls[:4])}")
     qfit_simplified = _string_values(candidate.get("qfit_simplified_properties"))
