@@ -144,6 +144,18 @@ python3 validation/mapbox_outdoors_visual_crops.py \
   --focus-cue-cameras
 ```
 
+When reviewing a before/after styling probe, pass the matching comparison-delta report so each crop row includes the per-camera mean/RMS movement from the candidate run:
+
+```bash
+python3 validation/mapbox_outdoors_visual_crops.py \
+  --comparison-summary-json debug/mapbox-outdoors-comparison/<candidate>/all-cameras/<timestamp>/summary.json \
+  --comparison-delta-json debug/mapbox-outdoors-comparison-delta/<timestamp>/comparison-delta.json \
+  --path-pedestrian-focus-json debug/mapbox-outdoors-path-pedestrian-focus/<timestamp>/path-pedestrian-focus.json \
+  --focus-cue-cameras
+```
+
+The delta context is shown only when the comparison-delta candidate summary matches the crop report's comparison summary, which keeps stale probe movement from being mixed into a newer visual crop sheet.
+
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
 ## Style audit before tuning

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_visual_crops import (
+    annotate_visual_crop_report_with_comparison_delta,
     build_run_directory,
     build_summary_markdown,
     build_visual_crop_paths,
@@ -259,6 +260,36 @@ def _path_pedestrian_focus_report(
     }
 
 
+def _comparison_delta_report(candidate_summary_json, *, camera_name="chamonix-trails-z14-outdoors"):
+    return {
+        "input_artifacts": {
+            "candidate": {
+                "summary_json": str(candidate_summary_json),
+            }
+        },
+        "cameras": [
+            {
+                "camera": camera_name,
+                "baseline_status": "passed",
+                "candidate_status": "passed",
+                "mean_delta_direction": "improved",
+                "rms_delta_direction": "worsened",
+                "metrics": {
+                    "changed_pixel_ratio": {
+                        "delta": -0.0000008680555555,
+                    },
+                    "normalized_mean_absolute_channel_delta": {
+                        "delta": -0.00015750385802469,
+                    },
+                    "normalized_rms_channel_delta": {
+                        "delta": 0.00047919108424084,
+                    },
+                },
+            }
+        ],
+    }
+
+
 class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
     def test_build_run_directory_and_paths_are_predictable(self):
         run_dir = build_run_directory(
@@ -489,6 +520,120 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
             self.assertEqual(dash_cues[0]["source_layer_id"], "road-steps")
             self.assertEqual(dash_cues[0]["source_dasharray"], [0.3, 0.3])
+
+    def test_generate_visual_crop_report_attaches_matching_comparison_delta_context(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            delta_path = root / "delta" / "comparison-delta.json"
+            delta_path.parent.mkdir(parents=True)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+            report = annotate_visual_crop_report_with_comparison_delta(
+                report,
+                comparison_summary_path=summary_path,
+                comparison_delta_report=_comparison_delta_report(summary_path),
+                comparison_delta_report_path=delta_path,
+            )
+            markdown = build_summary_markdown(report)
+
+            self.assertEqual(report["comparison_delta_json"], str(delta_path))
+            self.assertEqual(
+                report["comparison_delta_candidate_summary_json"],
+                str(summary_path),
+            )
+            self.assertIs(report["comparison_delta_candidate_summary_match"], True)
+            self.assertEqual(
+                report["cameras"][0]["comparison_delta"],
+                {
+                    "baseline_status": "passed",
+                    "candidate_status": "passed",
+                    "changed_pixel_ratio_delta": -0.0000008680555555,
+                    "mean_delta": -0.00015750385802469,
+                    "mean_delta_direction": "improved",
+                    "rms_delta": 0.00047919108424084,
+                    "rms_delta_direction": "worsened",
+                },
+            )
+            self.assertIn("Comparison delta input: `", markdown)
+            self.assertIn("Comparison delta candidate match: `True`", markdown)
+            self.assertIn("| Camera | Comparison status | Artifact status | Changed ratio | Mean delta | RMS delta | Mean movement | RMS movement |", markdown)
+            self.assertIn("| chamonix-trails-z14-outdoors | passed | metrics_available | 0.9820 | 0.0352 | 0.0761 | -0.000157504 | +0.000479191 |", markdown)
+
+    def test_generate_visual_crop_report_suppresses_mismatched_comparison_delta_context(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            delta_path = root / "delta" / "comparison-delta.json"
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+            report = annotate_visual_crop_report_with_comparison_delta(
+                report,
+                comparison_summary_path=summary_path,
+                comparison_delta_report=_comparison_delta_report(root / "stale" / "summary.json"),
+                comparison_delta_report_path=delta_path,
+            )
+            markdown = build_summary_markdown(report)
+
+            self.assertIs(report["comparison_delta_candidate_summary_match"], False)
+            self.assertNotIn("comparison_delta", report["cameras"][0])
+            self.assertIn("Comparison delta candidate match: `False`", markdown)
+            self.assertNotIn("Mean movement", markdown)
+
+    def test_generate_visual_crop_report_requires_comparison_delta_candidate_summary(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            delta_path = root / "delta" / "comparison-delta.json"
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+            delta_report = _comparison_delta_report(summary_path)
+            del delta_report["input_artifacts"]
+            report = annotate_visual_crop_report_with_comparison_delta(
+                report,
+                comparison_summary_path=summary_path,
+                comparison_delta_report=delta_report,
+                comparison_delta_report_path=delta_path,
+            )
+            markdown = build_summary_markdown(report)
+
+            self.assertEqual(report["comparison_delta_json"], str(delta_path))
+            self.assertNotIn("comparison_delta_candidate_summary_match", report)
+            self.assertNotIn("comparison_delta", report["cameras"][0])
+            self.assertNotIn("Mean movement", markdown)
 
     def test_generate_visual_crop_report_can_filter_to_focus_cue_cameras(self):
         image_module, image_stat_module = _fake_image_modules()
@@ -984,6 +1129,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            delta_path = root / "delta" / "comparison-delta.json"
+            delta_path.parent.mkdir(parents=True)
+            delta_path.write_text(
+                json.dumps(_comparison_delta_report(summary_path)),
+                encoding="utf-8",
+            )
             output_root = root / "debug"
             stdout = io.StringIO()
 
@@ -1003,6 +1154,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                         str(summary_path),
                         "--path-pedestrian-focus-json",
                         str(focus_path),
+                        "--comparison-delta-json",
+                        str(delta_path),
                         "--camera",
                         "chamonix-trails-z14-outdoors",
                         "--crops-per-camera",
@@ -1028,6 +1181,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 report["path_pedestrian_focus_comparison_summary_jsons"],
                 [str(summary_path)],
             )
+            self.assertIs(report["comparison_delta_candidate_summary_match"], True)
+            self.assertIn("comparison_delta", report["cameras"][0])
             self.assertIs(report["path_pedestrian_focus_comparison_match"], True)
             self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
             self.assertEqual(

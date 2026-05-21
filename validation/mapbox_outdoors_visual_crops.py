@@ -382,6 +382,158 @@ def _comparison_context_from_artifacts(artifacts: Mapping[str, object]) -> dict[
     }
 
 
+def _resolve_report_input_path(
+    path_text: str,
+    *,
+    report_path: Path | None,
+) -> Path:
+    path = Path(path_text)
+    if path.is_absolute():
+        return path
+    if report_path is not None:
+        return report_path.parent / path
+    return path
+
+
+def _same_resolved_path(first: Path, second: Path) -> bool:
+    return first.resolve() == second.resolve()
+
+
+def _comparison_delta_candidate_summary_path(
+    comparison_delta_report: Mapping[str, object],
+    *,
+    comparison_delta_report_path: Path | None,
+) -> Path | None:
+    input_artifacts = comparison_delta_report.get("input_artifacts")
+    if not isinstance(input_artifacts, Mapping):
+        return None
+    candidate = input_artifacts.get("candidate")
+    if not isinstance(candidate, Mapping):
+        return None
+    summary_json = candidate.get("summary_json")
+    if not isinstance(summary_json, str) or not summary_json:
+        return None
+    return _resolve_report_input_path(
+        summary_json,
+        report_path=comparison_delta_report_path,
+    )
+
+
+def _comparison_delta_metric(row: Mapping[str, object], metric_key: str) -> float | None:
+    metrics = row.get("metrics")
+    if not isinstance(metrics, Mapping):
+        return None
+    metric = metrics.get(metric_key)
+    if not isinstance(metric, Mapping):
+        return None
+    value = metric.get("delta")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _comparison_delta_camera_context(row: Mapping[str, object]) -> dict[str, object]:
+    context: dict[str, object] = {}
+    for source_key, target_key in (
+        ("changed_pixel_ratio", "changed_pixel_ratio_delta"),
+        ("normalized_mean_absolute_channel_delta", "mean_delta"),
+        ("normalized_rms_channel_delta", "rms_delta"),
+    ):
+        value = _comparison_delta_metric(row, source_key)
+        if value is not None:
+            context[target_key] = value
+    for key in (
+        "baseline_status",
+        "candidate_status",
+        "mean_delta_direction",
+        "rms_delta_direction",
+    ):
+        value = row.get(key)
+        if isinstance(value, str) and value:
+            context[key] = value
+    return context
+
+
+def _comparison_delta_context_by_camera(
+    comparison_delta_report: Mapping[str, object] | None,
+) -> dict[str, dict[str, object]]:
+    if comparison_delta_report is None:
+        return {}
+    cameras = comparison_delta_report.get("cameras")
+    if not isinstance(cameras, list):
+        return {}
+    rows: dict[str, dict[str, object]] = {}
+    for row in cameras:
+        if not isinstance(row, Mapping):
+            continue
+        camera = row.get("camera")
+        if not isinstance(camera, str) or not camera:
+            continue
+        context = _comparison_delta_camera_context(row)
+        if context:
+            rows[camera] = context
+    return rows
+
+
+def _annotated_delta_camera_rows(
+    cameras: object,
+    delta_context_by_camera: Mapping[str, Mapping[str, object]],
+) -> list[object]:
+    if not isinstance(cameras, list):
+        return []
+    annotated_rows: list[object] = []
+    for camera in cameras:
+        if not isinstance(camera, Mapping):
+            annotated_rows.append(camera)
+            continue
+        camera_row = dict(camera)
+        camera_name = camera_row.get("camera")
+        delta_context = (
+            delta_context_by_camera.get(camera_name)
+            if isinstance(camera_name, str)
+            else None
+        )
+        if delta_context:
+            camera_row["comparison_delta"] = dict(delta_context)
+        annotated_rows.append(camera_row)
+    return annotated_rows
+
+
+def annotate_visual_crop_report_with_comparison_delta(
+    report: Mapping[str, object],
+    *,
+    comparison_summary_path: Path,
+    comparison_delta_report: Mapping[str, object],
+    comparison_delta_report_path: Path,
+) -> dict[str, object]:
+    delta_candidate_summary_path = _comparison_delta_candidate_summary_path(
+        comparison_delta_report,
+        comparison_delta_report_path=comparison_delta_report_path,
+    )
+    delta_candidate_match = (
+        _same_resolved_path(delta_candidate_summary_path, comparison_summary_path)
+        if delta_candidate_summary_path is not None
+        else None
+    )
+    delta_context_by_camera = (
+        _comparison_delta_context_by_camera(comparison_delta_report)
+        if delta_candidate_match is True
+        else {}
+    )
+    annotated_report = dict(report)
+    annotated_report["cameras"] = _annotated_delta_camera_rows(
+        report.get("cameras"),
+        delta_context_by_camera,
+    )
+    annotated_report["comparison_delta_json"] = _display_input_path(comparison_delta_report_path)
+    if delta_candidate_summary_path is not None:
+        annotated_report["comparison_delta_candidate_summary_json"] = _display_input_path(
+            delta_candidate_summary_path,
+        )
+        annotated_report["comparison_delta_candidate_summary_match"] = delta_candidate_match
+    return annotated_report
+
+
 def _hotspot_crop_rows(
     *,
     camera_name: str,
@@ -681,6 +833,16 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
     comparison_summary_run = _comparison_summary_run_markdown(report.get("comparison_summary_run"))
     if comparison_summary_run:
         lines.append(f"Comparison summary run: {comparison_summary_run}")
+    if report.get("comparison_delta_json"):
+        lines.append(f"Comparison delta input: `{report.get('comparison_delta_json')}`")
+    if report.get("comparison_delta_candidate_summary_json"):
+        lines.append(
+            "Comparison delta candidate summary: "
+            f"`{report.get('comparison_delta_candidate_summary_json')}`"
+        )
+        match = report.get("comparison_delta_candidate_summary_match")
+        if match is not None:
+            lines.append(f"Comparison delta candidate match: `{match}`")
     if report.get("path_pedestrian_focus_json"):
         lines.append(f"Path/pedestrian focus input: `{report.get('path_pedestrian_focus_json')}`")
     focus_comparison_paths = report.get("path_pedestrian_focus_comparison_summary_jsons")
@@ -713,17 +875,39 @@ def _comparison_summary_run_markdown(value: object) -> str:
     return f"`{path_value}`{suffix}"
 
 
-def _summary_table_intro_lines() -> list[str]:
+def _include_comparison_delta_columns(report: Mapping[str, object]) -> bool:
+    return any(
+        isinstance(camera, Mapping) and isinstance(camera.get("comparison_delta"), Mapping)
+        for camera in report.get("cameras", [])
+    )
+
+
+def _summary_table_intro_lines(report: Mapping[str, object]) -> list[str]:
+    headers = [
+        "Camera",
+        "Comparison status",
+        "Artifact status",
+        "Changed ratio",
+        "Mean delta",
+        "RMS delta",
+    ]
+    alignments = ["---", "---", "---", "---:", "---:", "---:"]
+    if _include_comparison_delta_columns(report):
+        headers.extend(["Mean movement", "RMS movement"])
+        alignments.extend(["---:", "---:"])
+    headers.extend(["Crop status", "Crop", "Box", "Score", "Mapbox GL", "QGIS render", "Diff"])
+    alignments.extend(["---", "---:", "---", "---:", "---", "---", "---"])
     return [
         "",
         (
             "Crops are selected from the highest-delta windows in the comparison diff image, "
             "then applied to the matching Mapbox GL, QGIS, and diff artifacts. "
-            "Comparison metric columns come from the same all-camera comparison summary."
+            "Comparison metric columns come from the same all-camera comparison summary; "
+            "movement columns come from the optional comparison-delta report."
         ),
         "",
-        "| Camera | Comparison status | Artifact status | Changed ratio | Mean delta | RMS delta | Crop status | Crop | Box | Score | Mapbox GL | QGIS render | Diff |",
-        "| --- | --- | --- | ---: | ---: | ---: | --- | ---: | --- | ---: | --- | --- | --- |",
+        _markdown_table_row(headers),
+        _markdown_table_row(alignments),
     ]
 
 
@@ -739,17 +923,43 @@ def _comparison_context_cell(camera: Mapping[str, object], key: str) -> object:
     return value
 
 
-def _summary_crop_row(camera: Mapping[str, object], crop: Mapping[str, object]) -> str:
+def _comparison_delta_context(camera: Mapping[str, object]) -> Mapping[str, object]:
+    comparison_delta = camera.get("comparison_delta")
+    return comparison_delta if isinstance(comparison_delta, Mapping) else {}
+
+
+def _comparison_delta_context_cell(camera: Mapping[str, object], key: str) -> object:
+    value = _comparison_delta_context(camera).get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f"{float(value):+.9f}"
+    return value
+
+
+def _summary_crop_row(
+    camera: Mapping[str, object],
+    crop: Mapping[str, object],
+    *,
+    include_comparison_delta: bool,
+) -> str:
     outputs = crop.get("outputs")
     output_paths = outputs if isinstance(outputs, Mapping) else {}
-    return _markdown_table_row(
+    cells = [
+        camera.get("camera"),
+        _comparison_context_cell(camera, "status"),
+        _comparison_context_cell(camera, "artifact_status"),
+        _comparison_context_cell(camera, "changed_pixel_ratio"),
+        _comparison_context_cell(camera, "normalized_mean_absolute_channel_delta"),
+        _comparison_context_cell(camera, "normalized_rms_channel_delta"),
+    ]
+    if include_comparison_delta:
+        cells.extend(
+            [
+                _comparison_delta_context_cell(camera, "mean_delta"),
+                _comparison_delta_context_cell(camera, "rms_delta"),
+            ]
+        )
+    cells.extend(
         [
-            camera.get("camera"),
-            _comparison_context_cell(camera, "status"),
-            _comparison_context_cell(camera, "artifact_status"),
-            _comparison_context_cell(camera, "changed_pixel_ratio"),
-            _comparison_context_cell(camera, "normalized_mean_absolute_channel_delta"),
-            _comparison_context_cell(camera, "normalized_rms_channel_delta"),
             camera.get("status"),
             crop.get("index"),
             crop.get("box"),
@@ -759,32 +969,45 @@ def _summary_crop_row(camera: Mapping[str, object], crop: Mapping[str, object]) 
             f"`{output_paths.get('diff')}`",
         ]
     )
+    return _markdown_table_row(cells)
 
 
-def _summary_camera_rows(camera: Mapping[str, object]) -> list[str]:
+def _summary_camera_rows(
+    camera: Mapping[str, object],
+    *,
+    include_comparison_delta: bool,
+) -> list[str]:
     crops = camera.get("crops")
     crop_rows = crops if isinstance(crops, list) else []
     if not crop_rows:
-        return [
-            _markdown_table_row(
+        cells = [
+            camera.get("camera"),
+            _comparison_context_cell(camera, "status"),
+            _comparison_context_cell(camera, "artifact_status"),
+            _comparison_context_cell(camera, "changed_pixel_ratio"),
+            _comparison_context_cell(camera, "normalized_mean_absolute_channel_delta"),
+            _comparison_context_cell(camera, "normalized_rms_channel_delta"),
+        ]
+        if include_comparison_delta:
+            cells.extend(
                 [
-                    camera.get("camera"),
-                    _comparison_context_cell(camera, "status"),
-                    _comparison_context_cell(camera, "artifact_status"),
-                    _comparison_context_cell(camera, "changed_pixel_ratio"),
-                    _comparison_context_cell(camera, "normalized_mean_absolute_channel_delta"),
-                    _comparison_context_cell(camera, "normalized_rms_channel_delta"),
-                    camera.get("status"),
-                    "-",
-                    "-",
-                    "-",
-                    "-",
-                    "-",
-                    "-",
+                    _comparison_delta_context_cell(camera, "mean_delta"),
+                    _comparison_delta_context_cell(camera, "rms_delta"),
                 ]
             )
+        cells.extend([camera.get("status"), "-", "-", "-", "-", "-", "-"])
+        return [
+            _markdown_table_row(cells)
         ]
-    return [_summary_crop_row(camera, crop) for crop in crop_rows if isinstance(crop, Mapping)]
+    return [
+        _summary_crop_row(
+            camera,
+            crop,
+            include_comparison_delta=include_comparison_delta,
+        )
+        for crop in crop_rows
+        if isinstance(crop, Mapping)
+    ]
 
 
 def _candidate_backed_focus_summaries(
@@ -855,11 +1078,17 @@ def _summary_focus_cue_lines(report: Mapping[str, object]) -> list[str]:
 
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = _summary_header_lines(report)
-    lines.extend(_summary_table_intro_lines())
+    include_comparison_delta = _include_comparison_delta_columns(report)
+    lines.extend(_summary_table_intro_lines(report))
     for camera in report.get("cameras", []):
         if not isinstance(camera, Mapping):
             continue
-        lines.extend(_summary_camera_rows(camera))
+        lines.extend(
+            _summary_camera_rows(
+                camera,
+                include_comparison_delta=include_comparison_delta,
+            )
+        )
     lines.extend(_summary_focus_cue_lines(report))
     return "\n".join(lines) + "\n"
 
@@ -900,6 +1129,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--path-pedestrian-focus-json",
         type=Path,
         help="Optional path-pedestrian-focus.json to annotate visual crops with per-camera stroke cues.",
+    )
+    parser.add_argument(
+        "--comparison-delta-json",
+        type=Path,
+        help="Optional comparison-delta.json to annotate crops with per-camera metric movements.",
     )
     parser.add_argument(
         "--camera",
@@ -961,6 +1195,13 @@ def main(argv: list[str] | None = None) -> int:
             args.path_pedestrian_focus_json,
             label="Path/pedestrian focus JSON",
         )
+    comparison_delta_report = None
+    if args.comparison_delta_json is not None:
+        comparison_delta_report = _load_cli_json_object(
+            parser,
+            args.comparison_delta_json,
+            label="Comparison delta JSON",
+        )
     paths = build_visual_crop_paths(build_run_directory())
     try:
         report = generate_visual_crop_report(
@@ -974,6 +1215,13 @@ def main(argv: list[str] | None = None) -> int:
             crop_size=args.crop_size,
             crops_per_camera=args.crops_per_camera,
         )
+        if comparison_delta_report is not None and args.comparison_delta_json is not None:
+            report = annotate_visual_crop_report_with_comparison_delta(
+                report,
+                comparison_summary_path=args.comparison_summary_json,
+                comparison_delta_report=comparison_delta_report,
+                comparison_delta_report_path=args.comparison_delta_json,
+            )
     except (OSError, RuntimeError, ValueError) as error:
         parser.error(str(error))
     write_report(report, paths)
