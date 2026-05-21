@@ -655,6 +655,46 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertIn("unknown-layer (landcover/fill)", markdown)
             self.assertNotIn("None (", markdown)
 
+    def test_generate_visual_crop_report_keeps_zero_candidate_style_audit_sections(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            style_audit_report = _style_audit_report()
+            summary = style_audit_report["summary"]
+            summary["airport_special_landuse_candidates"] = []
+            summary["airport_special_landuse_candidates_by_source_layer"] = []
+            summary["airport_special_landuse_candidates_by_type"] = []
+            summary["airport_special_landuse_simplified_by_property"] = []
+            summary["airport_special_landuse_qgis_dependent_by_property"] = []
+            style_audit_path = root / "style-audit" / "audit.json"
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                annotation_inputs=VisualCropAnnotationInputs(
+                    style_audit_report=style_audit_report,
+                    style_audit_report_path=style_audit_path,
+                ),
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            focus = report["style_audit_area_fill_focus"]
+            self.assertEqual(
+                [row["key"] for row in focus],
+                ["terrain_landcover", "airport_special_landuse"],
+            )
+            self.assertEqual(focus[1]["candidate_count"], 0)
+            self.assertEqual(focus[1]["sample_candidates"], [])
+            markdown = build_summary_markdown(report)
+            self.assertIn("| Airport/special landuse | 0 | - | - | - | - | - |", markdown)
+
     def test_generate_visual_crop_report_attaches_matching_comparison_delta_context(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:

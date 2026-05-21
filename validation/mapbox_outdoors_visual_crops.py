@@ -429,11 +429,14 @@ def _style_audit_summary(style_audit_report: Mapping[str, object] | None) -> Map
     return summary if isinstance(summary, Mapping) else {}
 
 
-def _style_audit_rows(summary: Mapping[str, object], key: object) -> list[Mapping[str, object]]:
-    rows = summary.get(str(key))
+def _style_audit_mapping_rows(rows: object) -> list[Mapping[str, object]]:
     if not isinstance(rows, list):
         return []
     return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _style_audit_rows(summary: Mapping[str, object], key: object) -> list[Mapping[str, object]]:
+    return _style_audit_mapping_rows(summary.get(str(key)))
 
 
 def _style_audit_candidate_sample(
@@ -475,9 +478,10 @@ def _style_audit_area_fill_focus(
         return []
     focus_rows: list[dict[str, object]] = []
     for section in STYLE_AUDIT_AREA_FILL_SECTIONS:
-        candidates = _style_audit_rows(summary, section["candidates"])
-        if not candidates:
+        candidate_rows = summary.get(str(section["candidates"]))
+        if not isinstance(candidate_rows, list):
             continue
+        candidates = _style_audit_mapping_rows(candidate_rows)
         focus_rows.append(
             {
                 "key": section["key"],
