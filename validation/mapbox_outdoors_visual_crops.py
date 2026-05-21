@@ -1201,6 +1201,9 @@ def generate_visual_crop_report(
         "contact_sheet": _display_input_path(contact_sheet) if contact_sheet is not None else None,
         "cameras": camera_rows,
     }
+    crop_color_movement_groups = _crop_color_movement_group_records(report)
+    if crop_color_movement_groups:
+        report["crop_color_movement_groups"] = crop_color_movement_groups
     _add_visual_crop_annotation_metadata(
         report,
         annotations=annotations,
@@ -1690,8 +1693,21 @@ class _CropColorMovementGroup:
             self.max_abs_luminance = max(self.max_abs_luminance, abs(luminance))
         _increment_count(self.cameras, camera_name)
 
+    def to_record(self, key: tuple[str, str, str]) -> dict[str, object]:
+        luminance_direction, channel, rgb_direction = key
+        return {
+            "movement": _crop_color_movement_group_label(key),
+            "luminance_direction": luminance_direction,
+            "dominant_rgb_channel": channel,
+            "dominant_rgb_direction": rgb_direction,
+            "crop_count": self.count,
+            "max_abs_rgb_delta": self.max_abs_rgb,
+            "max_abs_luminance_delta": self.max_abs_luminance,
+            "cameras": dict(sorted(self.cameras.items())),
+        }
 
-def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> list[list[object]]:
+
+def _computed_crop_color_movement_group_records(report: Mapping[str, object]) -> list[dict[str, object]]:
     groups: dict[tuple[str, str, str], _CropColorMovementGroup] = {}
     for camera, crop in _summary_crop_mappings(report):
         metrics = crop.get("color_metrics")
@@ -1706,15 +1722,33 @@ def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> lis
         groups.items(),
         key=lambda item: (-item[1].count, -item[1].max_abs_rgb, item[0]),
     )
+    return [group.to_record(group_key) for group_key, group in sorted_groups]
+
+
+def _crop_color_movement_group_records(report: Mapping[str, object]) -> list[Mapping[str, object]]:
+    records = report.get("crop_color_movement_groups")
+    if isinstance(records, list):
+        return [record for record in records if isinstance(record, Mapping)]
+    return _computed_crop_color_movement_group_records(report)
+
+
+def _crop_color_movement_group_record_float(record: Mapping[str, object], key: str) -> float:
+    value = record.get(key)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
+
+
+def _summary_crop_color_movement_group_rows(report: Mapping[str, object]) -> list[list[object]]:
     return [
         [
-            _crop_color_movement_group_label(group_key),
-            group.count,
-            f"{group.max_abs_rgb:.1f}",
-            f"{group.max_abs_luminance:.1f}",
-            _joined_summary_labels(_top_count_labels(group.cameras)),
+            record.get("movement"),
+            record.get("crop_count"),
+            f"{_crop_color_movement_group_record_float(record, 'max_abs_rgb_delta'):.1f}",
+            f"{_crop_color_movement_group_record_float(record, 'max_abs_luminance_delta'):.1f}",
+            _joined_summary_labels(_top_count_labels(record.get("cameras"))),
         ]
-        for group_key, group in sorted_groups[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]
+        for record in _crop_color_movement_group_records(report)[:DEFAULT_CROP_COLOR_MOVEMENT_GROUP_LIMIT]
     ]
 
 

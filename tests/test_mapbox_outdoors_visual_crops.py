@@ -609,11 +609,30 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                 },
             )
             self.assertEqual(report["crop_count"], 1)
+            self.assertEqual(
+                report["crop_color_movement_groups"],
+                [
+                    {
+                        "movement": "darker + red lower",
+                        "luminance_direction": "darker",
+                        "dominant_rgb_channel": "red",
+                        "dominant_rgb_direction": "lower",
+                        "crop_count": 1,
+                        "max_abs_rgb_delta": 127.0,
+                        "max_abs_luminance_delta": 127.0,
+                        "cameras": {"chamonix-trails-z14-outdoors": 1},
+                    }
+                ],
+            )
             self.assertTrue(paths.contact_sheet_path.exists())
             self.assertTrue(paths.json_path.exists())
             self.assertTrue(paths.summary_path.exists())
             loaded = json.loads(paths.json_path.read_text(encoding="utf-8"))
             self.assertEqual(loaded["camera_count"], 1)
+            self.assertEqual(
+                loaded["crop_color_movement_groups"],
+                report["crop_color_movement_groups"],
+            )
             self.assertEqual(
                 loaded["cameras"][0]["comparison"],
                 {
