@@ -5565,7 +5565,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._extract_zoom_scalar_size_at_zoom(line_width, 14.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM
         )
-        path_background_low_width_mm = path_core_low_width_mm * 1.15
+        path_background_low_width_mm = path_core_low_width_mm
         mid_high_width_mm = (
             mapbox_config._extract_zoom_scalar_size_at_zoom(line_width, 17.0)
             * mapbox_config._MAPBOX_PIXEL_TO_MM

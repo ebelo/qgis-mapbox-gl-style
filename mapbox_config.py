@@ -675,9 +675,6 @@ _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_LAYER_PREFIXES = (
     "bridge-path-bg-below-z16",
 )
 _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM = 14.0
-# The z14 Geneva/Chamonix comparisons benefit from a small casing-only boost,
-# but larger low-zoom path casings overshoot the Mapbox GL reference.
-_PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE = 1.15
 _PEDESTRIAN_LINE_WIDTH_LAYER_IDS = {
     "bridge-pedestrian",
     "bridge-pedestrian-case",
@@ -3040,12 +3037,11 @@ def _should_sample_path_low_zoom_background_line_width(layer_id: object, prop: s
 
 
 def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: object, maxzoom: object) -> float | None:
-    low_zoom_path_background_width = False
-    if _should_sample_path_low_zoom_line_width(layer_id, prop, maxzoom):
+    if (
+        _should_sample_path_low_zoom_line_width(layer_id, prop, maxzoom)
+        or _should_sample_path_low_zoom_background_line_width(layer_id, prop)
+    ):
         target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
-    elif _should_sample_path_low_zoom_background_line_width(layer_id, prop):
-        target_sample_zoom = _PATH_LOW_ZOOM_LINE_WIDTH_SAMPLE_ZOOM
-        low_zoom_path_background_width = True
     elif _should_sample_path_high_zoom_line_width(layer_id, prop, minzoom):
         target_sample_zoom = (
             _path_high_zoom_line_width_sample_zoom(layer_id)
@@ -3056,10 +3052,7 @@ def _path_split_line_width(expr: object, layer_id: object, prop: str, minzoom: o
     target_zoom = _zoom_in_layer_range(target_sample_zoom, minzoom, maxzoom)
     if target_zoom is None:
         return None
-    width = _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
-    if width is not None and low_zoom_path_background_width:
-        width *= _PATH_LOW_ZOOM_BACKGROUND_LINE_WIDTH_QGIS_SCALE
-    return width
+    return _extract_zoom_scalar_size_at_zoom(expr, target_zoom)
 
 
 def _line_width_mm_at_zoom(expr: object, target_zoom: float) -> float | None:
