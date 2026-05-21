@@ -150,6 +150,68 @@ def _write_visual_triplet(root, image_module, *, camera_name="chamonix-trails-z1
     return comparison_summary, summary_path
 
 
+def _path_pedestrian_focus_report(camera_name="chamonix-trails-z14-outdoors"):
+    return {
+        "cameras": [
+            {
+                "camera": camera_name,
+                "source_qgis_stroke_control_comparisons": [
+                    {
+                        "source_layer_id": "road-path-trail",
+                        "decoded_candidate_count": 74,
+                        "decoded_candidate_type_counts": {"trail": 69, "hiking": 5},
+                        "source_sampled_controls": {"line-width": 0.26458333333333334},
+                        "qgis_controls": [
+                            {
+                                "layer_id": "road-path-trail-below-z16",
+                                "controls": {"line-width": 0.42333333333333334},
+                            }
+                        ],
+                        "qgis_control_deltas": [
+                            {
+                                "layer_id": "road-path-trail-below-z16",
+                                "deltas": {
+                                    "line-width_delta_mm": 0.15875,
+                                    "line-width_ratio": 1.6,
+                                    "line-dasharray_match": True,
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "source_layer_id": "bridge-path",
+                        "decoded_candidate_count": 0,
+                        "decoded_candidate_type_counts": {},
+                        "source_sampled_controls": {
+                            "line-width": 1.0583333333333333,
+                            "line-dasharray": [1, 0.25],
+                        },
+                        "qgis_controls": [
+                            {
+                                "layer_id": "bridge-path",
+                                "controls": {
+                                    "line-width": 0.26458333333333334,
+                                    "line-dasharray": [4, 0.3],
+                                },
+                            }
+                        ],
+                        "qgis_control_deltas": [
+                            {
+                                "layer_id": "bridge-path",
+                                "deltas": {
+                                    "line-width_delta_mm": -0.79375,
+                                    "line-width_ratio": 0.25,
+                                    "line-dasharray_match": False,
+                                },
+                            }
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+
 class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
     def test_build_run_directory_and_paths_are_predictable(self):
         run_dir = build_run_directory(
@@ -324,6 +386,36 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             self.assertEqual(report["cameras"][0]["status"], "no_hotspot_crops")
             self.assertEqual(report["cameras"][0]["crops"], [])
 
+    def test_generate_visual_crop_report_attaches_path_pedestrian_focus_cues(self):
+        image_module, image_stat_module = _fake_image_modules()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            comparison_summary, summary_path = _write_visual_triplet(root, image_module)
+            focus_path = root / "focus" / "path-pedestrian-focus.json"
+            focus_path.parent.mkdir(parents=True)
+            paths = build_visual_crop_paths(root / "debug" / "run")
+
+            report = generate_visual_crop_report(
+                comparison_summary,
+                comparison_summary_path=summary_path,
+                paths=paths,
+                path_pedestrian_focus_report=_path_pedestrian_focus_report(),
+                path_pedestrian_focus_report_path=focus_path,
+                crop_size=(4, 4),
+                crops_per_camera=1,
+                trusted_output_root=root / "debug",
+                image_module=image_module,
+                image_stat_module=image_stat_module,
+            )
+
+            focus_cues = report["cameras"][0]["path_pedestrian_focus"]
+            stroke_cues = focus_cues["stroke_width_deltas"]
+            dash_cues = focus_cues["dash_mismatches"]
+            self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
+            self.assertEqual(stroke_cues[0]["source_layer_id"], "road-path-trail")
+            self.assertEqual(stroke_cues[0]["candidate_types"], ["trail=69", "hiking=5"])
+            self.assertEqual(dash_cues[0]["source_dasharray"], [1, 0.25])
+
     def test_generate_visual_crop_report_rejects_output_outside_trusted_root(self):
         image_module, image_stat_module = _fake_image_modules()
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -383,6 +475,52 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn("zermatt-trails-z18-outdoors", markdown)
         self.assertIn("debug/crops/crop-sheet.jpg", markdown)
 
+    def test_build_summary_markdown_lists_path_pedestrian_focus_cues(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "path_pedestrian_focus_json": "debug/focus/path-pedestrian-focus.json",
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 1,
+                "crop_count": 0,
+                "cameras": [
+                    {
+                        "camera": "chamonix-trails-z14-outdoors",
+                        "status": "no_hotspot_crops",
+                        "path_pedestrian_focus": {
+                            "stroke_width_deltas": [
+                                {
+                                    "source_layer_id": "road-path-trail",
+                                    "qgis_layer_id": "road-path-trail-below-z16",
+                                    "decoded_candidate_count": 74,
+                                    "candidate_types": ["trail=69", "hiking=5"],
+                                    "line_width_delta_mm": 0.15875,
+                                    "line_width_ratio": 1.6,
+                                }
+                            ],
+                            "dash_mismatches": [
+                                {
+                                    "source_layer_id": "bridge-path",
+                                    "qgis_layer_id": "bridge-path",
+                                    "decoded_candidate_count": 0,
+                                    "source_dasharray": [1, 0.25],
+                                    "qgis_dasharray": [4, 0.3],
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("Path/pedestrian focus input: `debug/focus/path-pedestrian-focus.json`", markdown)
+        self.assertIn("## Path/pedestrian focus cues", markdown)
+        self.assertIn("road-path-trail->road-path-trail-below-z16", markdown)
+        self.assertIn("candidates=74 (trail=69, hiking=5)", markdown)
+        self.assertIn("dash=[1,0.25]!=[4,0.3]", markdown)
+
     def test_build_summary_markdown_lists_empty_camera_status(self):
         markdown = build_summary_markdown(
             {
@@ -405,6 +543,9 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             root = Path(tmpdir)
             comparison_summary, summary_path = _write_visual_triplet(root, image_module)
             summary_path.write_text(json.dumps(comparison_summary), encoding="utf-8")
+            focus_path = root / "focus" / "path-pedestrian-focus.json"
+            focus_path.parent.mkdir(parents=True)
+            focus_path.write_text(json.dumps(_path_pedestrian_focus_report()), encoding="utf-8")
             output_root = root / "debug"
             stdout = io.StringIO()
 
@@ -422,6 +563,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     [
                         "--comparison-summary-json",
                         str(summary_path),
+                        "--path-pedestrian-focus-json",
+                        str(focus_path),
                         "--camera",
                         "chamonix-trails-z14-outdoors",
                         "--crops-per-camera",
@@ -435,6 +578,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             report_path = Path(stdout.getvalue().strip()).parent / "visual-crops.json"
             report = json.loads(report_path.read_text(encoding="utf-8"))
             self.assertEqual(report["crop_count"], 1)
+            self.assertEqual(report["path_pedestrian_focus_json"], str(focus_path))
+            self.assertIn("path_pedestrian_focus", report["cameras"][0])
             self.assertTrue((report_path.parent / "crop-sheet.jpg").exists())
 
     def test_main_reports_bad_crop_count_without_traceback(self):

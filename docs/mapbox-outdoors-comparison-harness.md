@@ -116,6 +116,27 @@ Use the browser image as the Mapbox GL reference. Inspect the QGIS image for hig
 
 Use the brightness-enhanced diff image and metrics as navigation aids, not as pass/fail gates. Label placement and antialiasing differences will create expected diff noise.
 
+## Visual hotspot crops
+
+After a full comparison run, crop the highest-delta windows when the contact sheet is too broad to choose the next tuning slice:
+
+```bash
+python3 validation/mapbox_outdoors_visual_crops.py \
+  --comparison-summary-json debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/summary.json \
+  --crop-size 420x300 \
+  --crops-per-camera 2
+```
+
+When path/pedestrian styling is under review, pass the matching focus report so each crop row is annotated with the strongest per-camera stroke-width and dash cues:
+
+```bash
+python3 validation/mapbox_outdoors_visual_crops.py \
+  --comparison-summary-json debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/summary.json \
+  --path-pedestrian-focus-json debug/mapbox-outdoors-path-pedestrian-focus/<timestamp>/path-pedestrian-focus.json
+```
+
+The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
+
 ## Style audit before tuning
 
 Before choosing another rendering-tuning slice, generate a style audit so the work is tied to the actual Mapbox Outdoors layer rules and qfit's current QGIS preprocessing choices.
