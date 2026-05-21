@@ -1138,6 +1138,14 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         )
 
         [camera] = report["cameras"]
+        comparisons = {
+            comparison["source_layer_id"]: comparison
+            for comparison in camera["source_qgis_stroke_control_comparisons"]
+        }
+        self.assertEqual(
+            comparisons["road-pedestrian-case"]["qgis_auxiliary_layer_ids"],
+            ["road-pedestrian-case-z18-plus-pale-casing"],
+        )
         self.assertEqual(
             camera["pedestrian_core_case_cap_relationships"],
             [
@@ -1168,6 +1176,9 @@ class MapboxOutdoorsPathPedestrianFocusTests(unittest.TestCase):
         )
         markdown = build_summary_markdown(report)
         self.assertIn("## Pedestrian core/case cap relationships", markdown)
+        self.assertIn("## QGIS auxiliary stroke layers", markdown)
+        self.assertIn("road-pedestrian-case-z18-plus-pale-casing", markdown)
+        self.assertIn("should not be read as one-to-one source style mismatches", markdown)
         self.assertIn("source_both_widths_capped=true", markdown)
         self.assertIn("qgis_ratio_preserving_core_width_mm_at_cap=2.4", markdown)
 
