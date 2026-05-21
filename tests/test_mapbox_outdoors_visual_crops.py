@@ -786,6 +786,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                 "candidates=0 source-capped"
                             )
                         ],
+                        "source_capped_stroke_samples": [
+                            (
+                                "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
+                                "candidates=0 source-capped"
+                            )
+                        ],
                         "zero_candidate_dash_samples": [
                             "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
                         ],
@@ -1868,6 +1874,12 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                                 "candidates=0 source-capped"
                             )
                         ],
+                        "source_capped_stroke_samples": [
+                            (
+                                "bridge-path->bridge-path delta=-0.7937mm ratio=0.25 "
+                                "candidates=0 source-capped"
+                            )
+                        ],
                         "zero_candidate_dash_samples": [
                             "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0"
                         ],
@@ -1925,6 +1937,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
         self.assertIn("## Path/pedestrian focus coverage samples", markdown)
+        self.assertIn("Source-capped strokes", markdown)
         self.assertIn("road-steps->road-steps delta=0mm ratio=1 candidates=3", markdown)
         self.assertIn("bridge-path->bridge-path delta=-0.7937mm ratio=0.25", markdown)
         self.assertIn("## Path/pedestrian decoded feature coverage", markdown)
@@ -1967,7 +1980,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertNotIn("## Path/pedestrian decoded feature coverage", markdown)
         self.assertIn(
             (
-                "| legacy-focus-report-camera | - | - | "
+                "| legacy-focus-report-camera | - | - | - | "
                 "bridge-path->bridge-path dash=[1,0.25]!=[4,0.3] candidates=0 |"
             ),
             markdown,

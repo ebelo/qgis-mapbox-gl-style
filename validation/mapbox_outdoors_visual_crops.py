@@ -556,6 +556,9 @@ def _path_pedestrian_focus_coverage_rows(
         zero_candidate_stroke_rows = [
             row for row in stroke_rows if not _has_decoded_candidates(row)
         ]
+        source_capped_stroke_rows = [
+            row for row in stroke_rows if row.get("source_line_width_capped") is True
+        ]
         zero_candidate_dash_rows = [
             row for row in dash_rows if not _has_decoded_candidates(row)
         ]
@@ -569,9 +572,7 @@ def _path_pedestrian_focus_coverage_rows(
                 ),
                 "candidate_backed_zero_delta_rows": len(candidate_zero_delta_rows),
                 "zero_candidate_stroke_rows": len(zero_candidate_stroke_rows),
-                "source_capped_stroke_rows": sum(
-                    1 for row in stroke_rows if row.get("source_line_width_capped") is True
-                ),
+                "source_capped_stroke_rows": len(source_capped_stroke_rows),
                 "dash_mismatch_rows": len(dash_rows),
                 "candidate_backed_dash_rows": sum(
                     1 for row in dash_rows if _has_decoded_candidates(row)
@@ -583,6 +584,10 @@ def _path_pedestrian_focus_coverage_rows(
                 ),
                 "zero_candidate_stroke_samples": _focus_coverage_sample_labels(
                     zero_candidate_stroke_rows,
+                    _stroke_focus_cue_summary,
+                ),
+                "source_capped_stroke_samples": _focus_coverage_sample_labels(
+                    source_capped_stroke_rows,
                     _stroke_focus_cue_summary,
                 ),
                 "zero_candidate_dash_samples": _focus_coverage_sample_labels(
@@ -2213,6 +2218,7 @@ def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[s
             continue
         samples = [
             row.get("candidate_zero_delta_stroke_samples"),
+            row.get("source_capped_stroke_samples"),
             row.get("zero_candidate_stroke_samples"),
             row.get("zero_candidate_dash_samples"),
         ]
@@ -2222,6 +2228,7 @@ def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[s
             [
                 row.get("camera"),
                 _joined_summary_label_values(row.get("candidate_zero_delta_stroke_samples")),
+                _joined_summary_label_values(row.get("source_capped_stroke_samples")),
                 _joined_summary_label_values(row.get("zero_candidate_stroke_samples")),
                 _joined_summary_label_values(row.get("zero_candidate_dash_samples")),
             ]
@@ -2234,11 +2241,14 @@ def _summary_focus_coverage_sample_lines(report: Mapping[str, object]) -> list[s
         "",
         (
             "Shows representative focus rows hidden from the cue table because they are "
-            "candidate-backed zero-delta rows or zero-candidate rows."
+            "candidate-backed zero-delta rows, source-capped rows, or zero-candidate rows."
         ),
         "",
-        "| Camera | Candidate zero-delta strokes | Zero-candidate strokes | Zero-candidate dashes |",
-        "| --- | --- | --- | --- |",
+        (
+            "| Camera | Candidate zero-delta strokes | Source-capped strokes | "
+            "Zero-candidate strokes | Zero-candidate dashes |"
+        ),
+        "| --- | --- | --- | --- | --- |",
     ]
     lines.extend(_markdown_table_row(row) for row in sample_rows)
     return lines
