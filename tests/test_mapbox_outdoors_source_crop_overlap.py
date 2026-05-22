@@ -190,6 +190,12 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             ],
             {"class": {"park": 1}, "type": {"park": 1}},
         )
+        self.assertAlmostEqual(
+            combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
+                "candidate_property_overlap_areas"
+            ]["class"]["park"]["crop_coverage_ratio"],
+            0.128418417649,
+        )
         self.assertEqual(
             combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
                 "matched_feature_count"
@@ -215,7 +221,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertIn("QGIS style-layer coverage evaluates camera-zoom-active filters", markdown)
         self.assertIn("QGIS filter missing props reports active style-layer filter properties", markdown)
         self.assertIn(
-            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128 | landuse-park-sized: sizerank=1/1 candidate=1 candidates [class: park=1; type: park=1] (matched=0) | park=1 | - | - |",
+            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128 | landuse-park-sized: sizerank=1/1 candidate=1 candidates [class: park=1; type: park=1] candidate coverage [class: park=0.128; type: park=0.128] (matched=0) | park=1 | - | - |",
             markdown,
         )
         self.assertIn("| `landuse_overlay` | 0 | 0 | 0.000 | - | - | - | - | - | - | - |", markdown)
@@ -330,6 +336,10 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertEqual(requirement["missing_feature_counts"], {"sizerank": 2})
         self.assertEqual(requirement["candidate_missing_feature_counts"], {"sizerank": 1})
         self.assertEqual(requirement["candidate_property_counts"], {"class": {"park": 1}})
+        self.assertAlmostEqual(
+            requirement["candidate_property_overlap_areas"]["class"]["park"]["crop_coverage_ratio"],
+            0.16,
+        )
         self.assertEqual(requirement["candidate_missing_feature_total"], 1)
         self.assertEqual(requirement["matched_feature_count"], 1)
         self.assertEqual(
@@ -405,7 +415,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             for index in range(9)
         ]
 
-        missing_counts, candidate_property_counts = _candidate_missing_filter_property_summary(
+        missing_counts, candidate_property_counts, candidate_property_areas = _candidate_missing_filter_property_summary(
             features,
             ["class", "sizerank"],
             [
@@ -413,12 +423,19 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
                 [">=", ["to-number", ["get", "sizerank"]], 0],
                 ["!=", ["get", "class"], "excluded"],
             ],
+            bounds={"west": 0.0, "south": 0.0, "east": 9.0, "north": 1.0},
+            crop_area=9.0,
             camera_zoom=18.0,
         )
 
         self.assertEqual(missing_counts, {"sizerank": 9})
         self.assertEqual(len(candidate_property_counts["class"]), 9)
         self.assertEqual(candidate_property_counts["class"]["class-8"], 1)
+        self.assertEqual(len(candidate_property_areas["class"]), 9)
+        self.assertAlmostEqual(
+            candidate_property_areas["class"]["class-8"]["crop_coverage_ratio"],
+            0.027777777778,
+        )
 
     def test_combined_candidate_counts_follow_displayed_missing_properties(self):
         missing_counts = {f"p{index}": 20 for index in range(8)}
@@ -436,18 +453,31 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
                             "candidate_missing_feature_counts": candidate_counts,
                             "candidate_missing_feature_total": sum(candidate_counts.values()),
                             "candidate_property_counts": {"class": {"commercial_area": 4}},
+                            "candidate_property_overlap_areas": {
+                                "class": {
+                                    "commercial_area": {
+                                        "overlap_bbox_area": 4.0,
+                                        "crop_coverage_ratio": 999.0,
+                                    }
+                                }
+                            },
                             "overlap_feature_count": 25,
                             "matched_feature_count": 0,
                         }
                     }
                 }
-            ]
+            ],
+            crop_area=8.0,
         )
 
         requirement = combined["landuse-many"]
         self.assertEqual(set(requirement["missing_feature_counts"]), {f"p{index}" for index in range(8)})
         self.assertEqual(requirement["candidate_missing_feature_counts"]["p0"], 1)
         self.assertEqual(requirement["candidate_property_counts"], {"class": {"commercial_area": 4}})
+        self.assertEqual(
+            requirement["candidate_property_overlap_areas"],
+            {"class": {"commercial_area": {"overlap_bbox_area": 4.0, "crop_coverage_ratio": 0.5}}},
+        )
         self.assertNotIn("p8", requirement["candidate_missing_feature_counts"])
 
     def test_mapbox_filter_helpers_cover_preprocessed_style_expressions(self):

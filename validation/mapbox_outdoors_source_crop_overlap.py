@@ -378,31 +378,50 @@ def _property_count_summary(features: Sequence[Mapping[str, object]]) -> dict[st
     return summary
 
 
+def _property_area_counter_summary(
+    property_areas: Mapping[str, Counter[str]],
+    *,
+    crop_area: float,
+    limit: int | None = MAX_COUNT_VALUES,
+) -> dict[str, dict[str, dict[str, float]]]:
+    return {
+        key: {
+            value: {
+                "overlap_bbox_area": _rounded_float(area),
+                "crop_coverage_ratio": _rounded_float(area / crop_area) if crop_area else 0.0,
+            }
+            for value, area in areas.most_common(limit)
+        }
+        for key, areas in property_areas.items()
+        if areas
+    }
+
+
+def _update_feature_property_areas(
+    property_areas: dict[str, Counter[str]],
+    feature: Mapping[str, object],
+    area: float,
+) -> None:
+    if area <= 0.0:
+        return
+    feature_properties = _feature_properties(feature)
+    for key in PROPERTY_COUNT_KEYS:
+        value = _clean_count_value(feature_properties.get(key))
+        if value != MISSING_VALUE:
+            property_areas.setdefault(key, Counter()).update({value: area})
+
+
 def _property_area_summary(
     features: Sequence[Mapping[str, object]],
     *,
     bounds: Mapping[str, float],
     crop_area: float,
 ) -> dict[str, dict[str, dict[str, float]]]:
-    summary: dict[str, dict[str, dict[str, float]]] = {}
+    property_areas: dict[str, Counter[str]] = {}
     feature_areas = [(feature, _feature_bbox_overlap_area(feature, bounds)) for feature in features]
-    for key in PROPERTY_COUNT_KEYS:
-        areas = Counter[str]()
-        for feature, area in feature_areas:
-            if area <= 0.0:
-                continue
-            areas[_clean_count_value(_feature_properties(feature).get(key))] += area
-        areas.pop(MISSING_VALUE, None)
-        if not areas:
-            continue
-        summary[key] = {
-            value: {
-                "overlap_bbox_area": _rounded_float(area),
-                "crop_coverage_ratio": _rounded_float(area / crop_area) if crop_area else 0.0,
-            }
-            for value, area in areas.most_common(MAX_COUNT_VALUES)
-        }
-    return summary
+    for feature, area in feature_areas:
+        _update_feature_property_areas(property_areas, feature, area)
+    return _property_area_counter_summary(property_areas, crop_area=crop_area)
 
 
 def _numeric_property_range(features: Sequence[Mapping[str, object]], key: str) -> dict[str, float] | None:
@@ -596,11 +615,14 @@ def _candidate_missing_filter_property_summary(
     properties: Sequence[str],
     expression: object,
     *,
+    bounds: Mapping[str, float],
+    crop_area: float,
     camera_zoom: float,
-) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
+) -> tuple[dict[str, int], dict[str, dict[str, int]], dict[str, dict[str, dict[str, float]]]]:
     property_set = set(properties)
     counts: Counter[str] = Counter()
     candidate_property_counts: dict[str, Counter[str]] = {}
+    candidate_property_areas: dict[str, Counter[str]] = {}
     for feature in features:
         missing_properties = property_set - set(_feature_properties(feature))
         if missing_properties and _feature_matches_candidate_filter_without_missing_checks(
@@ -611,6 +633,11 @@ def _candidate_missing_filter_property_summary(
         ):
             counts.update(missing_properties)
             _update_candidate_feature_property_counts(candidate_property_counts, feature)
+            _update_feature_property_areas(
+                candidate_property_areas,
+                feature,
+                _feature_bbox_overlap_area(feature, bounds),
+            )
     return (
         {name: counts[name] for name in properties if counts[name] > 0},
         {
@@ -618,6 +645,7 @@ def _candidate_missing_filter_property_summary(
             for key, counter in candidate_property_counts.items()
             if counter
         },
+        _property_area_counter_summary(candidate_property_areas, crop_area=crop_area, limit=None),
     )
 
 
@@ -888,6 +916,8 @@ def _style_layer_match_summary(
 def _style_layer_filter_property_summary(
     features: Sequence[Mapping[str, object]],
     *,
+    bounds: Mapping[str, float],
+    crop_area: float,
     source_layer: str,
     style_layers: Sequence[Mapping[str, object]],
     camera_zoom: float,
@@ -904,11 +934,15 @@ def _style_layer_filter_property_summary(
         missing_total = sum(missing_counts.values())
         if missing_total <= 0:
             continue
-        candidate_missing_counts, candidate_property_counts = _candidate_missing_filter_property_summary(
-            features,
-            properties,
-            layer.get("filter"),
-            camera_zoom=camera_zoom,
+        candidate_missing_counts, candidate_property_counts, candidate_property_areas = (
+            _candidate_missing_filter_property_summary(
+                features,
+                properties,
+                layer.get("filter"),
+                bounds=bounds,
+                crop_area=crop_area,
+                camera_zoom=camera_zoom,
+            )
         )
         candidate_missing_total = sum(candidate_missing_counts.values())
         summaries[layer_id] = {
@@ -919,6 +953,7 @@ def _style_layer_filter_property_summary(
             "candidate_missing_feature_counts": candidate_missing_counts,
             "candidate_missing_feature_total": candidate_missing_total,
             "candidate_property_counts": candidate_property_counts,
+            "candidate_property_overlap_areas": candidate_property_areas,
             "overlap_feature_count": len(features),
             "matched_feature_count": sum(
                 1
@@ -983,6 +1018,8 @@ def source_layer_overlap_record(
         ),
         "qgis_filter_property_requirements": _style_layer_filter_property_summary(
             overlapping_features,
+            bounds=bounds,
+            crop_area=crop_area,
             source_layer=source_layer,
             style_layers=style_layers,
             camera_zoom=camera_zoom,
@@ -1212,6 +1249,7 @@ def _iter_filter_property_requirement_values(
         Mapping[str, object],
         Mapping[str, object],
         Mapping[str, object],
+        Mapping[str, object],
         Sequence[object],
     ]
 ]:
@@ -1228,6 +1266,7 @@ def _iter_filter_property_requirement_values(
         missing_counts = requirement.get("missing_feature_counts")
         candidate_missing_counts = requirement.get("candidate_missing_feature_counts", {})
         candidate_property_counts = requirement.get("candidate_property_counts", {})
+        candidate_property_areas = requirement.get("candidate_property_overlap_areas", {})
         properties = requirement.get("filter_properties")
         if (
             isinstance(missing_total, int)
@@ -1237,6 +1276,7 @@ def _iter_filter_property_requirement_values(
             and isinstance(missing_counts, Mapping)
             and isinstance(candidate_missing_counts, Mapping)
             and isinstance(candidate_property_counts, Mapping)
+            and isinstance(candidate_property_areas, Mapping)
             and isinstance(properties, Sequence)
             and not isinstance(properties, (str, bytes))
         ):
@@ -1249,6 +1289,7 @@ def _iter_filter_property_requirement_values(
                 missing_counts,
                 candidate_missing_counts,
                 candidate_property_counts,
+                candidate_property_areas,
                 properties,
             )
 
@@ -1265,6 +1306,7 @@ def _new_combined_filter_property_requirement(
         "candidate_missing_feature_counts": Counter(),
         "candidate_missing_feature_total": 0,
         "candidate_property_counts": {},
+        "candidate_property_overlap_areas": {},
         "overlap_feature_count": 0,
         "matched_feature_count": 0,
     }
@@ -1289,6 +1331,26 @@ def _update_candidate_property_value_counts(
             counter.update({str(value): int(count) for value, count in value_counts.items()})
 
 
+def _update_candidate_property_overlap_areas(
+    combined_areas: object,
+    candidate_property_areas: Mapping[str, object],
+) -> None:
+    if not isinstance(combined_areas, dict):
+        return
+    for key, value_areas in candidate_property_areas.items():
+        if not isinstance(value_areas, Mapping):
+            continue
+        counter = combined_areas.setdefault(str(key), Counter())
+        if not isinstance(counter, Counter):
+            continue
+        for value, area_record in value_areas.items():
+            if not isinstance(area_record, Mapping):
+                continue
+            overlap_area = area_record.get("overlap_bbox_area")
+            if isinstance(overlap_area, (int, float)) and not isinstance(overlap_area, bool):
+                counter.update({str(value): float(overlap_area)})
+
+
 def _update_combined_filter_property_requirement(
     requirement: dict[str, object],
     *,
@@ -1299,10 +1361,15 @@ def _update_combined_filter_property_requirement(
     missing_counts: Mapping[str, object],
     candidate_missing_counts: Mapping[str, object],
     candidate_property_counts: Mapping[str, object],
+    candidate_property_areas: Mapping[str, object],
 ) -> None:
     _update_counter_from_mapping(requirement["missing_feature_counts"], missing_counts)
     _update_counter_from_mapping(requirement["candidate_missing_feature_counts"], candidate_missing_counts)
     _update_candidate_property_value_counts(requirement["candidate_property_counts"], candidate_property_counts)
+    _update_candidate_property_overlap_areas(
+        requirement["candidate_property_overlap_areas"],
+        candidate_property_areas,
+    )
     requirement["missing_feature_total"] = int(requirement["missing_feature_total"]) + missing_total
     requirement["candidate_missing_feature_total"] = (
         int(requirement["candidate_missing_feature_total"]) + candidate_missing_total
@@ -1336,8 +1403,28 @@ def _limited_candidate_property_counts(requirement: Mapping[str, object]) -> dic
     }
 
 
+def _limited_candidate_property_overlap_areas(
+    requirement: Mapping[str, object],
+    *,
+    crop_area: float,
+) -> dict[str, dict[str, dict[str, float]]]:
+    candidate_value_areas = requirement["candidate_property_overlap_areas"]
+    if not isinstance(candidate_value_areas, dict):
+        return {}
+    return _property_area_counter_summary(
+        {
+            str(key): counter
+            for key, counter in candidate_value_areas.items()
+            if isinstance(counter, Counter)
+        },
+        crop_area=crop_area,
+    )
+
+
 def _combined_filter_property_requirement_record(
     requirement: dict[str, object],
+    *,
+    crop_area: float,
 ) -> dict[str, object]:
     missing_counts = (
         dict(requirement["missing_feature_counts"].most_common(MAX_COUNT_VALUES))
@@ -1349,11 +1436,17 @@ def _combined_filter_property_requirement_record(
         "missing_feature_counts": missing_counts,
         "candidate_missing_feature_counts": _limited_candidate_missing_counts(requirement, missing_counts),
         "candidate_property_counts": _limited_candidate_property_counts(requirement),
+        "candidate_property_overlap_areas": _limited_candidate_property_overlap_areas(
+            requirement,
+            crop_area=crop_area,
+        ),
     }
 
 
 def _combined_filter_property_requirements(
     records: Sequence[Mapping[str, object]],
+    *,
+    crop_area: float = 0.0,
 ) -> dict[str, dict[str, object]]:
     requirements: dict[str, dict[str, object]] = {}
     for record in records:
@@ -1366,6 +1459,7 @@ def _combined_filter_property_requirements(
             missing_counts,
             candidate_missing_counts,
             candidate_property_counts,
+            candidate_property_areas,
             properties,
         ) in (
             _iter_filter_property_requirement_values(record)
@@ -1383,6 +1477,7 @@ def _combined_filter_property_requirements(
                 missing_counts=missing_counts,
                 candidate_missing_counts=candidate_missing_counts,
                 candidate_property_counts=candidate_property_counts,
+                candidate_property_areas=candidate_property_areas,
             )
     combined: dict[str, dict[str, object]] = {}
     for layer_id, requirement in sorted(
@@ -1394,7 +1489,7 @@ def _combined_filter_property_requirements(
             str(item[0]),
         ),
     )[:MAX_COUNT_VALUES]:
-        combined[layer_id] = _combined_filter_property_requirement_record(requirement)
+        combined[layer_id] = _combined_filter_property_requirement_record(requirement, crop_area=crop_area)
     return combined
 
 
@@ -1425,7 +1520,7 @@ def _combined_source_layer_record(source_layer: str, records: Sequence[Mapping[s
         "property_counts": _combined_property_counts(records),
         "property_overlap_areas": _combined_property_areas(records, crop_area=crop_area),
         "qgis_style_layer_matches": _combined_style_layer_matches(records, crop_area=crop_area),
-        "qgis_filter_property_requirements": _combined_filter_property_requirements(records),
+        "qgis_filter_property_requirements": _combined_filter_property_requirements(records, crop_area=crop_area),
         "ele_range": _combined_ele_range(records),
     }
 
@@ -1597,6 +1692,25 @@ def _format_candidate_property_counts(requirement: Mapping[str, object]) -> str:
     return "; ".join(formatted)
 
 
+def _format_candidate_property_overlap_areas(requirement: Mapping[str, object]) -> str:
+    areas = requirement.get("candidate_property_overlap_areas")
+    if not isinstance(areas, dict) or not areas:
+        return ""
+    formatted: list[str] = []
+    for key in PROPERTY_COUNT_KEYS:
+        value_areas = areas.get(key)
+        if not isinstance(value_areas, dict) or not value_areas:
+            continue
+        values = ", ".join(
+            f"{value}={float(area_record.get('crop_coverage_ratio', 0.0)):.3f}"
+            for value, area_record in list(value_areas.items())[:MAX_COUNT_VALUES]
+            if isinstance(area_record, dict)
+        )
+        if values:
+            formatted.append(f"{key}: {values}")
+    return "; ".join(formatted)
+
+
 def _format_filter_property_requirement(layer_id: str, requirement: Mapping[str, object]) -> str | None:
     overlap_count = int(requirement.get("overlap_feature_count") or 0)
     missing_counts = requirement.get("missing_feature_counts")
@@ -1610,7 +1724,12 @@ def _format_filter_property_requirement(layer_id: str, requirement: Mapping[str,
     )
     candidate_properties = _format_candidate_property_counts(requirement)
     candidate_suffix = f" candidates [{candidate_properties}]" if candidate_properties else ""
-    return f"{layer_id}: {counts}{candidate_suffix} (matched={int(requirement.get('matched_feature_count') or 0)})"
+    candidate_areas = _format_candidate_property_overlap_areas(requirement)
+    candidate_area_suffix = f" candidate coverage [{candidate_areas}]" if candidate_areas else ""
+    return (
+        f"{layer_id}: {counts}{candidate_suffix}{candidate_area_suffix} "
+        f"(matched={int(requirement.get('matched_feature_count') or 0)})"
+    )
 
 
 def _format_filter_property_requirements(record: Mapping[str, object]) -> str:
@@ -1673,7 +1792,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "QGIS filter missing props reports active style-layer filter properties that are absent from "
             "overlapping source features as missing/overlap feature counts. Candidate counts only include "
             "features that still match the layer's other available filter predicates after missing-property "
-            "checks are removed."
+            "checks are removed, with candidate bbox coverage ratios attributed by feature-property value."
         ),
         "",
         "## Combined overlap by source layer",
