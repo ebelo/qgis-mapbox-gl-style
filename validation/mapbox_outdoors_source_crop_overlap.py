@@ -5,6 +5,7 @@ import datetime as dt
 import gzip
 import json
 import math
+import operator as py_operator
 import os
 import sys
 from collections import Counter
@@ -30,6 +31,23 @@ DEFAULT_SOURCE_LAYERS = (
 )
 PROPERTY_COUNT_KEYS = ("class", "type", "index", "structure", "maki")
 MAX_COUNT_VALUES = 8
+COMPARISON_OPERATORS = frozenset(("==", "!=", ">", ">=", "<", "<=", "in", "!in"))
+BOOLEAN_OPERATORS = frozenset(("all", "any", "none", "!"))
+GEOMETRY_TYPE_PROPERTY = "$geometry_type"
+ZOOM_PROPERTY = "$zoom"
+NUMERIC_COMPARISONS = {
+    ">": py_operator.gt,
+    ">=": py_operator.ge,
+    "<": py_operator.lt,
+    "<=": py_operator.le,
+}
+STYLE_LAYER_PAINT_KEYS = (
+    "fill-color",
+    "fill-opacity",
+    "line-color",
+    "line-opacity",
+    "line-width",
+)
 MISSING_VALUE = "(missing)"
 
 TileFetcher = Callable[[str], bytes]
@@ -406,11 +424,277 @@ def _sample_feature_properties(features: Sequence[Mapping[str, object]], *, limi
     return samples
 
 
+def _numeric_value(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _comparison_membership_contains(left: object, right: object) -> bool:
+    if isinstance(right, str):
+        return isinstance(left, str) and left in right
+    haystack = right if isinstance(right, list) else [right]
+    return left in haystack
+
+
+def _comparison_result(operator: object, left: object, right: object) -> bool:
+    if operator == "==":
+        return left == right
+    if operator == "!=":
+        return left != right
+    numeric_comparison = NUMERIC_COMPARISONS.get(operator)
+    if numeric_comparison is not None:
+        left_number = _numeric_value(left)
+        right_number = _numeric_value(right)
+        if left_number is None or right_number is None:
+            return False
+        return numeric_comparison(left_number, right_number)
+    if operator in {"in", "!in"}:
+        contains = _comparison_membership_contains(left, right)
+        return contains if operator == "in" else not contains
+    return False
+
+
+def _mapbox_step_value(expression: Sequence[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 4:
+        return None
+    input_number = _numeric_value(_mapbox_expression_value(expression[1], properties))
+    result = expression[2]
+    if input_number is None:
+        return _mapbox_expression_value(result, properties)
+    for index in range(3, len(expression) - 1, 2):
+        stop = _numeric_value(_mapbox_expression_value(expression[index], properties))
+        if stop is None or input_number < stop:
+            break
+        result = expression[index + 1]
+    return _mapbox_expression_value(result, properties)
+
+
+def _mapbox_simple_expression_value(
+    operator: object,
+    operands: Sequence[object],
+    properties: Mapping[str, object],
+) -> object:
+    if operator == "get" and operands:
+        return properties.get(str(operands[0]))
+    if operator == "to-number" and operands:
+        return _numeric_value(_mapbox_expression_value(operands[0], properties))
+    if operator == "literal" and operands:
+        return operands[0]
+    if operator == "has" and operands:
+        return str(operands[0]) in properties
+    if operator == "!has" and operands:
+        return str(operands[0]) not in properties
+    if operator == "geometry-type":
+        return properties.get(GEOMETRY_TYPE_PROPERTY)
+    if operator == "zoom":
+        return properties.get(ZOOM_PROPERTY)
+    return None
+
+
+def _mapbox_match_value(expression: Sequence[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 5:
+        return None
+    input_value = _mapbox_expression_value(expression[1], properties)
+    fallback = expression[-1]
+    for index in range(2, len(expression) - 1, 2):
+        label = expression[index]
+        labels = label if isinstance(label, list) else [label]
+        if input_value in labels:
+            return _mapbox_expression_value(expression[index + 1], properties)
+    return _mapbox_expression_value(fallback, properties)
+
+
+def _mapbox_case_value(expression: Sequence[object], properties: Mapping[str, object]) -> object:
+    if len(expression) < 3:
+        return None
+    for index in range(1, len(expression) - 1, 2):
+        if _mapbox_filter_matches(expression[index], properties):
+            return _mapbox_expression_value(expression[index + 1], properties)
+    return _mapbox_expression_value(expression[-1], properties)
+
+
+def _mapbox_boolean_value(
+    operator: object,
+    operands: Sequence[object],
+    properties: Mapping[str, object],
+) -> object:
+    if operator == "all":
+        return all(_mapbox_filter_matches(item, properties) for item in operands)
+    if operator == "any":
+        return any(_mapbox_filter_matches(item, properties) for item in operands)
+    if operator == "none":
+        return not any(_mapbox_filter_matches(item, properties) for item in operands)
+    if operator == "!":
+        return not _mapbox_filter_matches(operands[0], properties) if operands else False
+    return None
+
+
+def _comparison_values(expression: Sequence[object], properties: Mapping[str, object]) -> tuple[object, object] | None:
+    if len(expression) < 3:
+        return None
+    return (
+        _mapbox_expression_value(expression[1], properties),
+        _mapbox_expression_value(expression[2], properties),
+    )
+
+
+def _mapbox_expression_value(expression: object, properties: Mapping[str, object]) -> object:
+    if not isinstance(expression, list) or not expression:
+        return expression
+    operator = expression[0]
+    operands = expression[1:]
+    if operator == "match":
+        return _mapbox_match_value(expression, properties)
+    if operator == "case":
+        return _mapbox_case_value(expression, properties)
+    if operator in BOOLEAN_OPERATORS:
+        return _mapbox_boolean_value(operator, operands, properties)
+    if operator in COMPARISON_OPERATORS:
+        values = _comparison_values(expression, properties)
+        return None if values is None else _comparison_result(operator, values[0], values[1])
+    if operator == "step":
+        return _mapbox_step_value(expression, properties)
+    return _mapbox_simple_expression_value(operator, operands, properties)
+
+
+def _legacy_filter_property_value(value: object, properties: Mapping[str, object]) -> object:
+    if value == "$type":
+        return properties.get(GEOMETRY_TYPE_PROPERTY)
+    return properties.get(value) if isinstance(value, str) else _mapbox_expression_value(value, properties)
+
+
+def _legacy_filter_values(expression: Sequence[object], properties: Mapping[str, object]) -> tuple[object, object] | None:
+    if len(expression) < 3 or not isinstance(expression[1], str):
+        return None
+    if expression[0] in {"in", "!in"} and len(expression) > 3:
+        return _legacy_filter_property_value(expression[1], properties), list(expression[2:])
+    return _legacy_filter_property_value(expression[1], properties), expression[2]
+
+
+def _mapbox_filter_matches(expression: object, properties: Mapping[str, object]) -> bool:
+    if expression in (None, True):
+        return True
+    if expression is False:
+        return False
+    if not isinstance(expression, list) or not expression:
+        return bool(expression)
+    operator = expression[0]
+    if operator in BOOLEAN_OPERATORS:
+        return bool(_mapbox_expression_value(expression, properties))
+    legacy_values = _legacy_filter_values(expression, properties)
+    if legacy_values is not None:
+        return _comparison_result(operator, legacy_values[0], legacy_values[1])
+    values = _comparison_values(expression, properties) if operator in COMPARISON_OPERATORS else None
+    if values is not None:
+        return _comparison_result(operator, values[0], values[1])
+    return bool(_mapbox_expression_value(expression, properties))
+
+
+def _style_layer_active_at_zoom(layer: Mapping[str, object], zoom: float) -> bool:
+    layout = layer.get("layout")
+    if isinstance(layout, Mapping) and layout.get("visibility") == "none":
+        return False
+    minzoom = _numeric_value(layer.get("minzoom"))
+    maxzoom = _numeric_value(layer.get("maxzoom"))
+    if minzoom is not None and zoom < minzoom:
+        return False
+    return maxzoom is None or zoom < maxzoom
+
+
+def _style_layer_paint_summary(layer: Mapping[str, object]) -> dict[str, object]:
+    paint = layer.get("paint")
+    if not isinstance(paint, dict):
+        return {}
+    return {key: paint[key] for key in STYLE_LAYER_PAINT_KEYS if key in paint}
+
+
+def _feature_context_properties(feature: Mapping[str, object], *, camera_zoom: float) -> dict[str, object]:
+    properties = dict(_feature_properties(feature))
+    geometry = feature.get("geometry")
+    if isinstance(geometry, dict) and isinstance(geometry.get("type"), str):
+        properties[GEOMETRY_TYPE_PROPERTY] = geometry["type"]
+    properties[ZOOM_PROPERTY] = camera_zoom
+    return properties
+
+
+def _matching_style_layers(
+    *,
+    feature: Mapping[str, object],
+    source_layer: str,
+    style_layers: Sequence[Mapping[str, object]],
+    camera_zoom: float,
+) -> Iterator[Mapping[str, object]]:
+    properties = _feature_context_properties(feature, camera_zoom=camera_zoom)
+    for layer in style_layers:
+        if layer.get("source-layer") != source_layer:
+            continue
+        if not _style_layer_active_at_zoom(layer, camera_zoom):
+            continue
+        if _mapbox_filter_matches(layer.get("filter"), properties):
+            yield layer
+
+
+def _style_layer_match_summary(
+    features: Sequence[Mapping[str, object]],
+    *,
+    bounds: Mapping[str, float],
+    crop_area: float,
+    source_layer: str,
+    style_layers: Sequence[Mapping[str, object]],
+    camera_zoom: float,
+) -> dict[str, dict[str, object]]:
+    matches: dict[str, dict[str, object]] = {}
+    for feature in features:
+        area = _feature_bbox_overlap_area(feature, bounds)
+        for layer in _matching_style_layers(
+            feature=feature,
+            source_layer=source_layer,
+            style_layers=style_layers,
+            camera_zoom=camera_zoom,
+        ):
+            layer_id = str(layer.get("id") or MISSING_VALUE)
+            match = matches.setdefault(
+                layer_id,
+                {
+                    "layer": layer_id,
+                    "type": layer.get("type"),
+                    "feature_count": 0,
+                    "overlap_bbox_area": 0.0,
+                    "paint": _style_layer_paint_summary(layer),
+                },
+            )
+            match["feature_count"] = int(match["feature_count"]) + 1
+            match["overlap_bbox_area"] = float(match["overlap_bbox_area"]) + area
+    return {
+        layer_id: {
+            **match,
+            "overlap_bbox_area": _rounded_float(float(match["overlap_bbox_area"])),
+            "crop_coverage_ratio": _rounded_float(float(match["overlap_bbox_area"]) / crop_area)
+            if crop_area
+            else 0.0,
+        }
+        for layer_id, match in sorted(
+            matches.items(),
+            key=lambda item: (-float(item[1]["overlap_bbox_area"]), str(item[0])),
+        )[:MAX_COUNT_VALUES]
+    }
+
+
 def source_layer_overlap_record(
     *,
     decoded_tiles: Sequence[Mapping[str, object]],
     bounds: Mapping[str, float],
     source_layer: str,
+    style_layers: Sequence[Mapping[str, object]] = (),
+    camera_zoom: float = 0.0,
 ) -> dict[str, object]:
     tile_features = [
         feature
@@ -434,6 +718,14 @@ def source_layer_overlap_record(
             overlapping_features,
             bounds=bounds,
             crop_area=crop_area,
+        ),
+        "qgis_style_layer_matches": _style_layer_match_summary(
+            overlapping_features,
+            bounds=bounds,
+            crop_area=crop_area,
+            source_layer=source_layer,
+            style_layers=style_layers,
+            camera_zoom=camera_zoom,
         ),
         "ele_range": _numeric_property_range(overlapping_features, "ele"),
         "sample_properties": _sample_feature_properties(overlapping_features),
@@ -600,6 +892,54 @@ def _combined_property_areas(
     }
 
 
+def _iter_style_layer_match_values(record: Mapping[str, object]) -> Iterator[tuple[str, int, float, object, object]]:
+    style_layer_matches = record.get("qgis_style_layer_matches")
+    if not isinstance(style_layer_matches, dict):
+        return
+    for layer_id, match in style_layer_matches.items():
+        if not isinstance(match, dict):
+            continue
+        feature_count = match.get("feature_count")
+        overlap_area = match.get("overlap_bbox_area")
+        if isinstance(feature_count, int) and isinstance(overlap_area, (int, float)):
+            yield str(layer_id), feature_count, float(overlap_area), match.get("type"), match.get("paint")
+
+
+def _combined_style_layer_matches(
+    records: Sequence[Mapping[str, object]],
+    *,
+    crop_area: float,
+) -> dict[str, dict[str, object]]:
+    matches: dict[str, dict[str, object]] = {}
+    for record in records:
+        for layer_id, feature_count, overlap_area, layer_type, paint in _iter_style_layer_match_values(record):
+            match = matches.setdefault(
+                layer_id,
+                {
+                    "layer": layer_id,
+                    "type": layer_type,
+                    "feature_count": 0,
+                    "overlap_bbox_area": 0.0,
+                    "paint": paint if isinstance(paint, dict) else {},
+                },
+            )
+            match["feature_count"] = int(match["feature_count"]) + feature_count
+            match["overlap_bbox_area"] = float(match["overlap_bbox_area"]) + overlap_area
+    return {
+        layer_id: {
+            **match,
+            "overlap_bbox_area": _rounded_float(float(match["overlap_bbox_area"])),
+            "crop_coverage_ratio": _rounded_float(float(match["overlap_bbox_area"]) / crop_area)
+            if crop_area
+            else 0.0,
+        }
+        for layer_id, match in sorted(
+            matches.items(),
+            key=lambda item: (-float(item[1]["overlap_bbox_area"]), str(item[0])),
+        )[:MAX_COUNT_VALUES]
+    }
+
+
 def _combined_ele_range(records: Sequence[Mapping[str, object]]) -> dict[str, float] | None:
     values: list[float] = []
     for record in records:
@@ -626,6 +966,7 @@ def _combined_source_layer_record(source_layer: str, records: Sequence[Mapping[s
         "bbox_crop_coverage_ratio": _rounded_float(overlap_area / crop_area) if crop_area else 0.0,
         "property_counts": _combined_property_counts(records),
         "property_overlap_areas": _combined_property_areas(records, crop_area=crop_area),
+        "qgis_style_layer_matches": _combined_style_layer_matches(records, crop_area=crop_area),
         "ele_range": _combined_ele_range(records),
     }
 
@@ -680,6 +1021,9 @@ def collect_source_crop_overlap_report(
         trusted_roots=trusted_roots,
     )
     style_definition = load_json_object(style_path)
+    style_layers = [
+        layer for layer in style_definition.get("layers", []) if isinstance(layer, dict)
+    ]
     tileset_ids = extract_mapbox_vector_source_ids(style_definition)
     tile_url_template = build_mapbox_vector_tiles_url(
         token,
@@ -688,6 +1032,7 @@ def collect_source_crop_overlap_report(
         tileset_ids=tileset_ids,
     )
     tile_zoom = config.tile_zoom if config.tile_zoom is not None else recommended_tile_zoom(float(camera["zoom"]))
+    camera_zoom = float(camera["zoom"])
     fetch_tile = tile_fetcher or _fetch_url_bytes
     decode_tile = tile_decoder or _default_tile_decoder
     decoded_tile_cache: dict[tuple[int, int, int], dict[str, object]] = {}
@@ -712,6 +1057,8 @@ def collect_source_crop_overlap_report(
                         decoded_tiles=decoded_tiles,
                         bounds=bounds,
                         source_layer=source_layer,
+                        style_layers=style_layers,
+                        camera_zoom=camera_zoom,
                     )
                     for source_layer in config.source_layers
                 ],
@@ -721,7 +1068,7 @@ def collect_source_crop_overlap_report(
     return {
         "generated": generated.astimezone(dt.timezone.utc).isoformat(),
         "camera": config.camera_name,
-        "camera_zoom": float(camera["zoom"]),
+        "camera_zoom": camera_zoom,
         "tile_zoom": tile_zoom,
         "decoded_tile_count": len(decoded_tile_cache),
         "tileset_ids": tileset_ids,
@@ -764,6 +1111,17 @@ def _format_property_coverage(record: Mapping[str, object], key: str) -> str:
     )
 
 
+def _format_style_layer_matches(record: Mapping[str, object]) -> str:
+    matches = record.get("qgis_style_layer_matches")
+    if not isinstance(matches, dict) or not matches:
+        return "-"
+    return ", ".join(
+        f"{layer_id}={float(match.get('crop_coverage_ratio', 0.0)):.3f}"
+        for layer_id, match in matches.items()
+        if isinstance(match, dict)
+    )
+
+
 def _format_ele_range(value: object) -> str:
     if not isinstance(value, dict):
         return "-"
@@ -802,23 +1160,28 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "Bbox coverage is a summed upper-bound attribution aid, not pixel ownership; ratios can exceed "
             "1.0 when feature bboxes overlap or line-feature bboxes span the same crop area."
         ),
+        (
+            "QGIS style-layer coverage evaluates camera-zoom-active filters from the QGIS-preprocessed "
+            "style against the overlapping source features; it is still bbox attribution, not rendered pixels."
+        ),
         "",
         "## Combined overlap by source layer",
         "",
-        "| Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | Types | Index values | Elevation range |",
-        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+        "| Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | Types | Index values | Elevation range |",
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for record in report.get("combined_source_layers", []):
         if not isinstance(record, dict):
             continue
         lines.append(
-            "| `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {types} | {indices} | {ele} |".format(
+            "| `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {style_matches} | {types} | {indices} | {ele} |".format(
                 source_layer=record["source_layer"],
                 tile_features=record["tile_feature_count"],
                 overlap_features=record["overlap_feature_count"],
                 coverage=_format_coverage(record.get("bbox_crop_coverage_ratio")),
                 classes=_format_property_counts(record, "class"),
                 class_coverage=_format_property_coverage(record, "class"),
+                style_matches=_format_style_layer_matches(record),
                 types=_format_property_counts(record, "type"),
                 indices=_format_property_counts(record, "index"),
                 ele=_format_ele_range(record.get("ele_range")),
@@ -829,8 +1192,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "",
             "## Per-crop overlap",
             "",
-            "| Crop | Box | Lon/lat bounds | Tiles | Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | Types | Index values | Elevation range |",
-            "| ---: | --- | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- |",
+            "| Crop | Box | Lon/lat bounds | Tiles | Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | Types | Index values | Elevation range |",
+            "| ---: | --- | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for crop in report.get("crops", []):
@@ -840,7 +1203,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             if not isinstance(source_layer_record, dict):
                 continue
             lines.append(
-                "| {crop} | {box} | {bounds} | {tile_count} | `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {types} | {indices} | {ele} |".format(
+                "| {crop} | {box} | {bounds} | {tile_count} | `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {style_matches} | {types} | {indices} | {ele} |".format(
                     crop=crop["index"],
                     box=crop["box"],
                     bounds=_format_bounds(crop["lon_lat_bounds"]),
@@ -851,6 +1214,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     coverage=_format_coverage(source_layer_record.get("bbox_crop_coverage_ratio")),
                     classes=_format_property_counts(source_layer_record, "class"),
                     class_coverage=_format_property_coverage(source_layer_record, "class"),
+                    style_matches=_format_style_layer_matches(source_layer_record),
                     types=_format_property_counts(source_layer_record, "type"),
                     indices=_format_property_counts(source_layer_record, "index"),
                     ele=_format_ele_range(source_layer_record.get("ele_range")),

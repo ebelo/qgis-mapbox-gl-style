@@ -8,6 +8,10 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_source_crop_overlap import (
     SourceCropOverlapConfig,
+    _comparison_membership_contains,
+    _mapbox_expression_value,
+    _mapbox_filter_matches,
+    _style_layer_active_at_zoom,
     bbox_overlaps_lon_lat_bounds,
     build_run_directory,
     build_source_crop_overlap_paths,
@@ -160,17 +164,116 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             combined["landuse"]["property_overlap_areas"]["class"]["park"]["crop_coverage_ratio"],
             0.128418417649,
         )
+        self.assertAlmostEqual(
+            combined["landuse"]["qgis_style_layer_matches"]["landuse-park"]["crop_coverage_ratio"],
+            0.128418417649,
+        )
         self.assertEqual(combined["landuse_overlay"]["overlap_feature_count"], 0)
         self.assertEqual(combined["contour"]["overlap_feature_count"], 2)
         self.assertEqual(combined["contour"]["bbox_crop_coverage_ratio"], 0.0)
+        self.assertEqual(
+            combined["contour"]["qgis_style_layer_matches"]["contour-major"]["feature_count"],
+            1,
+        )
+        self.assertEqual(
+            combined["contour"]["qgis_style_layer_matches"]["contour-minor"]["feature_count"],
+            1,
+        )
         self.assertEqual(combined["contour"]["property_counts"]["index"], {"10": 1, "1": 1})
         self.assertEqual(combined["contour"]["ele_range"], {"min": 1580.0, "max": 1600.0})
 
         markdown = build_summary_markdown(report)
         self.assertIn("Bbox coverage is a summed upper-bound attribution aid", markdown)
-        self.assertIn("| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | park=1 | - | - |", markdown)
-        self.assertIn("| `landuse_overlay` | 0 | 0 | 0.000 | - | - | - | - | - |", markdown)
-        self.assertIn("| `contour` | 2 | 2 | 0.000 | - | - | - | 10=1, 1=1 | 1580-1600 |", markdown)
+        self.assertIn("QGIS style-layer coverage evaluates camera-zoom-active filters", markdown)
+        self.assertIn(
+            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128 | park=1 | - | - |",
+            markdown,
+        )
+        self.assertIn("| `landuse_overlay` | 0 | 0 | 0.000 | - | - | - | - | - | - |", markdown)
+        self.assertIn(
+            "| `contour` | 2 | 2 | 0.000 | - | - | contour-major=0.000, contour-minor=0.000 | - | 10=1, 1=1 | 1580-1600 |",
+            markdown,
+        )
+
+    def test_mapbox_filter_helpers_cover_preprocessed_style_expressions(self):
+        properties = {"class": "park", "type": "garden", "sizerank": "3", "index": 10}
+        context_properties = {**properties, "$geometry_type": "Polygon", "$zoom": 18.0}
+
+        self.assertTrue(_comparison_membership_contains("ark", "parkland"))
+        self.assertFalse(_comparison_membership_contains(1, "123"))
+        self.assertTrue(_comparison_membership_contains("park", ["park", "cemetery"]))
+        self.assertEqual(_mapbox_expression_value(["get", "class"], properties), "park")
+        self.assertEqual(_mapbox_expression_value(["literal", ["park", "cemetery"]], properties), ["park", "cemetery"])
+        self.assertTrue(_mapbox_expression_value(["has", "class"], properties))
+        self.assertFalse(_mapbox_expression_value(["!has", "class"], properties))
+        self.assertTrue(_mapbox_expression_value(["!has", "missing"], properties))
+        self.assertIsNone(_mapbox_expression_value(["match"], properties))
+        self.assertIsNone(_mapbox_expression_value(["match", ["get", "class"], "park", True], properties))
+        self.assertIsNone(_mapbox_expression_value(["case"], properties))
+        self.assertEqual(
+            _mapbox_expression_value(["step", ["zoom"], "low", 10, "mid", 18, "high"], context_properties),
+            "high",
+        )
+        self.assertEqual(
+            _mapbox_expression_value(
+                [
+                    "case",
+                    ["==", ["get", "class"], "school"],
+                    "school",
+                    ["==", ["get", "class"], "park"],
+                    "park",
+                    "fallback",
+                ],
+                properties,
+            ),
+            "park",
+        )
+        self.assertTrue(
+            _mapbox_filter_matches(
+                [
+                    "all",
+                    [">=", ["to-number", ["get", "sizerank"]], 0],
+                    ["<=", ["to-number", ["get", "sizerank"]], 14],
+                    ["match", ["get", "class"], ["park", "cemetery"], True, False],
+                    ["!=", ["get", "type"], "zoo"],
+                ],
+                properties,
+            )
+        )
+        self.assertFalse(
+            _mapbox_filter_matches(
+                ["all", ["match", ["get", "class"], "commercial_area", True, False]],
+                properties,
+            )
+        )
+        self.assertTrue(_mapbox_filter_matches(["==", ["geometry-type"], "Polygon"], context_properties))
+        self.assertTrue(_mapbox_filter_matches(["==", "$type", "Polygon"], context_properties))
+        self.assertTrue(_mapbox_filter_matches(["in", "class", "school", "park"], context_properties))
+        self.assertFalse(_mapbox_filter_matches(["!in", "class", "school", "park"], context_properties))
+        self.assertTrue(
+            _mapbox_filter_matches(
+                ["any", ["==", ["get", "class"], "school"], ["==", ["get", "class"], "park"]],
+                properties,
+            )
+        )
+        self.assertTrue(_mapbox_filter_matches(["none", ["==", "class", "school"], ["!has", "type"]], properties))
+        self.assertFalse(_mapbox_filter_matches(["none", ["==", "class", "school"], ["!has", "missing"]], properties))
+        self.assertFalse(_mapbox_filter_matches(["!", ["==", ["get", "class"], "park"]], properties))
+        self.assertTrue(_mapbox_filter_matches(["in", ["get", "class"], ["literal", ["park", "cemetery"]]], properties))
+        self.assertTrue(_mapbox_filter_matches(["!in", ["get", "class"], ["literal", ["school", "cemetery"]]], properties))
+        self.assertFalse(_mapbox_filter_matches(["!in", ["get", "class"], ["literal", ["park", "cemetery"]]], properties))
+        self.assertTrue(_mapbox_filter_matches(["in", ["get", "class"], "parkland"], properties))
+        self.assertTrue(_mapbox_filter_matches(["!in", ["get", "class"], "schoolyard"], properties))
+        self.assertFalse(_mapbox_filter_matches(["!in", ["get", "class"], "parkland"], properties))
+        self.assertFalse(_mapbox_filter_matches([">", ["get", "class"], 1], properties))
+        self.assertFalse(_mapbox_filter_matches([], properties))
+        self.assertTrue(_mapbox_filter_matches(True, properties))
+        self.assertFalse(_mapbox_filter_matches(False, properties))
+        self.assertFalse(_style_layer_active_at_zoom({"layout": {"visibility": "none"}}, 12.0))
+        self.assertTrue(_style_layer_active_at_zoom({"layout": {"visibility": "visible"}}, 12.0))
+        self.assertTrue(_style_layer_active_at_zoom({"minzoom": 10, "maxzoom": 18}, 17.9))
+        self.assertFalse(_style_layer_active_at_zoom({"minzoom": 10, "maxzoom": 18}, 18.0))
+        self.assertFalse(_style_layer_active_at_zoom({"minzoom": 10}, 9.9))
 
     def test_write_report_outputs_json_and_markdown(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -255,7 +358,46 @@ def _write_source_overlap_fixture(root, *, manual_crop_boxes=None, include_camer
                         "url": "mapbox://mapbox.mapbox-streets-v8,mapbox.mapbox-terrain-v2",
                     }
                 },
-                "layers": [],
+                "layers": [
+                    {
+                        "id": "landuse-park",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 2,
+                        "filter": ["==", ["get", "class"], "park"],
+                        "paint": {"fill-color": "hsl(98, 55%, 70%)", "fill-opacity": 1.0},
+                    },
+                    {
+                        "id": "landuse-park-high-zoom",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 3,
+                        "filter": ["==", ["get", "class"], "park"],
+                        "paint": {"fill-color": "hsl(98, 55%, 70%)", "fill-opacity": 1.0},
+                    },
+                    {
+                        "id": "landuse-cemetery",
+                        "type": "fill",
+                        "source-layer": "landuse",
+                        "minzoom": 2,
+                        "filter": ["==", ["get", "class"], "cemetery"],
+                        "paint": {"fill-color": "hsl(98, 45%, 75%)", "fill-opacity": 1.0},
+                    },
+                    {
+                        "id": "contour-minor",
+                        "type": "line",
+                        "source-layer": "contour",
+                        "filter": ["match", ["get", "index"], [1, 2], True, False],
+                        "paint": {"line-color": "hsl(60, 10%, 35%)", "line-opacity": 0.55},
+                    },
+                    {
+                        "id": "contour-major",
+                        "type": "line",
+                        "source-layer": "contour",
+                        "filter": ["match", ["get", "index"], [1, 2], False, True],
+                        "paint": {"line-color": "hsl(60, 10%, 35%)", "line-opacity": 0.9},
+                    },
+                ],
             }
         ),
         encoding="utf-8",
