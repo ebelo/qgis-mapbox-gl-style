@@ -273,6 +273,7 @@ _AIRPORT_SPECIAL_LANDUSE_MARKERS = (
     "taxiway",
     "apron",
 )
+_AIRPORT_SPECIAL_LANDUSE_QFIT_SPLIT_MARKER_SUFFIXES = frozenset({"muted"})
 _AIRPORT_SPECIAL_LANDUSE_FILTER_PROPERTIES = frozenset({"class", "kind", "maki", "subclass", "type"})
 _AIRPORT_SPECIAL_LANDUSE_EXCLUSION_FILTER_PROPERTIES = frozenset({"class", "kind"})
 _AIRPORT_SPECIAL_LANDUSE_CONTROL_PROPERTIES = tuple(
@@ -1497,7 +1498,19 @@ def _is_qfit_split_airport_special_landuse_variant(layer: dict[str, object]) -> 
     if layer.get(_QFIT_SPLIT_VARIANT_KEY) is not True:
         return False
     layer_id = str(layer.get("id") or "").replace("_", "-").lower()
-    return any(layer_id.endswith(f"-{marker}") for marker in _AIRPORT_SPECIAL_LANDUSE_MARKERS)
+    layer_segments = layer_id.split("-")
+    for index, segment in enumerate(layer_segments):
+        if segment not in _AIRPORT_SPECIAL_LANDUSE_MARKERS:
+            continue
+        if index == len(layer_segments) - 1:
+            return True
+        next_segment = layer_segments[index + 1]
+        if (
+            next_segment in _AIRPORT_SPECIAL_LANDUSE_QFIT_SPLIT_MARKER_SUFFIXES
+            or re.match(r"^z\d+(?:-\d+)?$", next_segment) is not None
+        ):
+            return True
+    return False
 
 
 def _is_airport_special_landuse_candidate_layer(layer: dict[str, object]) -> bool:

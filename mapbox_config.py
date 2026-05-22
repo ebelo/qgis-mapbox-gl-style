@@ -1159,6 +1159,7 @@ _LANDUSE_AGRICULTURE_FILL_COLOR = "hsla(98, 50%, 74%, 0.6)"
 _LANDUSE_PARK_SPECIAL_FILL_COLOR = "hsl(98, 38%, 68%)"
 _LANDUSE_PARK_FILL_COLOR = "hsl(98, 55%, 70%)"
 _LANDUSE_AIRPORT_FILL_COLOR = "hsl(230, 40%, 82%)"
+_LANDUSE_AIRPORT_MUTED_FILL_COLOR = "hsl(230, 36%, 76%)"
 _LANDUSE_CEMETERY_FILL_COLOR = "hsl(98, 45%, 75%)"
 _LANDUSE_GLACIER_FILL_COLOR = "hsl(205, 45%, 95%)"
 _LANDUSE_HOSPITAL_FILL_COLOR = "hsl(20, 45%, 82%)"
@@ -1335,6 +1336,11 @@ _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY = 0.66
 # aeroway polygons in the Geneva z14 comparison. Keep this override narrow.
 _LANDUSE_CLASS_FILL_OPACITY_OVERRIDES = {
     (f"{_LANDUSE_LAYER_ID}-other-z10-plus", "airport"): _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
+    (
+        f"{_LANDUSE_LAYER_ID}-other-z10-plus",
+        "airport-muted-z14-to-z15",
+    ): _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
+    (f"{_LANDUSE_LAYER_ID}-other-z10-plus", "airport-z15-plus"): _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
 }
 _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("wood", ["match", ["get", "class"], "wood", True, False], _LANDUSE_WOOD_FILL_COLOR),
@@ -1364,6 +1370,16 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
         _LANDUSE_PARK_FILL_COLOR,
     ),
     ("airport", ["match", ["get", "class"], "airport", True, False], _LANDUSE_AIRPORT_FILL_COLOR),
+    (
+        "airport-muted-z14-to-z15",
+        ["match", ["get", "class"], "airport", True, False],
+        _LANDUSE_AIRPORT_MUTED_FILL_COLOR,
+    ),
+    (
+        "airport-z15-plus",
+        ["match", ["get", "class"], "airport", True, False],
+        _LANDUSE_AIRPORT_FILL_COLOR,
+    ),
     ("cemetery", ["match", ["get", "class"], "cemetery", True, False], _LANDUSE_CEMETERY_FILL_COLOR),
     ("hospital", ["match", ["get", "class"], "hospital", True, False], _LANDUSE_HOSPITAL_FILL_COLOR),
     ("pitch", ["match", ["get", "class"], "pitch", True, False], _LANDUSE_PITCH_FILL_COLOR),
@@ -1416,6 +1432,9 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANT_ZOOM_BOUNDS = {
     # Match the live Outdoors z16 rock-color stop without recoloring lower zooms.
     "rock-low-zoom": (None, 16.0),
     "rock-high-zoom": (16.0, None),
+    "airport": (None, 14.0),
+    "airport-muted-z14-to-z15": (14.0, 15.0),
+    "airport-z15-plus": (15.0, None),
     "commercial-area-low-zoom": (None, 16.0),
     "commercial-area-high-zoom": (16.0, None),
 }
