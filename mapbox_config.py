@@ -839,6 +839,7 @@ _PATH_BACKGROUND_LINE_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
         "hsl(60, 1%, 64%)",
     ),
 )
+_PATH_BACKGROUND_OUTDOOR_LINE_OPACITY = 0.5
 _PATH_HIGH_ZOOM_PALE_CASING_LAYER_IDS = {
     "bridge-path-bg-z16-to-z18-outdoor",
     "bridge-path-bg-z16-to-z18-remaining",
@@ -2456,6 +2457,8 @@ def _path_background_line_color_layer_variants(layer: dict[str, object]) -> list
         variant_paint = variant["paint"]
         assert isinstance(variant_paint, dict)
         variant_paint["line-color"] = line_color
+        if suffix == "outdoor":
+            variant_paint["line-opacity"] = _PATH_BACKGROUND_OUTDOOR_LINE_OPACITY
         variants.append(variant)
     return variants or None
 
