@@ -3596,6 +3596,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     ["match", ["get", "class"], class_filter, True, False],
                 )
         self.assertNotIn("landuse-other-z8-to-z10-rock-high-zoom", by_id)
+        self.assertNotIn("landuse-other-z8-to-z10-commercial-area-high-zoom", by_id)
         self.assertEqual(rock_mid["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
         self.assertEqual(rock_high_low["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
         self.assertEqual(rock_high["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_HIGH_ZOOM_FILL_COLOR)
@@ -3700,6 +3701,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 True,
             ],
         )
+        self.assertEqual(remaining_high["filter"][-1], remaining_mid["filter"][-1])
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-airport"),
             "landuse",
