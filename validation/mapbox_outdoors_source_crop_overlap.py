@@ -424,6 +424,42 @@ def _sample_feature_properties(features: Sequence[Mapping[str, object]], *, limi
     return samples
 
 
+def _filter_property_names(expression: object) -> set[str]:
+    if not isinstance(expression, list) or not expression:
+        return set()
+    operator = expression[0]
+    operands = expression[1:]
+    if operator in {"get", "has"} and operands:
+        return {str(operands[0])}
+    if operator == "!has":
+        return set()
+    if operator in COMPARISON_OPERATORS and len(expression) >= 3 and isinstance(expression[1], str):
+        names = {GEOMETRY_TYPE_PROPERTY if expression[1] == "$type" else expression[1]}
+        for operand in expression[2:]:
+            names.update(_filter_property_names(operand))
+        return names
+    names: set[str] = set()
+    for operand in operands:
+        names.update(_filter_property_names(operand))
+    return names
+
+
+def _source_filter_property_names(expression: object) -> list[str]:
+    return sorted(_filter_property_names(expression) - {GEOMETRY_TYPE_PROPERTY, ZOOM_PROPERTY})
+
+
+def _missing_filter_property_counts(
+    features: Sequence[Mapping[str, object]],
+    properties: Sequence[str],
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for name in properties:
+        missing_count = sum(1 for feature in features if name not in _feature_properties(feature))
+        if missing_count > 0:
+            counts[name] = missing_count
+    return counts
+
+
 def _numeric_value(value: object) -> float | None:
     if isinstance(value, bool):
         return None
@@ -688,6 +724,52 @@ def _style_layer_match_summary(
     }
 
 
+def _style_layer_filter_property_summary(
+    features: Sequence[Mapping[str, object]],
+    *,
+    source_layer: str,
+    style_layers: Sequence[Mapping[str, object]],
+    camera_zoom: float,
+) -> dict[str, dict[str, object]]:
+    summaries: dict[str, dict[str, object]] = {}
+    for layer in style_layers:
+        if layer.get("source-layer") != source_layer or not _style_layer_active_at_zoom(layer, camera_zoom):
+            continue
+        properties = _source_filter_property_names(layer.get("filter"))
+        if not properties:
+            continue
+        layer_id = str(layer.get("id") or MISSING_VALUE)
+        missing_counts = _missing_filter_property_counts(features, properties)
+        missing_total = sum(missing_counts.values())
+        if missing_total <= 0:
+            continue
+        summaries[layer_id] = {
+            "layer": layer_id,
+            "filter_properties": properties,
+            "missing_feature_counts": missing_counts,
+            "missing_feature_total": missing_total,
+            "overlap_feature_count": len(features),
+            "matched_feature_count": sum(
+                1
+                for feature in features
+                if _mapbox_filter_matches(
+                    layer.get("filter"),
+                    _feature_context_properties(feature, camera_zoom=camera_zoom),
+                )
+            ),
+        }
+    return dict(
+        sorted(
+            summaries.items(),
+            key=lambda item: (
+                -int(item[1]["missing_feature_total"]),
+                -int(item[1]["overlap_feature_count"]),
+                str(item[0]),
+            ),
+        )[:MAX_COUNT_VALUES]
+    )
+
+
 def source_layer_overlap_record(
     *,
     decoded_tiles: Sequence[Mapping[str, object]],
@@ -723,6 +805,12 @@ def source_layer_overlap_record(
             overlapping_features,
             bounds=bounds,
             crop_area=crop_area,
+            source_layer=source_layer,
+            style_layers=style_layers,
+            camera_zoom=camera_zoom,
+        ),
+        "qgis_filter_property_requirements": _style_layer_filter_property_summary(
+            overlapping_features,
             source_layer=source_layer,
             style_layers=style_layers,
             camera_zoom=camera_zoom,
@@ -940,6 +1028,74 @@ def _combined_style_layer_matches(
     }
 
 
+def _iter_filter_property_requirement_values(
+    record: Mapping[str, object],
+) -> Iterator[tuple[str, int, int, int, Mapping[str, object], Sequence[object]]]:
+    requirements = record.get("qgis_filter_property_requirements")
+    if not isinstance(requirements, dict):
+        return
+    for layer_id, requirement in requirements.items():
+        if not isinstance(requirement, dict):
+            continue
+        missing_total = requirement.get("missing_feature_total")
+        overlap_count = requirement.get("overlap_feature_count")
+        matched_count = requirement.get("matched_feature_count")
+        missing_counts = requirement.get("missing_feature_counts")
+        properties = requirement.get("filter_properties")
+        if (
+            isinstance(missing_total, int)
+            and isinstance(overlap_count, int)
+            and isinstance(matched_count, int)
+            and isinstance(missing_counts, Mapping)
+            and isinstance(properties, Sequence)
+            and not isinstance(properties, (str, bytes))
+        ):
+            yield str(layer_id), missing_total, overlap_count, matched_count, missing_counts, properties
+
+
+def _combined_filter_property_requirements(
+    records: Sequence[Mapping[str, object]],
+) -> dict[str, dict[str, object]]:
+    requirements: dict[str, dict[str, object]] = {}
+    for record in records:
+        for layer_id, missing_total, overlap_count, matched_count, missing_counts, properties in (
+            _iter_filter_property_requirement_values(record)
+        ):
+            requirement = requirements.setdefault(
+                layer_id,
+                {
+                    "layer": layer_id,
+                    "filter_properties": sorted(str(property_name) for property_name in properties),
+                    "missing_feature_counts": Counter(),
+                    "missing_feature_total": 0,
+                    "overlap_feature_count": 0,
+                    "matched_feature_count": 0,
+                },
+            )
+            cast_counts = requirement["missing_feature_counts"]
+            if isinstance(cast_counts, Counter):
+                cast_counts.update({str(name): int(count) for name, count in missing_counts.items()})
+            requirement["missing_feature_total"] = int(requirement["missing_feature_total"]) + missing_total
+            requirement["overlap_feature_count"] = int(requirement["overlap_feature_count"]) + overlap_count
+            requirement["matched_feature_count"] = int(requirement["matched_feature_count"]) + matched_count
+    return {
+        layer_id: {
+            **requirement,
+            "missing_feature_counts": dict(requirement["missing_feature_counts"].most_common(MAX_COUNT_VALUES))
+            if isinstance(requirement["missing_feature_counts"], Counter)
+            else {},
+        }
+        for layer_id, requirement in sorted(
+            requirements.items(),
+            key=lambda item: (
+                -int(item[1]["missing_feature_total"]),
+                -int(item[1]["overlap_feature_count"]),
+                str(item[0]),
+            ),
+        )[:MAX_COUNT_VALUES]
+    }
+
+
 def _combined_ele_range(records: Sequence[Mapping[str, object]]) -> dict[str, float] | None:
     values: list[float] = []
     for record in records:
@@ -967,6 +1123,7 @@ def _combined_source_layer_record(source_layer: str, records: Sequence[Mapping[s
         "property_counts": _combined_property_counts(records),
         "property_overlap_areas": _combined_property_areas(records, crop_area=crop_area),
         "qgis_style_layer_matches": _combined_style_layer_matches(records, crop_area=crop_area),
+        "qgis_filter_property_requirements": _combined_filter_property_requirements(records),
         "ele_range": _combined_ele_range(records),
     }
 
@@ -1122,6 +1279,26 @@ def _format_style_layer_matches(record: Mapping[str, object]) -> str:
     )
 
 
+def _format_filter_property_requirements(record: Mapping[str, object]) -> str:
+    requirements = record.get("qgis_filter_property_requirements")
+    if not isinstance(requirements, dict) or not requirements:
+        return "-"
+    formatted: list[str] = []
+    for layer_id, requirement in requirements.items():
+        if not isinstance(requirement, dict):
+            continue
+        overlap_count = int(requirement.get("overlap_feature_count") or 0)
+        missing_counts = requirement.get("missing_feature_counts")
+        if not isinstance(missing_counts, dict) or not missing_counts:
+            continue
+        counts = ", ".join(
+            f"{property_name}={int(count)}/{overlap_count}"
+            for property_name, count in missing_counts.items()
+        )
+        formatted.append(f"{layer_id}: {counts} (matched={int(requirement.get('matched_feature_count') or 0)})")
+    return "; ".join(formatted) if formatted else "-"
+
+
 def _format_ele_range(value: object) -> str:
     if not isinstance(value, dict):
         return "-"
@@ -1164,17 +1341,21 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "QGIS style-layer coverage evaluates camera-zoom-active filters from the QGIS-preprocessed "
             "style against the overlapping source features; it is still bbox attribution, not rendered pixels."
         ),
+        (
+            "QGIS filter missing props reports active style-layer filter properties that are absent from "
+            "overlapping source features as missing/overlap feature counts."
+        ),
         "",
         "## Combined overlap by source layer",
         "",
-        "| Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | Types | Index values | Elevation range |",
-        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
+        "| Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | QGIS filter missing props | Types | Index values | Elevation range |",
+        "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for record in report.get("combined_source_layers", []):
         if not isinstance(record, dict):
             continue
         lines.append(
-            "| `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {style_matches} | {types} | {indices} | {ele} |".format(
+            "| `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {style_matches} | {filter_missing} | {types} | {indices} | {ele} |".format(
                 source_layer=record["source_layer"],
                 tile_features=record["tile_feature_count"],
                 overlap_features=record["overlap_feature_count"],
@@ -1182,6 +1363,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 classes=_format_property_counts(record, "class"),
                 class_coverage=_format_property_coverage(record, "class"),
                 style_matches=_format_style_layer_matches(record),
+                filter_missing=_format_filter_property_requirements(record),
                 types=_format_property_counts(record, "type"),
                 indices=_format_property_counts(record, "index"),
                 ele=_format_ele_range(record.get("ele_range")),
@@ -1192,8 +1374,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "",
             "## Per-crop overlap",
             "",
-            "| Crop | Box | Lon/lat bounds | Tiles | Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | Types | Index values | Elevation range |",
-            "| ---: | --- | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- |",
+            "| Crop | Box | Lon/lat bounds | Tiles | Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | QGIS filter missing props | Types | Index values | Elevation range |",
+            "| ---: | --- | --- | ---: | --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
     for crop in report.get("crops", []):
@@ -1203,7 +1385,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             if not isinstance(source_layer_record, dict):
                 continue
             lines.append(
-                "| {crop} | {box} | {bounds} | {tile_count} | `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {style_matches} | {types} | {indices} | {ele} |".format(
+                "| {crop} | {box} | {bounds} | {tile_count} | `{source_layer}` | {tile_features} | {overlap_features} | {coverage} | {classes} | {class_coverage} | {style_matches} | {filter_missing} | {types} | {indices} | {ele} |".format(
                     crop=crop["index"],
                     box=crop["box"],
                     bounds=_format_bounds(crop["lon_lat_bounds"]),
@@ -1215,6 +1397,7 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                     classes=_format_property_counts(source_layer_record, "class"),
                     class_coverage=_format_property_coverage(source_layer_record, "class"),
                     style_matches=_format_style_layer_matches(source_layer_record),
+                    filter_missing=_format_filter_property_requirements(source_layer_record),
                     types=_format_property_counts(source_layer_record, "type"),
                     indices=_format_property_counts(source_layer_record, "index"),
                     ele=_format_ele_range(source_layer_record.get("ele_range")),
