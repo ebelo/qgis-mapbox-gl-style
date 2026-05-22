@@ -8,6 +8,7 @@ from tests import _path  # noqa: F401
 
 from qfit.validation.mapbox_outdoors_source_crop_overlap import (
     SourceCropOverlapConfig,
+    _combined_filter_property_requirements,
     _comparison_membership_contains,
     _mapbox_expression_value,
     _mapbox_filter_matches,
@@ -23,6 +24,7 @@ from qfit.validation.mapbox_outdoors_source_crop_overlap import (
     lon_lat_to_tile,
     recommended_tile_zoom,
     resolve_mapbox_token,
+    source_layer_overlap_record,
     tiles_for_lon_lat_bounds,
     write_report,
 )
@@ -177,6 +179,12 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         )
         self.assertEqual(
             combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
+                "candidate_missing_feature_counts"
+            ],
+            {"sizerank": 1},
+        )
+        self.assertEqual(
+            combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
                 "matched_feature_count"
             ],
             0,
@@ -200,7 +208,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertIn("QGIS style-layer coverage evaluates camera-zoom-active filters", markdown)
         self.assertIn("QGIS filter missing props reports active style-layer filter properties", markdown)
         self.assertIn(
-            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128 | landuse-park-sized: sizerank=1/1 (matched=0) | park=1 | - | - |",
+            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128 | landuse-park-sized: sizerank=1/1 candidate=1 (matched=0) | park=1 | - | - |",
             markdown,
         )
         self.assertIn("| `landuse_overlay` | 0 | 0 | 0.000 | - | - | - | - | - | - | - |", markdown)
@@ -208,6 +216,203 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             "| `contour` | 2 | 2 | 0.000 | - | - | contour-major=0.000, contour-minor=0.000 | - | - | 10=1, 1=1 | 1580-1600 |",
             markdown,
         )
+
+    def test_filter_property_candidates_ignore_normal_class_mismatches(self):
+        record = source_layer_overlap_record(
+            decoded_tiles=[
+                {
+                    "landuse": {
+                        "features": [
+                            _feature(
+                                "Polygon",
+                                [[[-0.9, -0.9], [-0.1, -0.9], [-0.1, -0.1], [-0.9, -0.1], [-0.9, -0.9]]],
+                                {"class": "park"},
+                            ),
+                            _feature(
+                                "Polygon",
+                                [[[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9], [0.1, 0.1]]],
+                                {"class": "cemetery"},
+                            ),
+                            _feature(
+                                "Polygon",
+                                [[[-0.8, 0.1], [-0.2, 0.1], [-0.2, 0.8], [-0.8, 0.8], [-0.8, 0.1]]],
+                                {"class": "park", "sizerank": 3},
+                            ),
+                        ]
+                    }
+                }
+            ],
+            bounds={"west": -1.0, "south": -1.0, "east": 1.0, "north": 1.0},
+            source_layer="landuse",
+            camera_zoom=18.0,
+            style_layers=[
+                {
+                    "id": "landuse-park-sized",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": [
+                        "all",
+                        ["==", ["get", "class"], "park"],
+                        [">=", ["to-number", ["get", "sizerank"]], 0],
+                    ],
+                },
+                {
+                    "id": "landuse-park-or-sized",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": [
+                        "any",
+                        ["==", ["get", "class"], "park"],
+                        [">=", ["to-number", ["get", "sizerank"]], 0],
+                    ],
+                },
+                {
+                    "id": "landuse-none-sized",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": [
+                        "none",
+                        ["!=", ["get", "sizerank"], 3],
+                        ["==", ["get", "class"], "cemetery"],
+                    ],
+                },
+                {
+                    "id": "landuse-case-preserves-branch",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": [
+                        "case",
+                        ["==", ["get", "sizerank"], 1],
+                        True,
+                        ["==", ["get", "class"], "park"],
+                        True,
+                        False,
+                    ],
+                },
+                {
+                    "id": "landuse-case-sized-park",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": [
+                        "case",
+                        [
+                            "all",
+                            ["==", ["get", "class"], "park"],
+                            [">=", ["to-number", ["get", "sizerank"]], 0],
+                        ],
+                        True,
+                        False,
+                    ],
+                },
+                {
+                    "id": "landuse-match-sized-park",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": [
+                        "match",
+                        ["get", "class"],
+                        "park",
+                        [">=", ["to-number", ["get", "sizerank"]], 0],
+                        False,
+                    ],
+                }
+            ],
+        )
+
+        requirement = record["qgis_filter_property_requirements"]["landuse-park-sized"]
+        self.assertEqual(requirement["missing_feature_counts"], {"sizerank": 2})
+        self.assertEqual(requirement["candidate_missing_feature_counts"], {"sizerank": 1})
+        self.assertEqual(requirement["candidate_missing_feature_total"], 1)
+        self.assertEqual(requirement["matched_feature_count"], 1)
+        self.assertEqual(
+            record["qgis_filter_property_requirements"]["landuse-park-or-sized"][
+                "candidate_missing_feature_counts"
+            ],
+            {},
+        )
+        self.assertEqual(
+            record["qgis_filter_property_requirements"]["landuse-none-sized"]["candidate_missing_feature_counts"],
+            {"sizerank": 1},
+        )
+        self.assertEqual(
+            record["qgis_filter_property_requirements"]["landuse-case-preserves-branch"][
+                "candidate_missing_feature_counts"
+            ],
+            {},
+        )
+        self.assertEqual(
+            record["qgis_filter_property_requirements"]["landuse-case-sized-park"][
+                "candidate_missing_feature_counts"
+            ],
+            {"sizerank": 1},
+        )
+        self.assertEqual(
+            record["qgis_filter_property_requirements"]["landuse-match-sized-park"][
+                "candidate_missing_feature_counts"
+            ],
+            {"sizerank": 1},
+        )
+
+    def test_match_input_missing_property_counts_as_candidate_gate(self):
+        record = source_layer_overlap_record(
+            decoded_tiles=[
+                {
+                    "landuse": {
+                        "features": [
+                            _feature(
+                                "Polygon",
+                                [[[-0.9, -0.9], [0.9, -0.9], [0.9, 0.9], [-0.9, 0.9], [-0.9, -0.9]]],
+                                {"type": "park"},
+                            )
+                        ]
+                    }
+                }
+            ],
+            bounds={"west": -1.0, "south": -1.0, "east": 1.0, "north": 1.0},
+            source_layer="landuse",
+            camera_zoom=18.0,
+            style_layers=[
+                {
+                    "id": "landuse-class-match",
+                    "type": "fill",
+                    "source-layer": "landuse",
+                    "filter": ["match", ["get", "class"], "park", True, False],
+                }
+            ],
+        )
+
+        requirement = record["qgis_filter_property_requirements"]["landuse-class-match"]
+        self.assertEqual(requirement["missing_feature_counts"], {"class": 1})
+        self.assertEqual(requirement["candidate_missing_feature_counts"], {"class": 1})
+        self.assertEqual(requirement["matched_feature_count"], 0)
+
+    def test_combined_candidate_counts_follow_displayed_missing_properties(self):
+        missing_counts = {f"p{index}": 20 for index in range(8)}
+        missing_counts["p8"] = 1
+        candidate_counts = {"p0": 1, **{f"p{index}": 5 for index in range(1, 9)}}
+
+        combined = _combined_filter_property_requirements(
+            [
+                {
+                    "qgis_filter_property_requirements": {
+                        "landuse-many": {
+                            "filter_properties": list(missing_counts),
+                            "missing_feature_counts": missing_counts,
+                            "missing_feature_total": sum(missing_counts.values()),
+                            "candidate_missing_feature_counts": candidate_counts,
+                            "candidate_missing_feature_total": sum(candidate_counts.values()),
+                            "overlap_feature_count": 25,
+                            "matched_feature_count": 0,
+                        }
+                    }
+                }
+            ]
+        )
+
+        requirement = combined["landuse-many"]
+        self.assertEqual(set(requirement["missing_feature_counts"]), {f"p{index}" for index in range(8)})
+        self.assertEqual(requirement["candidate_missing_feature_counts"]["p0"], 1)
+        self.assertNotIn("p8", requirement["candidate_missing_feature_counts"])
 
     def test_mapbox_filter_helpers_cover_preprocessed_style_expressions(self):
         properties = {"class": "park", "type": "garden", "sizerank": "3", "index": 10}
