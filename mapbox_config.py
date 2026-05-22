@@ -1368,6 +1368,16 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("pitch", ["match", ["get", "class"], "pitch", True, False], _LANDUSE_PITCH_FILL_COLOR),
     ("school", ["match", ["get", "class"], "school", True, False], _LANDUSE_SCHOOL_FILL_COLOR),
     (
+        "commercial-area-low-zoom",
+        ["match", ["get", "class"], "commercial_area", True, False],
+        _LANDUSE_COMMERCIAL_AREA_FILL_COLOR,
+    ),
+    (
+        "commercial-area-high-zoom",
+        ["match", ["get", "class"], "commercial_area", True, False],
+        _LANDUSE_COMMERCIAL_AREA_HIGH_ZOOM_FILL_COLOR,
+    ),
+    (
         "industrial",
         ["match", ["get", "class"], ["facility", "industrial"], True, False],
         _LANDUSE_INDUSTRIAL_FILL_COLOR,
@@ -1391,6 +1401,7 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
                 "hospital",
                 "pitch",
                 "school",
+                "commercial_area",
                 "facility",
                 "industrial",
             ],
@@ -1404,6 +1415,8 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANT_ZOOM_BOUNDS = {
     # Match the live Outdoors z16 rock-color stop without recoloring lower zooms.
     "rock-low-zoom": (None, 16.0),
     "rock-high-zoom": (16.0, None),
+    "commercial-area-low-zoom": (None, 16.0),
+    "commercial-area-high-zoom": (16.0, None),
 }
 _LANDCOVER_CROP_FILL_COLOR = "hsla(68, 55%, 70%, 0.6)"
 _LANDCOVER_FALLBACK_FILL_COLOR = "hsl(98, 48%, 67%)"

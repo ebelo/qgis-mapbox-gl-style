@@ -3557,7 +3557,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
             {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
         )
-        self.assertEqual(len(result["layers"]), 37)
+        self.assertEqual(len(result["layers"]), 40)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
         stable_class_variants = {
@@ -3580,6 +3580,9 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         rock_mid = by_id["landuse-other-z8-to-z10-rock-low-zoom"]
         rock_high_low = by_id["landuse-other-z10-plus-rock-low-zoom"]
         rock_high = by_id["landuse-other-z10-plus-rock-high-zoom"]
+        commercial_mid = by_id["landuse-other-z8-to-z10-commercial-area-low-zoom"]
+        commercial_high_low = by_id["landuse-other-z10-plus-commercial-area-low-zoom"]
+        commercial_high = by_id["landuse-other-z10-plus-commercial-area-high-zoom"]
         park_special_high = by_id["landuse-other-z10-plus-park-special"]
         park_high = by_id["landuse-other-z10-plus-park"]
         airport_high = by_id["landuse-other-z10-plus-airport"]
@@ -3600,6 +3603,20 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             self.assertEqual(
                 rock_layer["filter"][-1],
                 ["match", ["get", "class"], "rock", True, False],
+            )
+        self.assertEqual(commercial_mid["paint"]["fill-color"], mapbox_config._LANDUSE_COMMERCIAL_AREA_FILL_COLOR)
+        self.assertEqual(
+            commercial_high_low["paint"]["fill-color"],
+            mapbox_config._LANDUSE_COMMERCIAL_AREA_FILL_COLOR,
+        )
+        self.assertEqual(
+            commercial_high["paint"]["fill-color"],
+            mapbox_config._LANDUSE_COMMERCIAL_AREA_HIGH_ZOOM_FILL_COLOR,
+        )
+        for commercial_layer in (commercial_mid, commercial_high_low, commercial_high):
+            self.assertEqual(
+                commercial_layer["filter"][-1],
+                ["match", ["get", "class"], "commercial_area", True, False],
             )
         self.assertEqual(park_special_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
         self.assertEqual(park_mid["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
@@ -3625,6 +3642,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(rock_high_low["maxzoom"], 16.0)
         self.assertEqual(rock_high["minzoom"], 16.0)
         self.assertNotIn("maxzoom", rock_high)
+        self.assertEqual(commercial_mid["minzoom"], 8.0)
+        self.assertEqual(commercial_mid["maxzoom"], 10.0)
+        self.assertEqual(commercial_high_low["minzoom"], 10.0)
+        self.assertEqual(commercial_high_low["maxzoom"], 16.0)
+        self.assertEqual(commercial_high["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", commercial_high)
         self.assertEqual(
             park_mid["filter"],
             [
@@ -3669,6 +3692,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     "hospital",
                     "pitch",
                     "school",
+                    "commercial_area",
                     "facility",
                     "industrial",
                 ],
@@ -3772,6 +3796,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "landuse-other-z10-plus-hospital",
                 "landuse-other-z10-plus-pitch",
                 "landuse-other-z10-plus-school",
+                "landuse-other-z10-plus-commercial-area-low-zoom",
+                "landuse-other-z10-plus-commercial-area-high-zoom",
                 "landuse-other-z10-plus-industrial",
                 "landuse-other-z10-plus-remaining",
             ],
