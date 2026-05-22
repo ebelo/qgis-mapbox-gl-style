@@ -4079,16 +4079,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         result = simplify_mapbox_style_expressions(style)
 
-        self.assertEqual(len(result["layers"]), 2)
+        self.assertEqual(len(result["layers"]), 1)
         by_id = {layer["id"]: layer for layer in result["layers"]}
         fade_layer = by_id["road-pedestrian-polygon-pattern-z16-to-z17"]
-        full_layer = by_id["road-pedestrian-polygon-pattern-z17-plus"]
         self.assertEqual(fade_layer["minzoom"], 16)
         self.assertEqual(fade_layer["maxzoom"], 17.0)
-        self.assertEqual(full_layer["minzoom"], 17.0)
-        self.assertNotIn("maxzoom", full_layer)
         self.assertAlmostEqual(fade_layer["paint"]["fill-opacity"], 0.5)
-        self.assertAlmostEqual(full_layer["paint"]["fill-opacity"], 1.0)
+        self.assertNotIn("road-pedestrian-polygon-pattern-z17-plus", by_id)
         for layer in result["layers"]:
             self.assertNotIn("fill-pattern", layer["paint"])
             self.assertEqual(layer["paint"]["fill-color"], "hsl(0, 0%, 96%)")
@@ -4106,6 +4103,15 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertNotIn("fill-pattern", result["layers"][0]["paint"])
         self.assertEqual(result["layers"][0]["paint"]["fill-color"], "hsl(0, 0%, 96%)")
 
+    def test_road_pedestrian_polygon_pattern_skips_z17_only_fallback(self):
+        layer = self._road_pedestrian_polygon_pattern_layer()
+        layer["minzoom"] = 17
+        style = {"layers": [layer]}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        self.assertEqual(result["layers"], [])
+
     def test_road_pedestrian_polygon_pattern_fill_opacity_helpers_keep_passthrough_inputs(self):
         unchanged_layers = "not-a-layer-list"
         mixed_layers = ["not-a-layer", self._road_pedestrian_polygon_pattern_layer()]
@@ -4122,7 +4128,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
 
         self.assertEqual(result[0], "not-a-layer")
         self.assertEqual(result[1]["id"], "road-pedestrian-polygon-pattern-z16-to-z17")
-        self.assertEqual(result[2]["id"], "road-pedestrian-polygon-pattern-z17-plus")
+        self.assertEqual(len(result), 2)
 
     def _rail_track_layer(self, layer_id="road-rail-tracks", line_opacity=None):
         if line_opacity is None:

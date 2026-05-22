@@ -1503,6 +1503,9 @@ _WETLAND_PATTERN_FILL_OPACITY_ZOOM_BANDS: tuple[tuple[str, float | None, float |
 _ROAD_PEDESTRIAN_POLYGON_PATTERN_LAYER_ID = "road-pedestrian-polygon-pattern"
 _ROAD_PEDESTRIAN_POLYGON_PATTERN = "pedestrian-polygon"
 _ROAD_PEDESTRIAN_POLYGON_PATTERN_QGIS_FILL_COLOR = "hsl(0, 0%, 96%)"
+# The full-opacity sprite fallback paints as a solid pale fill in QGIS and
+# worsens high-zoom Zermatt parity; keep the fade-in band only.
+_ROAD_PEDESTRIAN_POLYGON_PATTERN_QGIS_SKIPPED_BANDS = {"z17-plus"}
 _ROAD_PEDESTRIAN_POLYGON_PATTERN_FILL_OPACITY_EXPRESSIONS = {
     _ROAD_PEDESTRIAN_POLYGON_PATTERN_LAYER_ID: ["interpolate", ["linear"], ["zoom"], 16, 0, 17, 1],
 }
@@ -4629,9 +4632,16 @@ def _road_pedestrian_polygon_pattern_fill_opacity_layer_variants(
     if variants is None:
         fallback_layer = _road_pedestrian_polygon_pattern_fallback_layer(layer)
         return [fallback_layer] if fallback_layer is not None else None
+    visible_variants: list[dict[str, object]] = []
+    layer_id = str(layer.get("id") or "")
     for variant in variants:
         _apply_road_pedestrian_polygon_pattern_fallback(variant)
-    return variants
+        variant_id = str(variant.get("id") or "")
+        suffix = variant_id.removeprefix(f"{layer_id}-")
+        if suffix in _ROAD_PEDESTRIAN_POLYGON_PATTERN_QGIS_SKIPPED_BANDS:
+            continue
+        visible_variants.append(variant)
+    return visible_variants
 
 
 def _road_pedestrian_polygon_pattern_fallback_layer(
