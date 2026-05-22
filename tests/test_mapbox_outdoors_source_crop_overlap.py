@@ -182,25 +182,19 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
                 "candidate_missing_feature_counts"
             ],
-            {"sizerank": 1},
+            {},
         )
         self.assertEqual(
             combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
                 "candidate_property_counts"
             ],
-            {"class": {"park": 1}, "type": {"park": 1}},
-        )
-        self.assertAlmostEqual(
-            combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
-                "candidate_property_overlap_areas"
-            ]["class"]["park"]["crop_coverage_ratio"],
-            0.128418417649,
+            {},
         )
         self.assertEqual(
             combined["landuse"]["qgis_filter_property_requirements"]["landuse-park-sized"][
                 "matched_feature_count"
             ],
-            0,
+            1,
         )
         self.assertEqual(combined["landuse_overlay"]["overlap_feature_count"], 0)
         self.assertEqual(combined["contour"]["overlap_feature_count"], 2)
@@ -221,7 +215,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertIn("QGIS style-layer coverage evaluates camera-zoom-active filters", markdown)
         self.assertIn("QGIS filter missing props reports active style-layer filter properties", markdown)
         self.assertIn(
-            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128 | landuse-park-sized: sizerank=1/1 candidate=1 candidates [class: park=1; type: park=1] candidate coverage [class: park=0.128; type: park=0.128] (matched=0) | park=1 | - | - |",
+            "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128, landuse-park-sized=0.128 | landuse-park-sized: sizerank=1/1 candidate=0 (matched=1) | park=1 | - | - |",
             markdown,
         )
         self.assertIn("| `landuse_overlay` | 0 | 0 | 0.000 | - | - | - | - | - | - | - |", markdown)
@@ -334,14 +328,11 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
 
         requirement = record["qgis_filter_property_requirements"]["landuse-park-sized"]
         self.assertEqual(requirement["missing_feature_counts"], {"sizerank": 2})
-        self.assertEqual(requirement["candidate_missing_feature_counts"], {"sizerank": 1})
-        self.assertEqual(requirement["candidate_property_counts"], {"class": {"park": 1}})
-        self.assertAlmostEqual(
-            requirement["candidate_property_overlap_areas"]["class"]["park"]["crop_coverage_ratio"],
-            0.16,
-        )
-        self.assertEqual(requirement["candidate_missing_feature_total"], 1)
-        self.assertEqual(requirement["matched_feature_count"], 1)
+        self.assertEqual(requirement["candidate_missing_feature_counts"], {})
+        self.assertEqual(requirement["candidate_property_counts"], {})
+        self.assertEqual(requirement["candidate_property_overlap_areas"], {})
+        self.assertEqual(requirement["candidate_missing_feature_total"], 0)
+        self.assertEqual(requirement["matched_feature_count"], 2)
         self.assertEqual(
             record["qgis_filter_property_requirements"]["landuse-park-or-sized"][
                 "candidate_missing_feature_counts"
@@ -362,13 +353,13 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             record["qgis_filter_property_requirements"]["landuse-case-sized-park"][
                 "candidate_missing_feature_counts"
             ],
-            {"sizerank": 1},
+            {},
         )
         self.assertEqual(
             record["qgis_filter_property_requirements"]["landuse-match-sized-park"][
                 "candidate_missing_feature_counts"
             ],
-            {"sizerank": 1},
+            {},
         )
 
     def test_match_input_missing_property_counts_as_candidate_gate(self):
@@ -420,7 +411,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             ["class", "sizerank"],
             [
                 "all",
-                [">=", ["to-number", ["get", "sizerank"]], 0],
+                ["==", ["get", "sizerank"], 1],
                 ["!=", ["get", "class"], "excluded"],
             ],
             bounds={"west": 0.0, "south": 0.0, "east": 9.0, "north": 1.0},
@@ -489,6 +480,10 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertTrue(_comparison_membership_contains("park", ["park", "cemetery"]))
         self.assertEqual(_mapbox_expression_value(["get", "class"], properties), "park")
         self.assertEqual(_mapbox_expression_value(["literal", ["park", "cemetery"]], properties), ["park", "cemetery"])
+        self.assertEqual(_mapbox_expression_value(["to-number", ["get", "missing"]], properties), 0.0)
+        self.assertEqual(_mapbox_expression_value(["to-number", False], properties), 0.0)
+        self.assertEqual(_mapbox_expression_value(["to-number", True], properties), 1.0)
+        self.assertEqual(_mapbox_expression_value(["to-number", ["get", "class"], 5], properties), 5.0)
         self.assertTrue(_mapbox_expression_value(["has", "class"], properties))
         self.assertFalse(_mapbox_expression_value(["!has", "class"], properties))
         self.assertTrue(_mapbox_expression_value(["!has", "missing"], properties))
@@ -523,6 +518,17 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
                     ["!=", ["get", "type"], "zoo"],
                 ],
                 properties,
+            )
+        )
+        self.assertTrue(
+            _mapbox_filter_matches(
+                [
+                    "all",
+                    [">=", ["to-number", ["get", "sizerank"]], 0],
+                    ["<=", ["to-number", ["get", "sizerank"]], 14],
+                    ["match", ["get", "class"], "commercial_area", True, False],
+                ],
+                {"class": "commercial_area"},
             )
         )
         self.assertFalse(

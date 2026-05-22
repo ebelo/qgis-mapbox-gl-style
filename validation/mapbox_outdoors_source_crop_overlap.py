@@ -662,6 +662,22 @@ def _numeric_value(value: object) -> float | None:
     return None
 
 
+def _mapbox_to_number_value(value: object) -> float | None:
+    if value is None or value is False:
+        return 0.0
+    if value is True:
+        return 1.0
+    return _numeric_value(value)
+
+
+def _mapbox_to_number_expression_value(operands: Sequence[object], properties: Mapping[str, object]) -> float | None:
+    for operand in operands:
+        converted = _mapbox_to_number_value(_mapbox_expression_value(operand, properties))
+        if converted is not None:
+            return converted
+    return None
+
+
 def _comparison_membership_contains(left: object, right: object) -> bool:
     if isinstance(right, str):
         return isinstance(left, str) and left in right
@@ -710,7 +726,7 @@ def _mapbox_simple_expression_value(
     if operator == "get" and operands:
         return properties.get(str(operands[0]))
     if operator == "to-number" and operands:
-        return _numeric_value(_mapbox_expression_value(operands[0], properties))
+        return _mapbox_to_number_expression_value(operands, properties)
     if operator == "literal" and operands:
         return operands[0]
     if operator == "has" and operands:
@@ -1791,8 +1807,9 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         (
             "QGIS filter missing props reports active style-layer filter properties that are absent from "
             "overlapping source features as missing/overlap feature counts. Candidate counts only include "
-            "features that still match the layer's other available filter predicates after missing-property "
-            "checks are removed, with candidate bbox coverage ratios attributed by feature-property value."
+            "features that do not already match the full filter but still match the layer's other available "
+            "filter predicates after missing-property checks are removed, with candidate bbox coverage ratios "
+            "attributed by feature-property value."
         ),
         "",
         "## Combined overlap by source layer",
