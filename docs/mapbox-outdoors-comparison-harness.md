@@ -197,6 +197,19 @@ python3 validation/mapbox_outdoors_source_crop_overlap.py \
 
 The report fetches only the live vector tiles intersecting that camera's crop boxes, decodes the requested source layers, and counts features whose transformed lon/lat geometry bounds overlap each crop. It also reports bbox-area crop coverage ratios by source layer and feature property, then evaluates camera-zoom-active filters from the QGIS-preprocessed style to show which style layers the overlapping features would hit. Missing filter-property diagnostics include candidate counts, candidate feature-property value counts, and candidate bbox coverage by feature-property value after dropping only the checks that depend on a feature's absent properties, which helps separate true missing-property gates from ordinary class-filter mismatches. This helps separate broad landuse fills from incidental bbox hits before changing rendering behavior. Treat coverage as summed upper-bound attribution rather than pixel ownership; ratios can exceed 1.0 when feature bboxes overlap or line-feature bboxes span the same crop area. Token-bearing tile URLs are intentionally omitted from the JSON and Markdown output. Use this when active style-audit rows such as landuse, contour, wetland, or tint-band candidates need source-layer evidence before becoming a styling slice.
 
+When source/crop overlap points at a possible rendered owner, run QGIS-only transparent layer masks against an existing comparison manifest before changing production paint:
+
+```bash
+export MAPBOX_ACCESS_TOKEN="***"
+python3 validation/mapbox_outdoors_rendered_layer_mask.py \
+  --baseline-manifest debug/mapbox-outdoors-comparison/zermatt-trails-z18-outdoors/<timestamp>/manifest.json \
+  --crop-box 160,600,480,840 \
+  --variant cemetery=landuse-other-z8-to-z10-cemetery,landuse-other-z10-plus-cemetery \
+  --variant commercial-area=landuse-other-z8-to-z10-commercial-area-low-zoom,landuse-other-z10-plus-commercial-area-low-zoom,landuse-other-z10-plus-commercial-area-high-zoom
+```
+
+The probe reuses the baseline manifest's token-free Mapbox reference, QGIS render, and QGIS-preprocessed style. Each variant writes a transparent-mask style JSON, a fresh QGIS render, a Mapbox-vs-QGIS diff, a QGIS-baseline movement diff, whole-image metrics, optional crop metrics, matched/missing target layer IDs, and the changed-pixel bounding box versus the baseline QGIS render. By default it also renders the unchanged style as a QGIS rerender control, so tiny movement can be separated from render noise. Use it to prove actual rendered-pixel ownership after source/crop bbox attribution; a no-op mask means the target layer is not visibly painting that render, and a worsening mask means the removed layer was helping the current QGIS output.
+
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
 ## Style audit before tuning
