@@ -565,28 +565,60 @@ def _filter_without_missing_property_checks(
     return _DROPPED_FILTER
 
 
-def _candidate_missing_filter_property_counts(
+def _feature_matches_candidate_filter_without_missing_checks(
+    feature: Mapping[str, object],
+    expression: object,
+    missing_properties: set[str],
+    *,
+    camera_zoom: float,
+) -> bool:
+    context_properties = _feature_context_properties(feature, camera_zoom=camera_zoom)
+    if _mapbox_filter_matches(expression, context_properties):
+        return False
+    candidate_filter = _filter_without_missing_property_checks(expression, missing_properties)
+    if candidate_filter is _DROPPED_FILTER:
+        candidate_filter = True
+    return _mapbox_filter_matches(candidate_filter, context_properties)
+
+
+def _update_candidate_feature_property_counts(
+    counts: dict[str, Counter[str]],
+    feature: Mapping[str, object],
+) -> None:
+    feature_properties = _feature_properties(feature)
+    for key in PROPERTY_COUNT_KEYS:
+        if key in feature_properties:
+            counts.setdefault(key, Counter()).update({_clean_count_value(feature_properties[key]): 1})
+
+
+def _candidate_missing_filter_property_summary(
     features: Sequence[Mapping[str, object]],
     properties: Sequence[str],
     expression: object,
     *,
     camera_zoom: float,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], dict[str, dict[str, int]]]:
     property_set = set(properties)
     counts: Counter[str] = Counter()
+    candidate_property_counts: dict[str, Counter[str]] = {}
     for feature in features:
         missing_properties = property_set - set(_feature_properties(feature))
-        if not missing_properties:
-            continue
-        context_properties = _feature_context_properties(feature, camera_zoom=camera_zoom)
-        if _mapbox_filter_matches(expression, context_properties):
-            continue
-        candidate_filter = _filter_without_missing_property_checks(expression, missing_properties)
-        if candidate_filter is _DROPPED_FILTER:
-            candidate_filter = True
-        if _mapbox_filter_matches(candidate_filter, context_properties):
+        if missing_properties and _feature_matches_candidate_filter_without_missing_checks(
+            feature,
+            expression,
+            missing_properties,
+            camera_zoom=camera_zoom,
+        ):
             counts.update(missing_properties)
-    return {name: counts[name] for name in properties if counts[name] > 0}
+            _update_candidate_feature_property_counts(candidate_property_counts, feature)
+    return (
+        {name: counts[name] for name in properties if counts[name] > 0},
+        {
+            key: dict(counter.most_common())
+            for key, counter in candidate_property_counts.items()
+            if counter
+        },
+    )
 
 
 def _numeric_value(value: object) -> float | None:
@@ -872,7 +904,7 @@ def _style_layer_filter_property_summary(
         missing_total = sum(missing_counts.values())
         if missing_total <= 0:
             continue
-        candidate_missing_counts = _candidate_missing_filter_property_counts(
+        candidate_missing_counts, candidate_property_counts = _candidate_missing_filter_property_summary(
             features,
             properties,
             layer.get("filter"),
@@ -886,6 +918,7 @@ def _style_layer_filter_property_summary(
             "missing_feature_total": missing_total,
             "candidate_missing_feature_counts": candidate_missing_counts,
             "candidate_missing_feature_total": candidate_missing_total,
+            "candidate_property_counts": candidate_property_counts,
             "overlap_feature_count": len(features),
             "matched_feature_count": sum(
                 1
@@ -1169,7 +1202,19 @@ def _combined_style_layer_matches(
 
 def _iter_filter_property_requirement_values(
     record: Mapping[str, object],
-) -> Iterator[tuple[str, int, int, int, int, Mapping[str, object], Mapping[str, object], Sequence[object]]]:
+) -> Iterator[
+    tuple[
+        str,
+        int,
+        int,
+        int,
+        int,
+        Mapping[str, object],
+        Mapping[str, object],
+        Mapping[str, object],
+        Sequence[object],
+    ]
+]:
     requirements = record.get("qgis_filter_property_requirements")
     if not isinstance(requirements, dict):
         return
@@ -1182,6 +1227,7 @@ def _iter_filter_property_requirement_values(
         candidate_missing_total = requirement.get("candidate_missing_feature_total", 0)
         missing_counts = requirement.get("missing_feature_counts")
         candidate_missing_counts = requirement.get("candidate_missing_feature_counts", {})
+        candidate_property_counts = requirement.get("candidate_property_counts", {})
         properties = requirement.get("filter_properties")
         if (
             isinstance(missing_total, int)
@@ -1190,6 +1236,7 @@ def _iter_filter_property_requirement_values(
             and isinstance(candidate_missing_total, int)
             and isinstance(missing_counts, Mapping)
             and isinstance(candidate_missing_counts, Mapping)
+            and isinstance(candidate_property_counts, Mapping)
             and isinstance(properties, Sequence)
             and not isinstance(properties, (str, bytes))
         ):
@@ -1201,8 +1248,108 @@ def _iter_filter_property_requirement_values(
                 candidate_missing_total,
                 missing_counts,
                 candidate_missing_counts,
+                candidate_property_counts,
                 properties,
             )
+
+
+def _new_combined_filter_property_requirement(
+    layer_id: str,
+    properties: Sequence[object],
+) -> dict[str, object]:
+    return {
+        "layer": layer_id,
+        "filter_properties": sorted(str(property_name) for property_name in properties),
+        "missing_feature_counts": Counter(),
+        "missing_feature_total": 0,
+        "candidate_missing_feature_counts": Counter(),
+        "candidate_missing_feature_total": 0,
+        "candidate_property_counts": {},
+        "overlap_feature_count": 0,
+        "matched_feature_count": 0,
+    }
+
+
+def _update_counter_from_mapping(counter: object, values: Mapping[str, object]) -> None:
+    if isinstance(counter, Counter):
+        counter.update({str(name): int(count) for name, count in values.items()})
+
+
+def _update_candidate_property_value_counts(
+    combined_counts: object,
+    candidate_property_counts: Mapping[str, object],
+) -> None:
+    if not isinstance(combined_counts, dict):
+        return
+    for key, value_counts in candidate_property_counts.items():
+        if not isinstance(value_counts, Mapping):
+            continue
+        counter = combined_counts.setdefault(str(key), Counter())
+        if isinstance(counter, Counter):
+            counter.update({str(value): int(count) for value, count in value_counts.items()})
+
+
+def _update_combined_filter_property_requirement(
+    requirement: dict[str, object],
+    *,
+    missing_total: int,
+    overlap_count: int,
+    matched_count: int,
+    candidate_missing_total: int,
+    missing_counts: Mapping[str, object],
+    candidate_missing_counts: Mapping[str, object],
+    candidate_property_counts: Mapping[str, object],
+) -> None:
+    _update_counter_from_mapping(requirement["missing_feature_counts"], missing_counts)
+    _update_counter_from_mapping(requirement["candidate_missing_feature_counts"], candidate_missing_counts)
+    _update_candidate_property_value_counts(requirement["candidate_property_counts"], candidate_property_counts)
+    requirement["missing_feature_total"] = int(requirement["missing_feature_total"]) + missing_total
+    requirement["candidate_missing_feature_total"] = (
+        int(requirement["candidate_missing_feature_total"]) + candidate_missing_total
+    )
+    requirement["overlap_feature_count"] = int(requirement["overlap_feature_count"]) + overlap_count
+    requirement["matched_feature_count"] = int(requirement["matched_feature_count"]) + matched_count
+
+
+def _limited_candidate_missing_counts(
+    requirement: Mapping[str, object],
+    missing_counts: Mapping[str, object],
+) -> dict[str, int]:
+    candidate_counter = requirement["candidate_missing_feature_counts"]
+    if not isinstance(candidate_counter, Counter):
+        return {}
+    return {
+        property_name: int(candidate_counter[property_name])
+        for property_name in missing_counts
+        if int(candidate_counter[property_name]) > 0
+    }
+
+
+def _limited_candidate_property_counts(requirement: Mapping[str, object]) -> dict[str, dict[str, int]]:
+    candidate_value_counts = requirement["candidate_property_counts"]
+    if not isinstance(candidate_value_counts, dict):
+        return {}
+    return {
+        key: dict(counter.most_common(MAX_COUNT_VALUES))
+        for key, counter in candidate_value_counts.items()
+        if isinstance(counter, Counter) and counter
+    }
+
+
+def _combined_filter_property_requirement_record(
+    requirement: dict[str, object],
+) -> dict[str, object]:
+    missing_counts = (
+        dict(requirement["missing_feature_counts"].most_common(MAX_COUNT_VALUES))
+        if isinstance(requirement["missing_feature_counts"], Counter)
+        else {}
+    )
+    return {
+        **requirement,
+        "missing_feature_counts": missing_counts,
+        "candidate_missing_feature_counts": _limited_candidate_missing_counts(requirement, missing_counts),
+        "candidate_property_counts": _limited_candidate_property_counts(requirement),
+    }
 
 
 def _combined_filter_property_requirements(
@@ -1218,35 +1365,25 @@ def _combined_filter_property_requirements(
             candidate_missing_total,
             missing_counts,
             candidate_missing_counts,
+            candidate_property_counts,
             properties,
         ) in (
             _iter_filter_property_requirement_values(record)
         ):
             requirement = requirements.setdefault(
                 layer_id,
-                {
-                    "layer": layer_id,
-                    "filter_properties": sorted(str(property_name) for property_name in properties),
-                    "missing_feature_counts": Counter(),
-                    "missing_feature_total": 0,
-                    "candidate_missing_feature_counts": Counter(),
-                    "candidate_missing_feature_total": 0,
-                    "overlap_feature_count": 0,
-                    "matched_feature_count": 0,
-                },
+                _new_combined_filter_property_requirement(layer_id, properties),
             )
-            cast_counts = requirement["missing_feature_counts"]
-            if isinstance(cast_counts, Counter):
-                cast_counts.update({str(name): int(count) for name, count in missing_counts.items()})
-            candidate_counts = requirement["candidate_missing_feature_counts"]
-            if isinstance(candidate_counts, Counter):
-                candidate_counts.update({str(name): int(count) for name, count in candidate_missing_counts.items()})
-            requirement["missing_feature_total"] = int(requirement["missing_feature_total"]) + missing_total
-            requirement["candidate_missing_feature_total"] = (
-                int(requirement["candidate_missing_feature_total"]) + candidate_missing_total
+            _update_combined_filter_property_requirement(
+                requirement,
+                missing_total=missing_total,
+                overlap_count=overlap_count,
+                matched_count=matched_count,
+                candidate_missing_total=candidate_missing_total,
+                missing_counts=missing_counts,
+                candidate_missing_counts=candidate_missing_counts,
+                candidate_property_counts=candidate_property_counts,
             )
-            requirement["overlap_feature_count"] = int(requirement["overlap_feature_count"]) + overlap_count
-            requirement["matched_feature_count"] = int(requirement["matched_feature_count"]) + matched_count
     combined: dict[str, dict[str, object]] = {}
     for layer_id, requirement in sorted(
         requirements.items(),
@@ -1257,26 +1394,7 @@ def _combined_filter_property_requirements(
             str(item[0]),
         ),
     )[:MAX_COUNT_VALUES]:
-        missing_counts = (
-            dict(requirement["missing_feature_counts"].most_common(MAX_COUNT_VALUES))
-            if isinstance(requirement["missing_feature_counts"], Counter)
-            else {}
-        )
-        candidate_counter = requirement["candidate_missing_feature_counts"]
-        candidate_counts = (
-            {
-                property_name: int(candidate_counter[property_name])
-                for property_name in missing_counts
-                if int(candidate_counter[property_name]) > 0
-            }
-            if isinstance(candidate_counter, Counter)
-            else {}
-        )
-        combined[layer_id] = {
-            **requirement,
-            "missing_feature_counts": missing_counts,
-            "candidate_missing_feature_counts": candidate_counts,
-        }
+        combined[layer_id] = _combined_filter_property_requirement_record(requirement)
     return combined
 
 
@@ -1463,6 +1581,38 @@ def _format_style_layer_matches(record: Mapping[str, object]) -> str:
     )
 
 
+def _format_candidate_property_counts(requirement: Mapping[str, object]) -> str:
+    counts = requirement.get("candidate_property_counts")
+    if not isinstance(counts, dict) or not counts:
+        return ""
+    formatted: list[str] = []
+    for key in PROPERTY_COUNT_KEYS:
+        value_counts = counts.get(key)
+        if not isinstance(value_counts, dict) or not value_counts:
+            continue
+        values = ", ".join(
+            f"{value}={int(count)}" for value, count in list(value_counts.items())[:MAX_COUNT_VALUES]
+        )
+        formatted.append(f"{key}: {values}")
+    return "; ".join(formatted)
+
+
+def _format_filter_property_requirement(layer_id: str, requirement: Mapping[str, object]) -> str | None:
+    overlap_count = int(requirement.get("overlap_feature_count") or 0)
+    missing_counts = requirement.get("missing_feature_counts")
+    if not isinstance(missing_counts, dict) or not missing_counts:
+        return None
+    candidate_counts = requirement.get("candidate_missing_feature_counts")
+    candidate_counts = candidate_counts if isinstance(candidate_counts, dict) else {}
+    counts = ", ".join(
+        f"{property_name}={int(count)}/{overlap_count} candidate={int(candidate_counts.get(property_name) or 0)}"
+        for property_name, count in missing_counts.items()
+    )
+    candidate_properties = _format_candidate_property_counts(requirement)
+    candidate_suffix = f" candidates [{candidate_properties}]" if candidate_properties else ""
+    return f"{layer_id}: {counts}{candidate_suffix} (matched={int(requirement.get('matched_feature_count') or 0)})"
+
+
 def _format_filter_property_requirements(record: Mapping[str, object]) -> str:
     requirements = record.get("qgis_filter_property_requirements")
     if not isinstance(requirements, dict) or not requirements:
@@ -1471,17 +1621,9 @@ def _format_filter_property_requirements(record: Mapping[str, object]) -> str:
     for layer_id, requirement in requirements.items():
         if not isinstance(requirement, dict):
             continue
-        overlap_count = int(requirement.get("overlap_feature_count") or 0)
-        missing_counts = requirement.get("missing_feature_counts")
-        if not isinstance(missing_counts, dict) or not missing_counts:
-            continue
-        candidate_counts = requirement.get("candidate_missing_feature_counts")
-        candidate_counts = candidate_counts if isinstance(candidate_counts, dict) else {}
-        counts = ", ".join(
-            f"{property_name}={int(count)}/{overlap_count} candidate={int(candidate_counts.get(property_name) or 0)}"
-            for property_name, count in missing_counts.items()
-        )
-        formatted.append(f"{layer_id}: {counts} (matched={int(requirement.get('matched_feature_count') or 0)})")
+        formatted_requirement = _format_filter_property_requirement(str(layer_id), requirement)
+        if formatted_requirement:
+            formatted.append(formatted_requirement)
     return "; ".join(formatted) if formatted else "-"
 
 
