@@ -305,6 +305,20 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                         "mean_absolute_channel_delta": -0.5,
                         "rms_channel_delta": 0.25,
                     }],
+                },
+                {
+                    "name": "control-only",
+                    "target_layer_ids": ["label-layer"],
+                    "render_changed": False,
+                    "metrics": {},
+                    "crop_delta_vs_baseline": [{
+                        "mean_absolute_channel_delta": 0.0,
+                        "rms_channel_delta": 0.0,
+                    }],
+                    "crop_delta_vs_rerender_control": [{
+                        "mean_absolute_channel_delta": -0.75,
+                        "rms_channel_delta": -0.5,
+                    }],
                 }
             ],
         })
@@ -315,7 +329,13 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
         self.assertIn("Control-adjusted render-moving variants: `moving`.", markdown)
         self.assertIn(
             "Control-adjusted crop-improving variants: `moving` crop 1 "
-            "(mean/RMS -1.000000000/-2.000000000).",
+            "(mean/RMS -1.000000000/-2.000000000), `control-only` crop 1 "
+            "(mean/RMS -0.750000000/-0.500000000).",
+            markdown,
+        )
+        self.assertIn(
+            "Control-only crop-improving variants: `control-only` crop 1 "
+            "(mean/RMS -0.750000000/-0.500000000).",
             markdown,
         )
         self.assertIn(

@@ -810,6 +810,12 @@ def _crop_delta_signal(delta: Mapping[str, object]) -> str | None:
     return None
 
 
+def _crop_delta_is_zero(delta: Mapping[str, object]) -> bool:
+    mean_delta = _numeric_metric_value(delta, "mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "rms_channel_delta")
+    return mean_delta == 0 and rms_delta == 0
+
+
 def _crop_signal_label(
     row: Mapping[str, object],
     *,
@@ -843,6 +849,29 @@ def _control_adjusted_crop_signal_labels(
     return labels
 
 
+def _control_only_crop_improvement_labels(
+    variant_rows: Sequence[Mapping[str, object]],
+    *,
+    control_name: object,
+) -> list[str]:
+    labels = []
+    for row in variant_rows:
+        if row.get("name") == control_name:
+            continue
+        baseline_crop_deltas = row.get("crop_delta_vs_baseline")
+        control_crop_deltas = row.get("crop_delta_vs_rerender_control")
+        if not isinstance(baseline_crop_deltas, list) or not isinstance(control_crop_deltas, list):
+            continue
+        for crop_index, delta_value in enumerate(control_crop_deltas):
+            if crop_index >= len(baseline_crop_deltas):
+                continue
+            delta = _mapping_value(delta_value)
+            baseline_delta = _mapping_value(baseline_crop_deltas[crop_index])
+            if _crop_delta_signal(delta) == "improving" and _crop_delta_is_zero(baseline_delta):
+                labels.append(_crop_signal_label(row, crop_index=crop_index, delta=delta))
+    return labels
+
+
 def _format_limited(labels: Sequence[str], *, limit: int = 5) -> str:
     if not labels:
         return "none"
@@ -867,6 +896,10 @@ def _read_lines(
         control_name=control_name,
         signal="improving",
     )
+    control_only_crop_improving = _control_only_crop_improvement_labels(
+        variant_rows,
+        control_name=control_name,
+    )
     crop_worsening = _control_adjusted_crop_signal_labels(
         variant_rows,
         control_name=control_name,
@@ -883,6 +916,7 @@ def _read_lines(
         "",
         f"- Control-adjusted render-moving variants: {', '.join(moving) if moving else 'none'}.",
         f"- Control-adjusted crop-improving variants: {_format_limited(crop_improving)}.",
+        f"- Control-only crop-improving variants: {_format_limited(control_only_crop_improving)}.",
         f"- Control-adjusted crop-worsening variants: {_format_limited(crop_worsening)}.",
         f"- Control-adjusted crop-mixed variants: {_format_limited(crop_mixed)}.",
         "- Use the rerender-control columns to separate style-mask movement from QGIS rerender noise.",
