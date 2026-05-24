@@ -1681,6 +1681,10 @@ def _format_property_coverage(record: Mapping[str, object], key: str) -> str:
     )
 
 
+def _markdown_cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
 def _format_style_layer_matches(record: Mapping[str, object]) -> str:
     matches = record.get("qgis_style_layer_matches")
     if not isinstance(matches, dict) or not matches:
@@ -1690,6 +1694,73 @@ def _format_style_layer_matches(record: Mapping[str, object]) -> str:
         for layer_id, match in matches.items()
         if isinstance(match, dict)
     )
+
+
+def _format_style_layer_paint(match: Mapping[str, object]) -> str:
+    paint = match.get("paint")
+    if not isinstance(paint, dict) or not paint:
+        return "-"
+    return "<br>".join(
+        f"{key}={_markdown_cell(json.dumps(value, ensure_ascii=False, separators=(',', ':')))}"
+        for key, value in paint.items()
+    )
+
+
+def _style_layer_paint_rows(source_layer_records: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for record in source_layer_records:
+        source_layer = str(record.get("source_layer") or MISSING_VALUE)
+        matches = record.get("qgis_style_layer_matches")
+        if not isinstance(matches, dict):
+            continue
+        for layer_id, match in matches.items():
+            if not isinstance(match, dict):
+                continue
+            rows.append(
+                {
+                    "source_layer": source_layer,
+                    "layer": str(layer_id),
+                    "type": str(match.get("type") or MISSING_VALUE),
+                    "feature_count": int(match.get("feature_count") or 0),
+                    "coverage": float(match.get("crop_coverage_ratio") or 0.0),
+                    "paint": _format_style_layer_paint(match),
+                }
+            )
+    return sorted(
+        rows,
+        key=lambda row: (str(row["source_layer"]), -float(row["coverage"]), str(row["layer"])),
+    )
+
+
+def _markdown_style_layer_paint_table(source_layer_records: Sequence[Mapping[str, object]]) -> list[str]:
+    rows = _style_layer_paint_rows(source_layer_records)
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## QGIS Style-Layer Paint Coverage",
+        "",
+        (
+            "Shows camera-zoom-active QGIS-preprocessed style layers that matched overlapping source "
+            "features, with their literal paint controls, so crop attribution can distinguish owner "
+            "coverage from color/opacity composition."
+        ),
+        "",
+        "| Source layer | QGIS style layer | Type | Features | Bbox crop coverage | Paint |",
+        "| --- | --- | --- | ---: | ---: | --- |",
+    ]
+    lines.extend(
+        "| `{source_layer}` | `{layer}` | `{type}` | {features} | {coverage:.3f} | {paint} |".format(
+            source_layer=_markdown_cell(row["source_layer"]),
+            layer=_markdown_cell(row["layer"]),
+            type=_markdown_cell(row["type"]),
+            features=row["feature_count"],
+            coverage=float(row["coverage"]),
+            paint=row["paint"],
+        )
+        for row in rows
+    )
+    return lines
 
 
 def _format_candidate_property_counts(requirement: Mapping[str, object]) -> str:
@@ -1835,6 +1906,15 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
                 ele=_format_ele_range(record.get("ele_range")),
             )
         )
+    lines.extend(
+        _markdown_style_layer_paint_table(
+            [
+                record
+                for record in report.get("combined_source_layers", [])
+                if isinstance(record, dict)
+            ]
+        )
+    )
     lines.extend(
         [
             "",

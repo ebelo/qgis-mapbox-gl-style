@@ -214,6 +214,17 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertIn("Bbox coverage is a summed upper-bound attribution aid", markdown)
         self.assertIn("QGIS style-layer coverage evaluates camera-zoom-active filters", markdown)
         self.assertIn("QGIS filter missing props reports active style-layer filter properties", markdown)
+        self.assertIn("## QGIS Style-Layer Paint Coverage", markdown)
+        self.assertIn(
+            "| `landuse` | `landuse-park` | `fill` | 1 | 0.128 | "
+            'fill-color="hsl(98, 55%, 70%)"<br>fill-opacity=1.0 |',
+            markdown,
+        )
+        self.assertIn(
+            "| `contour` | `contour-major` | `line` | 1 | 0.000 | "
+            'line-color="hsl(60, 10%, 35%)"<br>line-opacity=0.9 |',
+            markdown,
+        )
         self.assertIn(
             "| `landuse` | 2 | 1 | 0.128 | park=1 | park=0.128 | landuse-park=0.128, landuse-park-sized=0.128 | landuse-park-sized: sizerank=1/1 candidate=0 (matched=1) | park=1 | - | - |",
             markdown,
