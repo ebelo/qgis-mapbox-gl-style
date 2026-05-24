@@ -222,7 +222,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         )
         self.assertIn(
             "| `contour` | `contour-major` | `line` | 1 | 0.000 | "
-            'line-color="hsl(60, 10%, 35%)"<br>line-opacity=0.9 |',
+            'line-color="hsl(60, 10%, 35%)"<br>line-opacity=1.0 |',
             markdown,
         )
         self.assertIn(
@@ -714,14 +714,14 @@ def _write_source_overlap_fixture(root, *, manual_crop_boxes=None, include_camer
                         "type": "line",
                         "source-layer": "contour",
                         "filter": ["match", ["get", "index"], [1, 2], True, False],
-                        "paint": {"line-color": "hsl(60, 10%, 35%)", "line-opacity": 0.55},
+                        "paint": {"line-color": "hsl(60, 10%, 35%)", "line-opacity": 0.65},
                     },
                     {
                         "id": "contour-major",
                         "type": "line",
                         "source-layer": "contour",
                         "filter": ["match", ["get", "index"], [1, 2], False, True],
-                        "paint": {"line-color": "hsl(60, 10%, 35%)", "line-opacity": 0.9},
+                        "paint": {"line-color": "hsl(60, 10%, 35%)", "line-opacity": 1.0},
                     },
                 ],
             }
