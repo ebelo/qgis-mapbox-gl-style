@@ -17,10 +17,12 @@ from qfit.validation.mapbox_outdoors_rendered_layer_mask import (
     apply_transparent_layer_mask,
     build_qgis_render_child_script,
     build_rendered_layer_mask_report,
+    build_rendered_layer_mask_aggregate_report,
     image_changed_bbox,
     image_delta_metrics,
     parse_crop_box,
     parse_variant_spec,
+    render_aggregate_markdown_summary,
     render_markdown_summary,
     render_qgis_vector_in_subprocess,
 )
@@ -426,6 +428,155 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
         self.assertIn("Baseline manifest: debug/manifest.json", stdout.getvalue())
         self.assertIn("Run directory:", stdout.getvalue())
         self.assertIn("Summary:", stdout.getvalue())
+
+    def test_aggregate_report_summarizes_camera_and_crop_signals(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            geneva_report = root / "geneva.json"
+            chamonix_report = root / "chamonix.json"
+            geneva_report.write_text(
+                json.dumps({
+                    "camera": {"name": "geneva-airport-motorway-z14-outdoors"},
+                    "rerender_control_variant": "qgis-rerender-control",
+                    "crop_boxes": [[0, 0, 1, 1]],
+                    "variants": [
+                        {"name": "qgis-rerender-control", "is_rerender_control": True},
+                        {
+                            "name": "contour-z13-lines",
+                            "render_changed": True,
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": 0.01,
+                                "normalized_rms_channel_delta": 0.02,
+                            },
+                            "crop_delta_vs_baseline": [{
+                                "mean_absolute_channel_delta": 0.1,
+                                "rms_channel_delta": 0.2,
+                            }],
+                            "crop_delta_vs_rerender_control": [{
+                                "mean_absolute_channel_delta": 0.1,
+                                "rms_channel_delta": 0.2,
+                            }],
+                        },
+                        {
+                            "name": "contour-labels",
+                            "render_changed": False,
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": 0.0,
+                                "normalized_rms_channel_delta": 0.0,
+                            },
+                            "crop_delta_vs_baseline": [{
+                                "mean_absolute_channel_delta": 0.0,
+                                "rms_channel_delta": 0.0,
+                            }],
+                            "crop_delta_vs_rerender_control": [{
+                                "mean_absolute_channel_delta": -0.3,
+                                "rms_channel_delta": -0.4,
+                            }],
+                        },
+                        {
+                            "name": "park-grass-fills",
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": 0.0,
+                                "normalized_rms_channel_delta": 0.0,
+                            },
+                        },
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            chamonix_report.write_text(
+                json.dumps({
+                    "camera": {"name": "chamonix-trails-z14-outdoors"},
+                    "rerender_control_variant": "qgis-rerender-control",
+                    "crop_boxes": [[0, 0, 1, 1]],
+                    "variants": [
+                        {
+                            "name": "contour-z13-lines",
+                            "render_changed": True,
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": -0.03,
+                                "normalized_rms_channel_delta": -0.04,
+                            },
+                            "crop_delta_vs_baseline": [{
+                                "mean_absolute_channel_delta": -0.5,
+                                "rms_channel_delta": -0.6,
+                            }],
+                            "crop_delta_vs_rerender_control": [{
+                                "mean_absolute_channel_delta": -0.5,
+                                "rms_channel_delta": -0.6,
+                            }],
+                        },
+                        {
+                            "name": "park-grass-fills",
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": -0.01,
+                                "normalized_rms_channel_delta": -0.02,
+                            },
+                        }
+                    ],
+                }),
+                encoding="utf-8",
+            )
+
+            aggregate = build_rendered_layer_mask_aggregate_report(
+                (geneva_report, chamonix_report),
+                now=dt.datetime(2026, 5, 24, 21, 20, tzinfo=dt.timezone.utc),
+            )
+            markdown = render_aggregate_markdown_summary(aggregate)
+
+        self.assertIn("rendered-layer mask aggregate", markdown)
+        self.assertIn("| `contour-z13-lines` | 2 | 2 | 1 | 1 | 0 | 0 |", markdown)
+        self.assertIn("| `park-grass-fills` | 2 | 2 | 1 | 0 | 0 | 1 |", markdown)
+        self.assertIn(
+            "| `contour-labels` | `geneva-airport-motorway-z14-outdoors` | 1 | `[0, 0, 1, 1]` | "
+            "`improving` | -0.300000000 | -0.400000000 | yes |",
+            markdown,
+        )
+        self.assertIn("Whole-image mixed-camera variants: `contour-z13-lines`.", markdown)
+        self.assertIn(
+            "Control-adjusted non-control-only crop-improving rows: "
+            "`contour-z13-lines` on `chamonix-trails-z14-outdoors` crop 1.",
+            markdown,
+        )
+        self.assertIn(
+            "Control-only crop-improving rows: "
+            "`contour-labels` on `geneva-airport-motorway-z14-outdoors` crop 1.",
+            markdown,
+        )
+
+    def test_main_aggregate_mode_writes_markdown_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            report_path = root / "mask-summary.json"
+            output_path = root / "aggregate.md"
+            report_path.write_text(
+                json.dumps({
+                    "camera": {"name": "unit-camera"},
+                    "variants": [
+                        {
+                            "name": "landuse-mask",
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": -0.1,
+                                "normalized_rms_channel_delta": -0.2,
+                            },
+                        }
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = mask_module.main([
+                    "--aggregate-report",
+                    str(report_path),
+                    "--aggregate-output",
+                    str(output_path),
+                ])
+            output_markdown = output_path.read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertIn("Aggregate summary:", stdout.getvalue())
+        self.assertIn("landuse-mask", output_markdown)
 
 
 if __name__ == "__main__":

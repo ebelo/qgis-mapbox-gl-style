@@ -925,6 +925,271 @@ def _read_lines(
     ]
 
 
+def _whole_image_signal(row: Mapping[str, object]) -> str | None:
+    delta = _mapping_value(row.get("metric_delta_vs_baseline"))
+    mean_delta = _numeric_metric_value(delta, "normalized_mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "normalized_rms_channel_delta")
+    if mean_delta is None or rms_delta is None:
+        return None
+    if mean_delta < 0 and rms_delta < 0:
+        return "improving"
+    if mean_delta > 0 and rms_delta > 0:
+        return "worsening"
+    if mean_delta != 0 or rms_delta != 0:
+        return "mixed"
+    return None
+
+
+def _aggregate_variant_name(row: Mapping[str, object], control_name: object) -> str | None:
+    name = row.get("name")
+    if not isinstance(name, str) or not name or name == control_name or row.get("is_rerender_control") is True:
+        return None
+    return name
+
+
+def _aggregate_mask_variant_entry(
+    row: Mapping[str, object],
+    *,
+    variant_name: str,
+    camera_name: str,
+) -> dict[str, object]:
+    delta = _mapping_value(row.get("metric_delta_vs_baseline"))
+    return {
+        "variant": variant_name,
+        "camera": camera_name,
+        "signal": _whole_image_signal(row) or "none",
+        "mean_delta": _numeric_metric_value(delta, "normalized_mean_absolute_channel_delta"),
+        "rms_delta": _numeric_metric_value(delta, "normalized_rms_channel_delta"),
+        "render_changed": bool(row.get("render_changed")),
+    }
+
+
+def _aggregate_crop_box(crop_boxes: object, crop_index: int) -> str:
+    if isinstance(crop_boxes, list) and crop_index < len(crop_boxes):
+        return json.dumps(crop_boxes[crop_index])
+    return ""
+
+
+def _aggregate_baseline_crop_delta(
+    baseline_crop_deltas: Sequence[Mapping[str, object]],
+    crop_index: int,
+) -> Mapping[str, object]:
+    if crop_index < len(baseline_crop_deltas):
+        return baseline_crop_deltas[crop_index]
+    return {}
+
+
+def _aggregate_mask_crop_entries(
+    row: Mapping[str, object],
+    *,
+    variant_name: str,
+    camera_name: str,
+    crop_boxes: object,
+) -> list[dict[str, object]]:
+    baseline_crop_deltas = _list_of_mappings(row.get("crop_delta_vs_baseline"))
+    control_crop_deltas = _list_of_mappings(row.get("crop_delta_vs_rerender_control"))
+    entries = []
+    for crop_index, control_delta in enumerate(control_crop_deltas):
+        signal = _crop_delta_signal(control_delta)
+        if signal is None:
+            continue
+        baseline_delta = _aggregate_baseline_crop_delta(baseline_crop_deltas, crop_index)
+        entries.append({
+            "variant": variant_name,
+            "camera": camera_name,
+            "crop": crop_index + 1,
+            "crop_box": _aggregate_crop_box(crop_boxes, crop_index),
+            "signal": signal,
+            "mean_delta": _numeric_metric_value(control_delta, "mean_absolute_channel_delta"),
+            "rms_delta": _numeric_metric_value(control_delta, "rms_channel_delta"),
+            "control_only": signal == "improving" and _crop_delta_is_zero(baseline_delta),
+        })
+    return entries
+
+
+def _aggregate_mask_entries(
+    report_path_value: Path,
+) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
+    report_path = report_path_value.expanduser().resolve()
+    report = load_json_object(report_path)
+    camera = _mapping_value(report.get("camera"))
+    camera_name = str(camera.get("name") or "(unknown camera)")
+    control_name = report.get("rerender_control_variant")
+    crop_boxes = report.get("crop_boxes")
+    variant_entries: list[dict[str, object]] = []
+    crop_entries: list[dict[str, object]] = []
+    for row in _list_of_mappings(report.get("variants")):
+        variant_name = _aggregate_variant_name(row, control_name)
+        if variant_name is None:
+            continue
+        variant_entries.append(
+            _aggregate_mask_variant_entry(row, variant_name=variant_name, camera_name=camera_name)
+        )
+        crop_entries.extend(
+            _aggregate_mask_crop_entries(
+                row,
+                variant_name=variant_name,
+                camera_name=camera_name,
+                crop_boxes=crop_boxes,
+            )
+        )
+    return _repo_relative(report_path), variant_entries, crop_entries
+
+
+def _aggregate_mask_totals(variant_entries: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    grouped: dict[str, list[Mapping[str, object]]] = {}
+    for entry in variant_entries:
+        variant = str(entry.get("variant") or "")
+        if variant:
+            grouped.setdefault(variant, []).append(entry)
+    totals = []
+    for variant_name in sorted(grouped):
+        rows = grouped[variant_name]
+        signals = [str(row.get("signal") or "none") for row in rows]
+        totals.append({
+            "variant": variant_name,
+            "runs": len(rows),
+            "camera_count": len({str(row.get("camera") or "") for row in rows}),
+            "improving": signals.count("improving"),
+            "worsening": signals.count("worsening"),
+            "mixed": signals.count("mixed"),
+            "none": signals.count("none"),
+        })
+    return totals
+
+
+def build_rendered_layer_mask_aggregate_report(
+    report_paths: Sequence[Path],
+    *,
+    now: dt.datetime | None = None,
+) -> dict[str, object]:
+    input_reports = []
+    variant_entries: list[dict[str, object]] = []
+    crop_entries: list[dict[str, object]] = []
+    for report_path in report_paths:
+        input_path, report_variant_entries, report_crop_entries = _aggregate_mask_entries(report_path)
+        input_reports.append(input_path)
+        variant_entries.extend(report_variant_entries)
+        crop_entries.extend(report_crop_entries)
+    generated = now or dt.datetime.now(dt.timezone.utc)
+    return {
+        "generated": generated.isoformat(timespec="seconds"),
+        "input_reports": input_reports,
+        "variant_totals": _aggregate_mask_totals(variant_entries),
+        "variant_rows": sorted(variant_entries, key=lambda row: (str(row["variant"]), str(row["camera"]))),
+        "crop_rows": sorted(
+            crop_entries,
+            key=lambda row: (str(row["variant"]), str(row["camera"]), int(row["crop"])),
+        ),
+    }
+
+
+def _aggregate_mask_total_row(row: Mapping[str, object]) -> str:
+    return (
+        f"| `{row.get('variant')}` | {row.get('runs')} | {row.get('camera_count')} | "
+        f"{row.get('improving')} | {row.get('worsening')} | {row.get('mixed')} | {row.get('none')} |"
+    )
+
+
+def _aggregate_mask_variant_row(row: Mapping[str, object]) -> str:
+    return (
+        f"| `{row.get('variant')}` | `{row.get('camera')}` | `{row.get('signal')}` | "
+        f"{_format_number(row.get('mean_delta'))} | {_format_number(row.get('rms_delta'))} | "
+        f"{'yes' if row.get('render_changed') else 'no'} |"
+    )
+
+
+def _aggregate_mask_crop_row(row: Mapping[str, object]) -> str:
+    return (
+        f"| `{row.get('variant')}` | `{row.get('camera')}` | {row.get('crop')} | "
+        f"`{row.get('crop_box')}` | `{row.get('signal')}` | "
+        f"{_format_number(row.get('mean_delta'))} | {_format_number(row.get('rms_delta'))} | "
+        f"{'yes' if row.get('control_only') else 'no'} |"
+    )
+
+
+def _aggregate_read_lines(
+    *,
+    totals: Sequence[Mapping[str, object]],
+    crop_rows: Sequence[Mapping[str, object]],
+) -> list[str]:
+    all_improving = [
+        f"`{row.get('variant')}`"
+        for row in totals
+        if row.get("runs") and row.get("improving") == row.get("runs")
+    ]
+    mixed_camera = [
+        f"`{row.get('variant')}`"
+        for row in totals
+        if sum(1 for key in ("improving", "worsening", "mixed") if int(row.get(key) or 0) > 0) > 1
+    ]
+    crop_improving = [
+        f"`{row.get('variant')}` on `{row.get('camera')}` crop {row.get('crop')}"
+        for row in crop_rows
+        if row.get("signal") == "improving" and row.get("control_only") is not True
+    ]
+    control_only = [
+        f"`{row.get('variant')}` on `{row.get('camera')}` crop {row.get('crop')}"
+        for row in crop_rows
+        if row.get("control_only") is True
+    ]
+    return [
+        "",
+        "## Read",
+        "",
+        f"- Whole-image all-improving variants: {_format_limited(all_improving)}.",
+        f"- Whole-image mixed-camera variants: {_format_limited(mixed_camera)}.",
+        f"- Control-adjusted non-control-only crop-improving rows: {_format_limited(crop_improving)}.",
+        f"- Control-only crop-improving rows: {_format_limited(control_only)}.",
+        "- Treat mixed-camera or control-only wins as diagnostic leads, not production style changes.",
+    ]
+
+
+def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
+    input_reports = [str(path) for path in report.get("input_reports") or []]
+    totals = _list_of_mappings(report.get("variant_totals"))
+    variant_rows = _list_of_mappings(report.get("variant_rows"))
+    crop_rows = _list_of_mappings(report.get("crop_rows"))
+    lines = [
+        "# Mapbox Outdoors rendered-layer mask aggregate",
+        "",
+        f"Generated: `{report.get('generated')}`",
+        f"Input reports: `{len(input_reports)}`",
+    ]
+    if input_reports:
+        lines.extend(["", "Inputs:"])
+        lines.extend(f"- `{path}`" for path in input_reports[:20])
+        if len(input_reports) > 20:
+            lines.append(f"- ... {len(input_reports) - 20} more")
+    lines.extend([
+        "",
+        "## Variant totals",
+        "",
+        "| Variant | Runs | Cameras | Improving | Worsening | Mixed | None |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    lines.extend(_aggregate_mask_total_row(row) for row in totals) if totals else lines.append("| _none_ | 0 | 0 | 0 | 0 | 0 | 0 |")
+    lines.extend([
+        "",
+        "## Whole-image movement",
+        "",
+        "| Variant | Camera | Signal | Mean delta vs baseline | RMS delta vs baseline | Render changed |",
+        "| --- | --- | --- | ---: | ---: | --- |",
+    ])
+    lines.extend(_aggregate_mask_variant_row(row) for row in variant_rows) if variant_rows else lines.append("| _none_ |  |  |  |  |  |")
+    lines.extend([
+        "",
+        "## Crop movement",
+        "",
+        "| Variant | Camera | Crop | Box | Signal | Mean delta vs control | RMS delta vs control | Control-only |",
+        "| --- | --- | ---: | --- | --- | ---: | ---: | --- |",
+    ])
+    lines.extend(_aggregate_mask_crop_row(row) for row in crop_rows) if crop_rows else lines.append("| _none_ |  | 0 |  |  |  |  |  |")
+    lines.extend(_aggregate_read_lines(totals=totals, crop_rows=crop_rows))
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render_markdown_summary(report: Mapping[str, object]) -> str:
     variants = report.get("variants")
     variant_rows = _list_of_mappings(variants)
@@ -945,7 +1210,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--baseline-manifest",
-        required=True,
         type=Path,
         help="Existing comparison manifest with Mapbox reference, QGIS render, and preprocessed style paths.",
     )
@@ -953,8 +1217,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--variant",
         action="append",
         type=parse_variant_spec,
-        required=True,
+        default=[],
         help="Mask variant as NAME=LAYER_ID[,LAYER_ID...]. Repeat for multiple variants.",
+    )
+    parser.add_argument(
+        "--aggregate-report",
+        action="append",
+        type=Path,
+        default=[],
+        help="Existing rendered-layer mask summary.json report to aggregate. Repeat for multiple reports.",
+    )
+    parser.add_argument(
+        "--aggregate-output",
+        type=Path,
+        help="Optional Markdown output path for --aggregate-report mode. Defaults to stdout.",
     )
     parser.add_argument(
         "--crop-box",
@@ -975,8 +1251,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def _run_aggregate_mode(args: argparse.Namespace) -> int:
+    aggregate_report = build_rendered_layer_mask_aggregate_report(tuple(args.aggregate_report))
+    markdown_summary = render_aggregate_markdown_summary(aggregate_report)
+    if args.aggregate_output is not None:
+        output_path = args.aggregate_output.expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(markdown_summary, encoding="utf-8")
+        print(f"Aggregate summary: {_repo_relative(output_path)}")
+    else:
+        print(markdown_summary)
+    return 0
+
+
+def _run_mask_mode(args: argparse.Namespace) -> int:
+    if args.baseline_manifest is None or not args.variant:
+        raise SystemExit("--baseline-manifest and at least one --variant are required unless --aggregate-report is provided.")
     token = resolve_mapbox_token(provided_token=args.mapbox_token)
     report = build_rendered_layer_mask_report(
         RenderedLayerMaskConfig(
@@ -1000,6 +1290,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Run directory: {_repo_relative(newest)}")
         print(f"Summary: {_repo_relative(newest / 'summary.md')}")
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.aggregate_report:
+        return _run_aggregate_mode(args)
+    return _run_mask_mode(args)
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
