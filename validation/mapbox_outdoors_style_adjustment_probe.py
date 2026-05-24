@@ -559,6 +559,18 @@ def _metric_delta_worsens_both(delta: Mapping[str, object]) -> bool:
     return mean_delta is not None and mean_delta > 0 and rms_delta is not None and rms_delta > 0
 
 
+def _crop_delta_improves_both(delta: Mapping[str, object]) -> bool:
+    mean_delta = _numeric_metric_value(delta, "mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "rms_channel_delta")
+    return mean_delta is not None and mean_delta < 0 and rms_delta is not None and rms_delta < 0
+
+
+def _crop_delta_worsens_both(delta: Mapping[str, object]) -> bool:
+    mean_delta = _numeric_metric_value(delta, "mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "rms_channel_delta")
+    return mean_delta is not None and mean_delta > 0 and rms_delta is not None and rms_delta > 0
+
+
 def _preferred_aggregate_delta(row: Mapping[str, object]) -> tuple[str | None, Mapping[str, object]]:
     control_delta = _mapping_value(row.get("metric_delta_vs_rerender_control"))
     if _has_aggregate_metric_pair(control_delta):
@@ -567,6 +579,16 @@ def _preferred_aggregate_delta(row: Mapping[str, object]) -> tuple[str | None, M
     if _has_aggregate_metric_pair(baseline_delta):
         return "baseline", baseline_delta
     return None, {}
+
+
+def _preferred_crop_deltas(row: Mapping[str, object]) -> tuple[str | None, list[Mapping[str, object]]]:
+    control_deltas = _list_of_mappings(row.get("crop_delta_vs_rerender_control"))
+    if any(_has_crop_metric_pair(delta) for delta in control_deltas):
+        return "rerender_control", control_deltas
+    baseline_deltas = _list_of_mappings(row.get("crop_delta_vs_baseline"))
+    if any(_has_crop_metric_pair(delta) for delta in baseline_deltas):
+        return "baseline", baseline_deltas
+    return None, []
 
 
 def _numeric_metric_values(rows: Sequence[Mapping[str, object]], key: str) -> list[float]:
@@ -587,6 +609,10 @@ def _numeric_metric_value(row: Mapping[str, object], key: str) -> float | None:
 
 def _has_aggregate_metric_pair(delta: Mapping[str, object]) -> bool:
     return all(_numeric_metric_value(delta, key) is not None for key in AGGREGATE_METRIC_KEYS)
+
+
+def _has_crop_metric_pair(delta: Mapping[str, object]) -> bool:
+    return all(_numeric_metric_value(delta, key) is not None for key in CROP_METRIC_KEYS[:2])
 
 
 def _mean_value(values: Sequence[float]) -> float | None:
@@ -615,29 +641,113 @@ def _aggregate_metric_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, ob
     }
 
 
+def _aggregate_crop_metric_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    mean_delta_values = _numeric_metric_values(rows, "mean_absolute_channel_delta")
+    rms_delta_values = _numeric_metric_values(rows, "rms_channel_delta")
+    luminance_delta_values = _numeric_metric_values(rows, "mean_luminance_delta")
+    return {
+        "runs": len(rows),
+        "mean_delta_average": _mean_value(mean_delta_values),
+        "mean_delta_range": _metric_range(mean_delta_values),
+        "rms_delta_average": _mean_value(rms_delta_values),
+        "rms_delta_range": _metric_range(rms_delta_values),
+        "luminance_delta_average": _mean_value(luminance_delta_values),
+        "luminance_delta_range": _metric_range(luminance_delta_values),
+        "improving_runs": sum(1 for row in rows if _crop_delta_improves_both(row)),
+        "worsening_runs": sum(1 for row in rows if _crop_delta_worsens_both(row)),
+    }
+
+
 def _aggregate_other_runs(aggregate: Mapping[str, object]) -> int:
     return int(aggregate["runs"]) - int(aggregate["improving_runs"]) - int(aggregate["worsening_runs"])
 
 
+def _aggregate_crop_box(crop_boxes: object, crop_index: int) -> str:
+    if not isinstance(crop_boxes, list) or crop_index >= len(crop_boxes):
+        return ""
+    return json.dumps(crop_boxes[crop_index])
+
+
+def _aggregate_variant_name(variant: Mapping[str, object], control_variant_name: object) -> str | None:
+    variant_name = variant.get("name")
+    if not isinstance(variant_name, str) or not variant_name:
+        return None
+    if variant.get("is_rerender_control") is True or variant_name == control_variant_name:
+        return None
+    return variant_name
+
+
+def _aggregate_variant_delta_entry(
+    *,
+    variant_name: str,
+    camera_name: str,
+    variant: Mapping[str, object],
+) -> tuple[str, str, str, Mapping[str, object]] | None:
+    delta_source, delta = _preferred_aggregate_delta(variant)
+    if delta_source is None:
+        return None
+    return variant_name, camera_name, delta_source, delta
+
+
+def _aggregate_variant_crop_entries(
+    *,
+    variant_name: str,
+    camera_name: str,
+    crop_boxes: object,
+    variant: Mapping[str, object],
+) -> list[tuple[str, str, str, int, str, Mapping[str, object]]]:
+    crop_delta_source, crop_deltas = _preferred_crop_deltas(variant)
+    if crop_delta_source is None:
+        return []
+    return [
+        (
+            variant_name,
+            camera_name,
+            crop_delta_source,
+            crop_index + 1,
+            _aggregate_crop_box(crop_boxes, crop_index),
+            crop_delta,
+        )
+        for crop_index, crop_delta in enumerate(crop_deltas)
+        if _has_crop_metric_pair(crop_delta)
+    ]
+
+
 def _aggregate_delta_entries(
     report_path_value: Path,
-) -> tuple[str, list[tuple[str, str, str, Mapping[str, object]]]]:
+) -> tuple[
+    str,
+    list[tuple[str, str, str, Mapping[str, object]]],
+    list[tuple[str, str, str, int, str, Mapping[str, object]]],
+]:
     report_path = report_path_value.expanduser().resolve()
     report = load_json_object(report_path)
     camera = _mapping_value(report.get("camera"))
     camera_name = str(camera.get("name") or "(unknown camera)")
     control_variant_name = report.get("rerender_control_variant")
+    crop_boxes = report.get("crop_boxes")
     entries: list[tuple[str, str, str, Mapping[str, object]]] = []
+    crop_entries: list[tuple[str, str, str, int, str, Mapping[str, object]]] = []
     for variant in _list_of_mappings(report.get("variants")):
-        variant_name = variant.get("name")
-        if not isinstance(variant_name, str) or not variant_name:
+        variant_name = _aggregate_variant_name(variant, control_variant_name)
+        if variant_name is None:
             continue
-        if variant.get("is_rerender_control") is True or variant_name == control_variant_name:
-            continue
-        delta_source, delta = _preferred_aggregate_delta(variant)
-        if delta_source is not None:
-            entries.append((variant_name, camera_name, delta_source, delta))
-    return _repo_relative(report_path), entries
+        entry = _aggregate_variant_delta_entry(
+            variant_name=variant_name,
+            camera_name=camera_name,
+            variant=variant,
+        )
+        if entry is not None:
+            entries.append(entry)
+        crop_entries.extend(
+            _aggregate_variant_crop_entries(
+                variant_name=variant_name,
+                camera_name=camera_name,
+                crop_boxes=crop_boxes,
+                variant=variant,
+            )
+        )
+    return _repo_relative(report_path), entries, crop_entries
 
 
 def _aggregate_camera_rows(
@@ -670,6 +780,24 @@ def _aggregate_variant_totals(
     return totals
 
 
+def _aggregate_crop_rows(
+    grouped_crop_rows: Mapping[tuple[str, str, str, int, str], Sequence[Mapping[str, object]]],
+) -> list[dict[str, object]]:
+    rows = []
+    for variant_name, camera_name, delta_source, crop_index, crop_box in sorted(grouped_crop_rows):
+        aggregate = _aggregate_crop_metric_rows(
+            grouped_crop_rows[(variant_name, camera_name, delta_source, crop_index, crop_box)]
+        )
+        aggregate["variant"] = variant_name
+        aggregate["camera"] = camera_name
+        aggregate["delta_source"] = delta_source
+        aggregate["crop"] = crop_index
+        aggregate["crop_box"] = crop_box
+        aggregate["other_runs"] = _aggregate_other_runs(aggregate)
+        rows.append(aggregate)
+    return rows
+
+
 def build_style_adjustment_aggregate_report(
     report_paths: Sequence[Path],
     *,
@@ -677,16 +805,22 @@ def build_style_adjustment_aggregate_report(
 ) -> dict[str, object]:
     grouped_rows: dict[tuple[str, str, str], list[Mapping[str, object]]] = {}
     grouped_totals: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    grouped_crop_rows: dict[tuple[str, str, str, int, str], list[Mapping[str, object]]] = {}
     total_cameras: dict[tuple[str, str], set[str]] = {}
     input_paths: list[str] = []
     for report_path_value in report_paths:
-        input_path, entries = _aggregate_delta_entries(report_path_value)
+        input_path, entries, crop_entries = _aggregate_delta_entries(report_path_value)
         input_paths.append(input_path)
         for variant_name, camera_name, delta_source, delta in entries:
             grouped_rows.setdefault((variant_name, camera_name, delta_source), []).append(delta)
             total_key = (variant_name, delta_source)
             grouped_totals.setdefault(total_key, []).append(delta)
             total_cameras.setdefault(total_key, set()).add(camera_name)
+        for variant_name, camera_name, delta_source, crop_index, crop_box, crop_delta in crop_entries:
+            grouped_crop_rows.setdefault(
+                (variant_name, camera_name, delta_source, crop_index, crop_box),
+                [],
+            ).append(crop_delta)
 
     generated_at = now or dt.datetime.now(dt.timezone.utc)
     return {
@@ -694,6 +828,7 @@ def build_style_adjustment_aggregate_report(
         "input_reports": input_paths,
         "rows": _aggregate_camera_rows(grouped_rows),
         "variant_totals": _aggregate_variant_totals(grouped_totals, total_cameras),
+        "crop_rows": _aggregate_crop_rows(grouped_crop_rows),
     }
 
 
@@ -738,9 +873,23 @@ def _aggregate_total_row(row: Mapping[str, object]) -> str:
     )
 
 
+def _aggregate_crop_row(row: Mapping[str, object]) -> str:
+    return (
+        f"| `{row.get('variant')}` | `{row.get('camera')}` | `{row.get('delta_source')}` | "
+        f"{row.get('crop')} | `{row.get('crop_box')}` | {row.get('runs')} | "
+        f"{_format_number(row.get('mean_delta_average'))} | "
+        f"{_format_number(row.get('rms_delta_average'))} | "
+        f"{_format_number(row.get('luminance_delta_average'))} | "
+        f"{_format_number(row.get('mean_delta_range'))} | "
+        f"{_format_number(row.get('rms_delta_range'))} | "
+        f"{row.get('improving_runs')} | {row.get('worsening_runs')} | {row.get('other_runs')} |"
+    )
+
+
 def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
     totals = _list_of_mappings(report.get("variant_totals"))
     rows = _list_of_mappings(report.get("rows"))
+    crop_rows = _list_of_mappings(report.get("crop_rows"))
     lines = _aggregate_summary_header_lines(report)
     lines.extend([
         "",
@@ -766,9 +915,21 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         lines.append("| _none_ |  |  | 0 |  |  |  |  | 0 | 0 | 0 |")
     lines.extend([
         "",
+        "## Aggregated crop movement",
+        "",
+        "| Variant | Camera | Delta source | Crop | Box | Runs | Mean delta avg | RMS delta avg | Luminance delta avg | Mean delta range | RMS delta range | Improving | Worsening | Other |",
+        "| --- | --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    if crop_rows:
+        lines.extend(_aggregate_crop_row(row) for row in crop_rows)
+    else:
+        lines.append("| _none_ |  |  | 0 |  | 0 |  |  |  |  |  | 0 | 0 | 0 |")
+    lines.extend([
+        "",
         "## Key",
         "",
         "- Deltas are grouped by variant and camera, preferring rerender-control deltas when present.",
+        "- Crop deltas use rerender-control deltas when present and fall back to baseline deltas.",
         "- Negative mean/RMS averages indicate the variant moved closer to the Mapbox GL reference on average.",
         "- Non-zero ranges or mixed improving/worsening counts indicate repeated-render or camera-matrix instability.",
         "",

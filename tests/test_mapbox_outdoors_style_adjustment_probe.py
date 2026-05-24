@@ -323,6 +323,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                 json.dumps({
                     "camera": {"name": "valais-geneva-outdoors"},
                     "rerender_control_variant": "qgis-rerender-control",
+                    "crop_boxes": [[0, 0, 1, 1], [1, 1, 2, 2]],
                     "variants": [
                         {"name": "qgis-rerender-control", "is_rerender_control": True},
                         {
@@ -332,6 +333,18 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                                 "normalized_mean_absolute_channel_delta": -0.0001,
                                 "normalized_rms_channel_delta": -0.0002,
                             },
+                            "crop_delta_vs_rerender_control": [
+                                {
+                                    "mean_absolute_channel_delta": -1.0,
+                                    "rms_channel_delta": -2.0,
+                                    "mean_luminance_delta": -3.0,
+                                },
+                                {
+                                    "mean_absolute_channel_delta": 1.0,
+                                    "rms_channel_delta": 2.0,
+                                    "mean_luminance_delta": 3.0,
+                                },
+                            ],
                         },
                     ],
                 }),
@@ -341,6 +354,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                 json.dumps({
                     "camera": {"name": "valais-geneva-outdoors"},
                     "rerender_control_variant": "qgis-rerender-control",
+                    "crop_boxes": [[0, 0, 1, 1], [1, 1, 2, 2]],
                     "variants": [
                         {
                             "name": "landcover-opacity-70",
@@ -349,6 +363,13 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                                 "normalized_mean_absolute_channel_delta": 0.00005,
                                 "normalized_rms_channel_delta": 0.0001,
                             },
+                            "crop_delta_vs_rerender_control": [
+                                {
+                                    "mean_absolute_channel_delta": 0.5,
+                                    "rms_channel_delta": 0.5,
+                                    "mean_luminance_delta": 1.0,
+                                }
+                            ],
                         },
                     ],
                 }),
@@ -403,6 +424,25 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         self.assertEqual(valais_total["runs"], 2)
         self.assertEqual(valais_total["camera_count"], 1)
         self.assertAlmostEqual(valais_total["mean_delta_range"], 0.00015)
+        crop_rows = {
+            (row["variant"], row["camera"], row["delta_source"], row["crop"]): row
+            for row in aggregate["crop_rows"]
+        }
+        first_crop = crop_rows[("landcover-opacity-70", "valais-geneva-outdoors", "rerender_control", 1)]
+        self.assertEqual(first_crop["runs"], 2)
+        self.assertEqual(first_crop["crop_box"], "[0, 0, 1, 1]")
+        self.assertAlmostEqual(first_crop["mean_delta_average"], -0.25)
+        self.assertAlmostEqual(first_crop["luminance_delta_average"], -1.0)
+        self.assertEqual(first_crop["improving_runs"], 1)
+        self.assertEqual(first_crop["worsening_runs"], 1)
+        second_crop = crop_rows[("landcover-opacity-70", "valais-geneva-outdoors", "rerender_control", 2)]
+        self.assertEqual(second_crop["runs"], 1)
+        self.assertEqual(second_crop["crop_box"], "[1, 1, 2, 2]")
+        self.assertAlmostEqual(second_crop["mean_delta_average"], 1.0)
+        self.assertAlmostEqual(second_crop["rms_delta_average"], 2.0)
+        self.assertAlmostEqual(second_crop["luminance_delta_average"], 3.0)
+        self.assertEqual(second_crop["improving_runs"], 0)
+        self.assertEqual(second_crop["worsening_runs"], 1)
 
     def test_aggregate_report_ignores_boolean_metric_values(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -428,6 +468,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
 
         self.assertEqual(aggregate["rows"], [])
         self.assertEqual(aggregate["variant_totals"], [])
+        self.assertEqual(aggregate["crop_rows"], [])
 
     def test_aggregate_markdown_summary_surfaces_mixed_signal(self):
         markdown = render_aggregate_markdown_summary({
@@ -463,11 +504,35 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                     "other_runs": 0,
                 }
             ],
+            "crop_rows": [
+                {
+                    "variant": "landcover-opacity-70",
+                    "camera": "valais-geneva-outdoors",
+                    "delta_source": "rerender_control",
+                    "crop": 2,
+                    "crop_box": "[1, 1, 2, 2]",
+                    "runs": 1,
+                    "mean_delta_average": 1.0,
+                    "rms_delta_average": 2.0,
+                    "luminance_delta_average": 3.0,
+                    "mean_delta_range": 0.0,
+                    "rms_delta_range": 0.0,
+                    "improving_runs": 0,
+                    "worsening_runs": 1,
+                    "other_runs": 0,
+                }
+            ],
         })
 
         self.assertIn("style-adjustment aggregate", markdown)
         self.assertIn("`landcover-opacity-70`", markdown)
         self.assertIn("| `landcover-opacity-70` | `valais-geneva-outdoors` |", markdown)
+        self.assertIn("## Aggregated crop movement", markdown)
+        self.assertIn(
+            "| `landcover-opacity-70` | `valais-geneva-outdoors` | `rerender_control` | "
+            "2 | `[1, 1, 2, 2]` | 1 | 1.000000000 | 2.000000000 | 3.000000000 |",
+            markdown,
+        )
         self.assertIn("0.000300000", markdown)
         self.assertIn("## Key", markdown)
 
