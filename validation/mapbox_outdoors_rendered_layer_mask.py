@@ -638,6 +638,13 @@ def _format_number(value: object) -> str:
     return str(value)
 
 
+def _numeric_metric_value(row: Mapping[str, object], key: str) -> float | None:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _crop_delta(variant: Mapping[str, object], *, crop_index: int, key: str) -> object:
     crop_deltas = variant.get("crop_delta_vs_baseline")
     if not isinstance(crop_deltas, list) or crop_index >= len(crop_deltas):
@@ -789,6 +796,62 @@ def _extend_crop_movement_lines(
         lines.extend(_crop_movement_lines(variant_rows, crop_boxes))
 
 
+def _crop_delta_signal(delta: Mapping[str, object]) -> str | None:
+    mean_delta = _numeric_metric_value(delta, "mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "rms_channel_delta")
+    if mean_delta is None or rms_delta is None:
+        return None
+    if mean_delta < 0 and rms_delta < 0:
+        return "improving"
+    if mean_delta > 0 and rms_delta > 0:
+        return "worsening"
+    if mean_delta != 0 or rms_delta != 0:
+        return "mixed"
+    return None
+
+
+def _crop_signal_label(
+    row: Mapping[str, object],
+    *,
+    crop_index: int,
+    delta: Mapping[str, object],
+) -> str:
+    return (
+        f"`{row.get('name')}` crop {crop_index + 1} "
+        f"(mean/RMS {_format_number(delta.get('mean_absolute_channel_delta'))}/"
+        f"{_format_number(delta.get('rms_channel_delta'))})"
+    )
+
+
+def _control_adjusted_crop_signal_labels(
+    variant_rows: Sequence[Mapping[str, object]],
+    *,
+    control_name: object,
+    signal: str,
+) -> list[str]:
+    labels = []
+    for row in variant_rows:
+        if row.get("name") == control_name:
+            continue
+        control_crop_deltas = row.get("crop_delta_vs_rerender_control")
+        if not isinstance(control_crop_deltas, list):
+            continue
+        for crop_index, delta_value in enumerate(control_crop_deltas):
+            delta = _mapping_value(delta_value)
+            if _crop_delta_signal(delta) == signal:
+                labels.append(_crop_signal_label(row, crop_index=crop_index, delta=delta))
+    return labels
+
+
+def _format_limited(labels: Sequence[str], *, limit: int = 5) -> str:
+    if not labels:
+        return "none"
+    visible = list(labels[:limit])
+    if len(labels) > limit:
+        visible.append(f"... {len(labels) - limit} more")
+    return ", ".join(visible)
+
+
 def _read_lines(
     *,
     variant_rows: Sequence[Mapping[str, object]],
@@ -799,11 +862,29 @@ def _read_lines(
         for row in variant_rows
         if row.get("name") != control_name and _has_control_adjusted_movement(row)
     ]
+    crop_improving = _control_adjusted_crop_signal_labels(
+        variant_rows,
+        control_name=control_name,
+        signal="improving",
+    )
+    crop_worsening = _control_adjusted_crop_signal_labels(
+        variant_rows,
+        control_name=control_name,
+        signal="worsening",
+    )
+    crop_mixed = _control_adjusted_crop_signal_labels(
+        variant_rows,
+        control_name=control_name,
+        signal="mixed",
+    )
     return [
         "",
         "## Read",
         "",
         f"- Control-adjusted render-moving variants: {', '.join(moving) if moving else 'none'}.",
+        f"- Control-adjusted crop-improving variants: {_format_limited(crop_improving)}.",
+        f"- Control-adjusted crop-worsening variants: {_format_limited(crop_worsening)}.",
+        f"- Control-adjusted crop-mixed variants: {_format_limited(crop_mixed)}.",
         "- Use the rerender-control columns to separate style-mask movement from QGIS rerender noise.",
         "- This is diagnostic evidence only; use it to prove rendered-pixel ownership before changing production paint.",
         "",

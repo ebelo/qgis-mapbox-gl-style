@@ -253,12 +253,26 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
             "inputs": {"baseline_manifest": "debug/manifest.json"},
             "baseline": {"metrics": {"normalized_mean_absolute_channel_delta": 0.1}},
             "crop_boxes": [[0, 0, 1, 1]],
+            "rerender_control_variant": "qgis-rerender-control",
             "variants": [
+                {
+                    "name": "qgis-rerender-control",
+                    "target_layer_ids": [],
+                    "render_changed": True,
+                    "metrics": {},
+                    "crop_delta_vs_rerender_control": [{
+                        "mean_absolute_channel_delta": -9.0,
+                        "rms_channel_delta": -8.0,
+                    }],
+                },
                 {
                     "name": "moving",
                     "target_layer_ids": ["layer"],
                     "render_changed": True,
                     "metrics": {"normalized_mean_absolute_channel_delta": 0.2},
+                    "qgis_movement_vs_rerender_control_metrics": {
+                        "mean_absolute_channel_delta": 0.5,
+                    },
                     "metric_delta_vs_baseline": {
                         "normalized_mean_absolute_channel_delta": 0.1,
                     },
@@ -266,6 +280,30 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                         "mean_absolute_channel_delta": 1.0,
                         "rms_channel_delta": 2.0,
                         "mean_luminance_delta": 3.0,
+                    }],
+                    "crop_delta_vs_rerender_control": [{
+                        "mean_absolute_channel_delta": -1.0,
+                        "rms_channel_delta": -2.0,
+                    }],
+                },
+                {
+                    "name": "worsening",
+                    "target_layer_ids": ["other-layer"],
+                    "render_changed": False,
+                    "metrics": {},
+                    "crop_delta_vs_rerender_control": [{
+                        "mean_absolute_channel_delta": 1.5,
+                        "rms_channel_delta": 2.5,
+                    }],
+                },
+                {
+                    "name": "mixed",
+                    "target_layer_ids": ["mixed-layer"],
+                    "render_changed": False,
+                    "metrics": {},
+                    "crop_delta_vs_rerender_control": [{
+                        "mean_absolute_channel_delta": -0.5,
+                        "rms_channel_delta": 0.25,
                     }],
                 }
             ],
@@ -275,6 +313,22 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
         self.assertIn("## Crop movement", markdown)
         self.assertIn("| `moving` | 1 | `[0, 0, 1, 1]` | 1.000000000 | 2.000000000 | 3.000000000 |", markdown)
         self.assertIn("Control-adjusted render-moving variants: `moving`.", markdown)
+        self.assertIn(
+            "Control-adjusted crop-improving variants: `moving` crop 1 "
+            "(mean/RMS -1.000000000/-2.000000000).",
+            markdown,
+        )
+        self.assertIn(
+            "Control-adjusted crop-worsening variants: `worsening` crop 1 "
+            "(mean/RMS 1.500000000/2.500000000).",
+            markdown,
+        )
+        self.assertIn(
+            "Control-adjusted crop-mixed variants: `mixed` crop 1 "
+            "(mean/RMS -0.500000000/0.250000000).",
+            markdown,
+        )
+        self.assertNotIn("qgis-rerender-control` crop", markdown)
 
     def test_qgis_child_script_keeps_token_out_of_source(self):
         script = build_qgis_render_child_script()
