@@ -1347,6 +1347,7 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("scrub", ["match", ["get", "class"], "scrub", True, False], _LANDUSE_SCRUB_FILL_COLOR),
     ("agriculture", ["match", ["get", "class"], "agriculture", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
     ("grass", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
+    ("grass-high-zoom", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
     ("glacier", ["match", ["get", "class"], "glacier", True, False], _LANDUSE_GLACIER_FILL_COLOR),
     ("sand", ["match", ["get", "class"], "sand", True, False], _LANDUSE_SAND_FILL_COLOR),
     ("rock-low-zoom", ["match", ["get", "class"], "rock", True, False], _LANDUSE_ROCK_FILL_COLOR),
@@ -1362,6 +1363,15 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ),
     (
         "park",
+        [
+            "all",
+            ["match", ["get", "class"], "park", True, False],
+            ["match", ["get", "type"], ["garden", "playground", "zoo"], False, True],
+        ],
+        _LANDUSE_PARK_FILL_COLOR,
+    ),
+    (
+        "park-high-zoom",
         [
             "all",
             ["match", ["get", "class"], "park", True, False],
@@ -1430,8 +1440,12 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
 )
 _LANDUSE_CLASS_FILL_COLOR_VARIANT_ZOOM_BOUNDS = {
     # Match the live Outdoors z16 rock-color stop without recoloring lower zooms.
+    "grass": (None, 16.0),
+    "grass-high-zoom": (16.0, None),
     "rock-low-zoom": (None, 16.0),
     "rock-high-zoom": (16.0, None),
+    "park": (None, 16.0),
+    "park-high-zoom": (16.0, None),
     "airport": (None, 14.0),
     "airport-muted-z14-to-z15": (14.0, 15.0),
     "airport-z15-plus": (15.0, None),

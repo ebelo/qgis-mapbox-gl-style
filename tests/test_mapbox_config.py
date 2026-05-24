@@ -3557,7 +3557,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
             {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
         )
-        self.assertEqual(len(result["layers"]), 42)
+        self.assertEqual(len(result["layers"]), 44)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
         stable_class_variants = {
@@ -3580,11 +3580,13 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         rock_mid = by_id["landuse-other-z8-to-z10-rock-low-zoom"]
         rock_high_low = by_id["landuse-other-z10-plus-rock-low-zoom"]
         rock_high = by_id["landuse-other-z10-plus-rock-high-zoom"]
+        grass_high = by_id["landuse-other-z10-plus-grass-high-zoom"]
         commercial_mid = by_id["landuse-other-z8-to-z10-commercial-area-low-zoom"]
         commercial_high_low = by_id["landuse-other-z10-plus-commercial-area-low-zoom"]
         commercial_high = by_id["landuse-other-z10-plus-commercial-area-high-zoom"]
         park_special_high = by_id["landuse-other-z10-plus-park-special"]
         park_high = by_id["landuse-other-z10-plus-park"]
+        park_high_zoom = by_id["landuse-other-z10-plus-park-high-zoom"]
         airport_high_low = by_id["landuse-other-z10-plus-airport"]
         airport_high_muted = by_id["landuse-other-z10-plus-airport-muted-z14-to-z15"]
         airport_high = by_id["landuse-other-z10-plus-airport-z15-plus"]
@@ -3598,9 +3600,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     ["match", ["get", "class"], class_filter, True, False],
                 )
         self.assertNotIn("landuse-other-z8-to-z10-rock-high-zoom", by_id)
+        self.assertNotIn("landuse-other-z8-to-z10-grass-high-zoom", by_id)
+        self.assertNotIn("landuse-other-z8-to-z10-park-high-zoom", by_id)
         self.assertNotIn("landuse-other-z8-to-z10-airport-muted-z14-to-z15", by_id)
         self.assertNotIn("landuse-other-z8-to-z10-airport-z15-plus", by_id)
         self.assertNotIn("landuse-other-z8-to-z10-commercial-area-high-zoom", by_id)
+        self.assertEqual(grass_high["paint"]["fill-color"], mapbox_config._LANDUSE_AGRICULTURE_FILL_COLOR)
+        self.assertEqual(
+            grass_high["filter"][-1],
+            ["match", ["get", "class"], "grass", True, False],
+        )
         self.assertEqual(rock_mid["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
         self.assertEqual(rock_high_low["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
         self.assertEqual(rock_high["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_HIGH_ZOOM_FILL_COLOR)
@@ -3629,6 +3638,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(remaining_mid["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
         self.assertEqual(park_special_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_SPECIAL_FILL_COLOR)
         self.assertEqual(park_high["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
+        self.assertEqual(park_high_zoom["paint"]["fill-color"], mapbox_config._LANDUSE_PARK_FILL_COLOR)
         self.assertEqual(airport_high_low["paint"]["fill-color"], mapbox_config._LANDUSE_AIRPORT_FILL_COLOR)
         self.assertEqual(
             airport_high_muted["paint"]["fill-color"],
@@ -3652,6 +3662,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(remaining_high["paint"]["fill-opacity"], 1.0)
         self.assertEqual(park_mid["minzoom"], 8.0)
         self.assertEqual(park_mid["maxzoom"], 10.0)
+        self.assertEqual(grass_high["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", grass_high)
+        self.assertEqual(park_high["minzoom"], 10.0)
+        self.assertEqual(park_high["maxzoom"], 16.0)
+        self.assertEqual(park_high_zoom["minzoom"], 16.0)
+        self.assertNotIn("maxzoom", park_high_zoom)
         self.assertEqual(airport_high_low["minzoom"], 10.0)
         self.assertEqual(airport_high_low["maxzoom"], 14.0)
         self.assertEqual(airport_high_muted["minzoom"], 14.0)
@@ -3691,6 +3707,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 ["match", ["get", "type"], ["garden", "playground", "zoo"], True, False],
             ],
         )
+        self.assertEqual(park_high_zoom["filter"][-1], park_high["filter"][-1])
         self.assertEqual(
             airport_mid["filter"][-1],
             ["match", ["get", "class"], "airport", True, False],
@@ -3746,6 +3763,54 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-rock-high-zoom"),
             "landuse",
         )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-park-high-zoom"),
+            "landuse",
+        )
+
+    def test_landuse_high_zoom_park_and_grass_variants_sample_high_zoom_filter(self):
+        landuse_filter = [
+            "all",
+            [">=", ["to-number", ["get", "sizerank"]], 0],
+            [
+                "match",
+                ["get", "class"],
+                ["agriculture", "wood", "grass", "scrub", "glacier", "pitch", "sand"],
+                True,
+                "residential",
+                False,
+                ["park", "airport"],
+                ["step", ["zoom"], False, 8, ["==", ["get", "sizerank"], 1], 10, True],
+                False,
+            ],
+            [
+                "<=",
+                [
+                    "-",
+                    ["to-number", ["get", "sizerank"]],
+                    ["interpolate", ["exponential", 1.5], ["zoom"], 12, 0, 18, 14],
+                ],
+                14,
+            ],
+        ]
+        layer = self._landuse_layer(filter_value=landuse_filter)
+        layer["paint"]["fill-color"] = copy.deepcopy(mapbox_config._LANDUSE_FILL_COLOR_EXPRESSION)
+
+        result = simplify_mapbox_style_expressions({"layers": [layer]})
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        grass_low = by_id["landuse-other-z10-plus-grass"]
+        grass_high = by_id["landuse-other-z10-plus-grass-high-zoom"]
+        park_low = by_id["landuse-other-z10-plus-park"]
+        park_high = by_id["landuse-other-z10-plus-park-high-zoom"]
+        self.assertEqual(grass_low["maxzoom"], 16.0)
+        self.assertEqual(park_low["maxzoom"], 16.0)
+        self.assertEqual(grass_high["minzoom"], 16.0)
+        self.assertEqual(park_high["minzoom"], 16.0)
+        self.assertAlmostEqual(grass_low["filter"][3][2], 14.0)
+        self.assertAlmostEqual(park_low["filter"][3][2], 14.0)
+        self.assertAlmostEqual(grass_high["filter"][3][2], 19.473684210526315)
+        self.assertAlmostEqual(park_high["filter"][3][2], 19.473684210526315)
 
     def test_landuse_fill_opacity_uses_effective_zoom_band_midpoints(self):
         layer = self._landuse_layer()
@@ -3823,12 +3888,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "landuse-other-z10-plus-scrub",
                 "landuse-other-z10-plus-agriculture",
                 "landuse-other-z10-plus-grass",
+                "landuse-other-z10-plus-grass-high-zoom",
                 "landuse-other-z10-plus-glacier",
                 "landuse-other-z10-plus-sand",
                 "landuse-other-z10-plus-rock-low-zoom",
                 "landuse-other-z10-plus-rock-high-zoom",
                 "landuse-other-z10-plus-park-special",
                 "landuse-other-z10-plus-park",
+                "landuse-other-z10-plus-park-high-zoom",
                 "landuse-other-z10-plus-airport",
                 "landuse-other-z10-plus-airport-muted-z14-to-z15",
                 "landuse-other-z10-plus-airport-z15-plus",
