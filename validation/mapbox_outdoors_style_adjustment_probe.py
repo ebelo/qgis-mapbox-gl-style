@@ -21,7 +21,7 @@ try:
     from .mapbox_outdoors_rendered_layer_mask import (
         RenderedLayerMaskContext as StyleAdjustmentProbeContext,
         RenderedLayerMaskPaths as StyleAdjustmentProbePaths,
-        _first_crop_lines,
+        _extend_crop_movement_lines,
         _format_number,
         _list_of_mappings,
         _manifest_output_path,
@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - direct script execution
     from mapbox_outdoors_rendered_layer_mask import (  # type: ignore[no-redef]
         RenderedLayerMaskContext as StyleAdjustmentProbeContext,
         RenderedLayerMaskPaths as StyleAdjustmentProbePaths,
-        _first_crop_lines,
+        _extend_crop_movement_lines,
         _format_number,
         _list_of_mappings,
         _manifest_output_path,
@@ -860,8 +860,7 @@ def render_markdown_summary(report: Mapping[str, object]) -> str:
     baseline_metrics = _mapping_value(_mapping_value(report.get("baseline")).get("metrics"))
     lines = _summary_header_lines(report)
     lines.extend(_whole_image_lines(baseline_metrics=baseline_metrics, variant_rows=variant_rows))
-    if report.get("crop_boxes"):
-        lines.extend(_first_crop_lines(variant_rows))
+    _extend_crop_movement_lines(lines, report=report, variant_rows=variant_rows)
     lines.extend(_read_lines(variant_rows=variant_rows, control_name=report.get("rerender_control_variant")))
     return "\n".join(lines)
 

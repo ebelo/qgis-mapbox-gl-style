@@ -638,14 +638,14 @@ def _format_number(value: object) -> str:
     return str(value)
 
 
-def _first_crop_delta(variant: Mapping[str, object], key: str) -> object:
+def _crop_delta(variant: Mapping[str, object], *, crop_index: int, key: str) -> object:
     crop_deltas = variant.get("crop_delta_vs_baseline")
-    if not isinstance(crop_deltas, list) or not crop_deltas:
+    if not isinstance(crop_deltas, list) or crop_index >= len(crop_deltas):
         return None
-    first = crop_deltas[0]
-    if not isinstance(first, Mapping):
+    crop_delta = crop_deltas[crop_index]
+    if not isinstance(crop_delta, Mapping):
         return None
-    return first.get(key)
+    return crop_delta.get(key)
 
 
 def _has_control_adjusted_movement(variant: Mapping[str, object]) -> bool:
@@ -720,34 +720,73 @@ def _whole_image_lines(
     ]
 
 
-def _first_control_crop_delta(row: Mapping[str, object]) -> Mapping[str, object]:
+def _control_crop_delta(row: Mapping[str, object], *, crop_index: int) -> Mapping[str, object]:
     control_crop_delta = row.get("crop_delta_vs_rerender_control")
-    if not isinstance(control_crop_delta, list) or not control_crop_delta:
+    if not isinstance(control_crop_delta, list) or crop_index >= len(control_crop_delta):
         return {}
-    return _mapping_value(control_crop_delta[0])
+    return _mapping_value(control_crop_delta[crop_index])
 
 
-def _first_crop_row(row: Mapping[str, object]) -> str:
-    first_control_crop_delta = _first_control_crop_delta(row)
+def _crop_box_label(crop_boxes: Sequence[object], *, crop_index: int) -> str:
+    if crop_index >= len(crop_boxes):
+        return ""
+    crop_box = crop_boxes[crop_index]
+    return f"`{crop_box}`"
+
+
+def _crop_movement_row(row: Mapping[str, object], *, crop_index: int, crop_boxes: Sequence[object]) -> str:
+    control_crop_delta = _control_crop_delta(row, crop_index=crop_index)
     return (
-        f"| `{row.get('name')}` | "
-        f"{_format_number(_first_crop_delta(row, 'mean_absolute_channel_delta'))} | "
-        f"{_format_number(_first_crop_delta(row, 'rms_channel_delta'))} | "
-        f"{_format_number(_first_crop_delta(row, 'mean_luminance_delta'))} | "
-        f"{_format_number(first_control_crop_delta.get('mean_absolute_channel_delta'))} | "
-        f"{_format_number(first_control_crop_delta.get('rms_channel_delta'))} |"
+        f"| `{row.get('name')}` | {crop_index + 1} | {_crop_box_label(crop_boxes, crop_index=crop_index)} | "
+        f"{_format_number(_crop_delta(row, crop_index=crop_index, key='mean_absolute_channel_delta'))} | "
+        f"{_format_number(_crop_delta(row, crop_index=crop_index, key='rms_channel_delta'))} | "
+        f"{_format_number(_crop_delta(row, crop_index=crop_index, key='mean_luminance_delta'))} | "
+        f"{_format_number(control_crop_delta.get('mean_absolute_channel_delta'))} | "
+        f"{_format_number(control_crop_delta.get('rms_channel_delta'))} |"
     )
 
 
-def _first_crop_lines(variant_rows: Sequence[Mapping[str, object]]) -> list[str]:
+def _crop_count(variant_rows: Sequence[Mapping[str, object]], crop_boxes: Sequence[object]) -> int:
+    counts = [len(crop_boxes)]
+    for row in variant_rows:
+        crop_deltas = row.get("crop_delta_vs_baseline")
+        if isinstance(crop_deltas, list):
+            counts.append(len(crop_deltas))
+        control_crop_deltas = row.get("crop_delta_vs_rerender_control")
+        if isinstance(control_crop_deltas, list):
+            counts.append(len(control_crop_deltas))
+    return max(counts)
+
+
+def _crop_movement_lines(
+    variant_rows: Sequence[Mapping[str, object]],
+    crop_boxes: Sequence[object] = (),
+) -> list[str]:
+    crop_count = _crop_count(variant_rows, crop_boxes)
+    rows = [
+        _crop_movement_row(row, crop_index=crop_index, crop_boxes=crop_boxes)
+        for crop_index in range(crop_count)
+        for row in variant_rows
+    ]
     return [
         "",
-        "## First crop movement",
+        "## Crop movement",
         "",
-        "| Variant | Mean abs delta vs baseline | RMS delta vs baseline | Luminance delta vs baseline | Mean abs delta vs control | RMS delta vs control |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
-        *[_first_crop_row(row) for row in variant_rows],
+        "| Variant | Crop | Box | Mean abs delta vs baseline | RMS delta vs baseline | Luminance delta vs baseline | Mean abs delta vs control | RMS delta vs control |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |",
+        *rows,
     ]
+
+
+def _extend_crop_movement_lines(
+    lines: list[str],
+    *,
+    report: Mapping[str, object],
+    variant_rows: Sequence[Mapping[str, object]],
+) -> None:
+    crop_boxes = report.get("crop_boxes")
+    if isinstance(crop_boxes, list) and crop_boxes:
+        lines.extend(_crop_movement_lines(variant_rows, crop_boxes))
 
 
 def _read_lines(
@@ -777,8 +816,7 @@ def render_markdown_summary(report: Mapping[str, object]) -> str:
     baseline_metrics = _mapping_value(_mapping_value(report.get("baseline")).get("metrics"))
     lines = _summary_header_lines(report)
     lines.extend(_whole_image_lines(baseline_metrics=baseline_metrics, variant_rows=variant_rows))
-    if report.get("crop_boxes"):
-        lines.extend(_first_crop_lines(variant_rows))
+    _extend_crop_movement_lines(lines, report=report, variant_rows=variant_rows)
     lines.extend(_read_lines(variant_rows=variant_rows, control_name=report.get("rerender_control_variant")))
     return "\n".join(lines)
 

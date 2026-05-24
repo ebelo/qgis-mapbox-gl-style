@@ -264,7 +264,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
             "camera": {"name": "unit-camera"},
             "inputs": {"baseline_manifest": "debug/manifest.json"},
             "baseline": {"metrics": {"normalized_mean_absolute_channel_delta": 0.1}},
-            "crop_boxes": [[0, 0, 1, 1]],
+            "crop_boxes": [[0, 0, 1, 1], [1, 1, 2, 2]],
             "rerender_control_variant": "qgis-rerender-control",
             "variants": [
                 {
@@ -278,19 +278,38 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                         "normalized_mean_absolute_channel_delta": -0.03,
                         "normalized_rms_channel_delta": -0.02,
                     },
-                    "crop_delta_vs_baseline": [{
-                        "mean_absolute_channel_delta": -1.0,
-                        "rms_channel_delta": -2.0,
-                        "mean_luminance_delta": -3.0,
-                    }],
-                    "crop_delta_vs_rerender_control": [{
-                        "mean_absolute_channel_delta": -1.5,
-                        "rms_channel_delta": -2.5,
-                    }],
+                    "crop_delta_vs_baseline": [
+                        {
+                            "mean_absolute_channel_delta": -1.0,
+                            "rms_channel_delta": -2.0,
+                            "mean_luminance_delta": -3.0,
+                        },
+                        {
+                            "mean_absolute_channel_delta": 4.0,
+                            "rms_channel_delta": 5.0,
+                            "mean_luminance_delta": 6.0,
+                        },
+                    ],
+                    "crop_delta_vs_rerender_control": [
+                        {
+                            "mean_absolute_channel_delta": -1.5,
+                            "rms_channel_delta": -2.5,
+                        },
+                        {
+                            "mean_absolute_channel_delta": 4.5,
+                            "rms_channel_delta": 5.5,
+                        },
+                    ],
                 }
             ],
         })
 
+        self.assertIn("## Crop movement", markdown)
+        self.assertIn(
+            "| `contour-strong` | 2 | `[1, 1, 2, 2]` | 4.000000000 | 5.000000000 | "
+            "6.000000000 | 4.500000000 | 5.500000000 |",
+            markdown,
+        )
         self.assertIn("Whole-image mean/RMS improving variants: `contour-strong`.", markdown)
         self.assertIn("Control-adjusted whole-image mean/RMS improving variants: `contour-strong`.", markdown)
 

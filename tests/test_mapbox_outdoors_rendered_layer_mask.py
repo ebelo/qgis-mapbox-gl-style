@@ -272,6 +272,8 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
         })
 
         self.assertIn("`moving`", markdown)
+        self.assertIn("## Crop movement", markdown)
+        self.assertIn("| `moving` | 1 | `[0, 0, 1, 1]` | 1.000000000 | 2.000000000 | 3.000000000 |", markdown)
         self.assertIn("Control-adjusted render-moving variants: `moving`.", markdown)
 
     def test_qgis_child_script_keeps_token_out_of_source(self):
