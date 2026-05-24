@@ -1331,10 +1331,19 @@ _LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS = {
     for suffix, _class_filter, _band_minzoom, _band_maxzoom, residential in _LANDUSE_FILL_OPACITY_VARIANTS
     if not residential and suffix not in _LANDUSE_CLASS_FILL_COLOR_EXCLUDED_OPACITY_SUFFIXES
 }
+_LANDUSE_LOW_ZOOM_WOOD_AGRICULTURE_FILL_OPACITY = 0.5
 _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY = 0.66
 # QGIS renders the full-opacity airport landuse wash too strongly over
 # aeroway polygons in the Geneva z14 comparison. Keep this override narrow.
 _LANDUSE_CLASS_FILL_OPACITY_OVERRIDES = {
+    (
+        f"{_LANDUSE_LAYER_ID}-other-z10-plus",
+        "wood",
+    ): _LANDUSE_LOW_ZOOM_WOOD_AGRICULTURE_FILL_OPACITY,
+    (
+        f"{_LANDUSE_LAYER_ID}-other-z10-plus",
+        "agriculture",
+    ): _LANDUSE_LOW_ZOOM_WOOD_AGRICULTURE_FILL_OPACITY,
     (f"{_LANDUSE_LAYER_ID}-other-z10-plus", "airport"): _LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
     (
         f"{_LANDUSE_LAYER_ID}-other-z10-plus",
@@ -1344,8 +1353,14 @@ _LANDUSE_CLASS_FILL_OPACITY_OVERRIDES = {
 }
 _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ("wood", ["match", ["get", "class"], "wood", True, False], _LANDUSE_WOOD_FILL_COLOR),
+    ("wood-z12-plus", ["match", ["get", "class"], "wood", True, False], _LANDUSE_WOOD_FILL_COLOR),
     ("scrub", ["match", ["get", "class"], "scrub", True, False], _LANDUSE_SCRUB_FILL_COLOR),
     ("agriculture", ["match", ["get", "class"], "agriculture", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
+    (
+        "agriculture-z12-plus",
+        ["match", ["get", "class"], "agriculture", True, False],
+        _LANDUSE_AGRICULTURE_FILL_COLOR,
+    ),
     ("grass", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
     ("grass-high-zoom", ["match", ["get", "class"], "grass", True, False], _LANDUSE_AGRICULTURE_FILL_COLOR),
     ("glacier", ["match", ["get", "class"], "glacier", True, False], _LANDUSE_GLACIER_FILL_COLOR),
@@ -1439,6 +1454,10 @@ _LANDUSE_CLASS_FILL_COLOR_VARIANTS: tuple[tuple[str, object, str], ...] = (
     ),
 )
 _LANDUSE_CLASS_FILL_COLOR_VARIANT_ZOOM_BOUNDS = {
+    "wood": (None, 12.0),
+    "wood-z12-plus": (12.0, None),
+    "agriculture": (None, 12.0),
+    "agriculture-z12-plus": (12.0, None),
     # Match the live Outdoors z16 rock-color stop without recoloring lower zooms.
     "grass": (None, 16.0),
     "grass-high-zoom": (16.0, None),

@@ -3557,7 +3557,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             mapbox_config._LANDUSE_CLASS_FILL_COLOR_SPLIT_LAYER_IDS,
             {"landuse-other-z8-to-z10", "landuse-other-z10-plus"},
         )
-        self.assertEqual(len(result["layers"]), 44)
+        self.assertEqual(len(result["layers"]), 46)
         self.assertIn("landuse-other-below-z8", by_id)
         self.assertNotIn("landuse-other-below-z8-park", by_id)
         stable_class_variants = {
@@ -3578,6 +3578,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         airport_mid = by_id["landuse-other-z8-to-z10-airport"]
         remaining_mid = by_id["landuse-other-z8-to-z10-remaining"]
         rock_mid = by_id["landuse-other-z8-to-z10-rock-low-zoom"]
+        wood_high = by_id["landuse-other-z10-plus-wood-z12-plus"]
+        agriculture_high = by_id["landuse-other-z10-plus-agriculture-z12-plus"]
         rock_high_low = by_id["landuse-other-z10-plus-rock-low-zoom"]
         rock_high = by_id["landuse-other-z10-plus-rock-high-zoom"]
         grass_high = by_id["landuse-other-z10-plus-grass-high-zoom"]
@@ -3600,6 +3602,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                     ["match", ["get", "class"], class_filter, True, False],
                 )
         self.assertNotIn("landuse-other-z8-to-z10-rock-high-zoom", by_id)
+        self.assertNotIn("landuse-other-z8-to-z10-wood-z12-plus", by_id)
+        self.assertNotIn("landuse-other-z8-to-z10-agriculture-z12-plus", by_id)
         self.assertNotIn("landuse-other-z8-to-z10-grass-high-zoom", by_id)
         self.assertNotIn("landuse-other-z8-to-z10-park-high-zoom", by_id)
         self.assertNotIn("landuse-other-z8-to-z10-airport-muted-z14-to-z15", by_id)
@@ -3609,6 +3613,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(
             grass_high["filter"][-1],
             ["match", ["get", "class"], "grass", True, False],
+        )
+        self.assertEqual(wood_high["paint"]["fill-color"], mapbox_config._LANDUSE_WOOD_FILL_COLOR)
+        self.assertEqual(
+            wood_high["filter"][-1],
+            ["match", ["get", "class"], "wood", True, False],
+        )
+        self.assertEqual(agriculture_high["paint"]["fill-color"], mapbox_config._LANDUSE_AGRICULTURE_FILL_COLOR)
+        self.assertEqual(
+            agriculture_high["filter"][-1],
+            ["match", ["get", "class"], "agriculture", True, False],
         )
         self.assertEqual(rock_mid["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
         self.assertEqual(rock_high_low["paint"]["fill-color"], mapbox_config._LANDUSE_ROCK_FILL_COLOR)
@@ -3648,6 +3662,16 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(remaining_high["paint"]["fill-color"], mapbox_config._LANDUSE_FALLBACK_FILL_COLOR)
         self.assertAlmostEqual(airport_mid["paint"]["fill-opacity"], 0.6)
         self.assertAlmostEqual(
+            by_id["landuse-other-z10-plus-wood"]["paint"]["fill-opacity"],
+            mapbox_config._LANDUSE_LOW_ZOOM_WOOD_AGRICULTURE_FILL_OPACITY,
+        )
+        self.assertAlmostEqual(
+            by_id["landuse-other-z10-plus-agriculture"]["paint"]["fill-opacity"],
+            mapbox_config._LANDUSE_LOW_ZOOM_WOOD_AGRICULTURE_FILL_OPACITY,
+        )
+        self.assertAlmostEqual(wood_high["paint"]["fill-opacity"], 1.0)
+        self.assertAlmostEqual(agriculture_high["paint"]["fill-opacity"], 1.0)
+        self.assertAlmostEqual(
             airport_high_low["paint"]["fill-opacity"],
             mapbox_config._LANDUSE_AIRPORT_HIGH_ZOOM_FILL_OPACITY,
         )
@@ -3662,6 +3686,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertAlmostEqual(remaining_high["paint"]["fill-opacity"], 1.0)
         self.assertEqual(park_mid["minzoom"], 8.0)
         self.assertEqual(park_mid["maxzoom"], 10.0)
+        self.assertEqual(by_id["landuse-other-z10-plus-wood"]["minzoom"], 10.0)
+        self.assertEqual(by_id["landuse-other-z10-plus-wood"]["maxzoom"], 12.0)
+        self.assertEqual(wood_high["minzoom"], 12.0)
+        self.assertNotIn("maxzoom", wood_high)
+        self.assertEqual(by_id["landuse-other-z10-plus-agriculture"]["minzoom"], 10.0)
+        self.assertEqual(by_id["landuse-other-z10-plus-agriculture"]["maxzoom"], 12.0)
+        self.assertEqual(agriculture_high["minzoom"], 12.0)
+        self.assertNotIn("maxzoom", agriculture_high)
         self.assertEqual(grass_high["minzoom"], 16.0)
         self.assertNotIn("maxzoom", grass_high)
         self.assertEqual(park_high["minzoom"], 10.0)
@@ -3761,6 +3793,14 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         )
         self.assertEqual(
             mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-rock-high-zoom"),
+            "landuse",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-wood-z12-plus"),
+            "landuse",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit("landuse-other-z10-plus-agriculture-z12-plus"),
             "landuse",
         )
         self.assertEqual(
@@ -3885,8 +3925,10 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "not-a-layer",
                 "landuse",
                 "landuse-other-z10-plus-wood",
+                "landuse-other-z10-plus-wood-z12-plus",
                 "landuse-other-z10-plus-scrub",
                 "landuse-other-z10-plus-agriculture",
+                "landuse-other-z10-plus-agriculture-z12-plus",
                 "landuse-other-z10-plus-grass",
                 "landuse-other-z10-plus-grass-high-zoom",
                 "landuse-other-z10-plus-glacier",
