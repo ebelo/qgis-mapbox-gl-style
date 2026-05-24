@@ -210,6 +210,38 @@ python3 validation/mapbox_outdoors_rendered_layer_mask.py \
 
 The probe reuses the baseline manifest's token-free Mapbox reference, QGIS render, and QGIS-preprocessed style. Each variant writes a transparent-mask style JSON, a fresh QGIS render, a Mapbox-vs-QGIS diff, a QGIS-baseline movement diff, whole-image metrics, optional crop metrics, matched/missing target layer IDs, and the changed-pixel bounding box versus the baseline QGIS render. By default it also renders the unchanged style as a QGIS rerender control, so tiny movement can be separated from render noise. Use it to prove actual rendered-pixel ownership after source/crop bbox attribution; a no-op mask means the target layer is not visibly painting that render, and a worsening mask means the removed layer was helping the current QGIS output.
 
+When removal masks prove ownership but not a safe fix, run a style-adjustment probe against the same manifest before changing production preprocessing. The probe reads a JSON plan of named variants and per-layer paint, layout, zoom, or filter overrides, then renders each variant with the same baseline camera and token source:
+
+```json
+{
+  "variants": [
+    {
+      "name": "contour-strong",
+      "adjustments": [
+        {
+          "layer_id": "contour-line-index-minor-z16-plus",
+          "paint": {
+            "line-opacity": 0.68,
+            "line-width": 0.38
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+```bash
+export MAPBOX_ACCESS_TOKEN="***"
+python3 validation/mapbox_outdoors_style_adjustment_probe.py \
+  --baseline-manifest debug/mapbox-outdoors-comparison/zermatt-trails-z18-outdoors/<timestamp>/manifest.json \
+  --variant-json /tmp/zermatt-style-adjustments.json \
+  --crop-box 210,600,630,900 \
+  --crop-box 0,450,420,750
+```
+
+Outputs are written under `debug/mapbox-outdoors-style-adjustment-probe/comparison-camera/<timestamp>/`. Each variant records the adjusted style JSON, fresh QGIS render, Mapbox-vs-QGIS diff, QGIS-baseline movement diff, whole-image metric deltas against both the baseline and rerender control, crop metric deltas, matched/missing adjusted layer IDs, and changed-pixel bounding boxes. Treat this as diagnostic-only evidence; promote a variant only after all-camera validation shows a real improvement without unacceptable regressions.
+
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
 ## Style audit before tuning
