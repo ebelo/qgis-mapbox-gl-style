@@ -886,6 +886,92 @@ def _aggregate_crop_row(row: Mapping[str, object]) -> str:
     )
 
 
+def _count_value(row: Mapping[str, object], key: str) -> int:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return int(value)
+
+
+def _runs_count(row: Mapping[str, object]) -> int:
+    return _count_value(row, "runs")
+
+
+def _improving_runs_count(row: Mapping[str, object]) -> int:
+    return _count_value(row, "improving_runs")
+
+
+def _worsening_runs_count(row: Mapping[str, object]) -> int:
+    return _count_value(row, "worsening_runs")
+
+
+def _is_all_improving(row: Mapping[str, object]) -> bool:
+    runs = _runs_count(row)
+    return runs > 0 and _improving_runs_count(row) == runs
+
+
+def _is_mixed_signal(row: Mapping[str, object]) -> bool:
+    return _improving_runs_count(row) > 0 and _worsening_runs_count(row) > 0
+
+
+def _variant_signal_label(row: Mapping[str, object]) -> str:
+    return (
+        f"`{row.get('variant')}` (`{row.get('delta_source')}`, "
+        f"{_improving_runs_count(row)}/{_runs_count(row)} improving, "
+        f"{_worsening_runs_count(row)}/{_runs_count(row)} worsening)"
+    )
+
+
+def _crop_signal_label(row: Mapping[str, object]) -> str:
+    return (
+        f"`{row.get('variant')}` on `{row.get('camera')}` crop {row.get('crop')} "
+        f"(`{row.get('delta_source')}`, {_improving_runs_count(row)}/{_runs_count(row)} improving, "
+        f"{_worsening_runs_count(row)}/{_runs_count(row)} worsening)"
+    )
+
+
+def _metric_sort_value(row: Mapping[str, object]) -> float:
+    mean_delta = _numeric_metric_value(row, "mean_delta_average") or 0.0
+    rms_delta = _numeric_metric_value(row, "rms_delta_average") or 0.0
+    return mean_delta + rms_delta
+
+
+def _format_limited(labels: Sequence[str], *, limit: int = 5) -> str:
+    if not labels:
+        return "none"
+    visible = list(labels[:limit])
+    if len(labels) > limit:
+        visible.append(f"... {len(labels) - limit} more")
+    return ", ".join(visible)
+
+
+def _aggregate_read_lines(
+    *,
+    totals: Sequence[Mapping[str, object]],
+    crop_rows: Sequence[Mapping[str, object]],
+) -> list[str]:
+    all_improving_totals = [_variant_signal_label(row) for row in totals if _is_all_improving(row)]
+    mixed_totals = [_variant_signal_label(row) for row in totals if _is_mixed_signal(row)]
+    all_improving_crops = [
+        _crop_signal_label(row)
+        for row in sorted(
+            (row for row in crop_rows if _is_all_improving(row)),
+            key=_metric_sort_value,
+        )
+    ]
+    mixed_crops = [_crop_signal_label(row) for row in crop_rows if _is_mixed_signal(row)]
+    return [
+        "",
+        "## Read",
+        "",
+        f"- Whole-image all-improving variants: {_format_limited(all_improving_totals)}.",
+        f"- Whole-image mixed-signal variants: {_format_limited(mixed_totals)}.",
+        f"- Crop rows all-improving: {_format_limited(all_improving_crops)}.",
+        f"- Crop rows mixed-signal: {_format_limited(mixed_crops)}.",
+        "- Treat crop-only wins as diagnostic leads; promote a style change only after camera-matrix validation avoids regressions.",
+    ]
+
+
 def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
     totals = _list_of_mappings(report.get("variant_totals"))
     rows = _list_of_mappings(report.get("rows"))
@@ -924,6 +1010,7 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         lines.extend(_aggregate_crop_row(row) for row in crop_rows)
     else:
         lines.append("| _none_ |  |  | 0 |  | 0 |  |  |  |  |  | 0 | 0 | 0 |")
+    lines.extend(_aggregate_read_lines(totals=totals, crop_rows=crop_rows))
     lines.extend([
         "",
         "## Key",

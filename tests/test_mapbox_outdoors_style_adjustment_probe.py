@@ -520,6 +520,22 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                     "improving_runs": 0,
                     "worsening_runs": 1,
                     "other_runs": 0,
+                },
+                {
+                    "variant": "water-deeper",
+                    "camera": "switzerland-alps-z5-outdoors",
+                    "delta_source": "rerender_control",
+                    "crop": 1,
+                    "crop_box": "[0, 0, 1, 1]",
+                    "runs": 2.0,
+                    "mean_delta_average": -3.0,
+                    "rms_delta_average": -4.0,
+                    "luminance_delta_average": -5.0,
+                    "mean_delta_range": 0.2,
+                    "rms_delta_range": 0.3,
+                    "improving_runs": 2.0,
+                    "worsening_runs": 0.0,
+                    "other_runs": 0,
                 }
             ],
         })
@@ -531,6 +547,18 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         self.assertIn(
             "| `landcover-opacity-70` | `valais-geneva-outdoors` | `rerender_control` | "
             "2 | `[1, 1, 2, 2]` | 1 | 1.000000000 | 2.000000000 | 3.000000000 |",
+            markdown,
+        )
+        self.assertIn("## Read", markdown)
+        self.assertIn(
+            "Whole-image mixed-signal variants: "
+            "`landcover-opacity-70` (`rerender_control`, 1/2 improving, 1/2 worsening).",
+            markdown,
+        )
+        self.assertIn(
+            "Crop rows all-improving: "
+            "`water-deeper` on `switzerland-alps-z5-outdoors` crop 1 "
+            "(`rerender_control`, 2/2 improving, 0/2 worsening).",
             markdown,
         )
         self.assertIn("0.000300000", markdown)
