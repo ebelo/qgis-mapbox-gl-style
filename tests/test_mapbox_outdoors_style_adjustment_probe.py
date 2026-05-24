@@ -14,8 +14,10 @@ from qfit.validation.mapbox_outdoors_style_adjustment_probe import (
     StyleAdjustment,
     StyleAdjustmentProbeConfig,
     apply_style_adjustments,
+    build_style_adjustment_aggregate_report,
     build_style_adjustment_probe_report,
     load_style_adjustment_variants,
+    render_aggregate_markdown_summary,
     render_markdown_summary,
 )
 
@@ -292,6 +294,164 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         self.assertIn("Whole-image mean/RMS improving variants: `contour-strong`.", markdown)
         self.assertIn("Control-adjusted whole-image mean/RMS improving variants: `contour-strong`.", markdown)
 
+    def test_aggregate_report_groups_repeated_variant_camera_deltas(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            first_report = root / "first-style-adjustment-probe.json"
+            second_report = root / "second-style-adjustment-probe.json"
+            third_report = root / "third-style-adjustment-probe.json"
+            first_report.write_text(
+                json.dumps({
+                    "camera": {"name": "valais-geneva-outdoors"},
+                    "rerender_control_variant": "qgis-rerender-control",
+                    "variants": [
+                        {"name": "qgis-rerender-control", "is_rerender_control": True},
+                        {
+                            "name": "landcover-opacity-70",
+                            "is_rerender_control": False,
+                            "metric_delta_vs_rerender_control": {
+                                "normalized_mean_absolute_channel_delta": -0.0001,
+                                "normalized_rms_channel_delta": -0.0002,
+                            },
+                        },
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            second_report.write_text(
+                json.dumps({
+                    "camera": {"name": "valais-geneva-outdoors"},
+                    "rerender_control_variant": "qgis-rerender-control",
+                    "variants": [
+                        {
+                            "name": "landcover-opacity-70",
+                            "is_rerender_control": False,
+                            "metric_delta_vs_rerender_control": {
+                                "normalized_mean_absolute_channel_delta": 0.00005,
+                                "normalized_rms_channel_delta": 0.0001,
+                            },
+                        },
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            third_report.write_text(
+                json.dumps({
+                    "camera": {"name": "geneva-airport-motorway-z14-outdoors"},
+                    "variants": [
+                        {
+                            "name": "landcover-opacity-70",
+                            "metric_delta_vs_rerender_control": {
+                                "normalized_mean_absolute_channel_delta": -0.0002,
+                            },
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": -0.0003,
+                                "normalized_rms_channel_delta": -0.0004,
+                            },
+                        },
+                    ],
+                }),
+                encoding="utf-8",
+            )
+
+            aggregate = build_style_adjustment_aggregate_report(
+                (first_report, second_report, third_report),
+                now=dt.datetime(2026, 5, 24, 15, 0, tzinfo=dt.timezone.utc),
+            )
+
+        rows = {
+            (row["variant"], row["camera"], row["delta_source"]): row
+            for row in aggregate["rows"]
+        }
+        valais_row = rows[("landcover-opacity-70", "valais-geneva-outdoors", "rerender_control")]
+        self.assertEqual(aggregate["generated"], "2026-05-24T15:00:00+00:00")
+        self.assertEqual(valais_row["runs"], 2)
+        self.assertEqual(valais_row["improving_runs"], 1)
+        self.assertEqual(valais_row["worsening_runs"], 1)
+        self.assertAlmostEqual(valais_row["mean_delta_average"], -0.000025)
+        self.assertAlmostEqual(valais_row["rms_delta_range"], 0.0003)
+        self.assertEqual(
+            rows[("landcover-opacity-70", "geneva-airport-motorway-z14-outdoors", "baseline")][
+                "improving_runs"
+            ],
+            1,
+        )
+        total_rows = {
+            (row["variant"], row["delta_source"]): row
+            for row in aggregate["variant_totals"]
+        }
+        valais_total = total_rows[("landcover-opacity-70", "rerender_control")]
+        self.assertEqual(valais_total["runs"], 2)
+        self.assertEqual(valais_total["camera_count"], 1)
+        self.assertAlmostEqual(valais_total["mean_delta_range"], 0.00015)
+
+    def test_aggregate_report_ignores_boolean_metric_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            report_path = root / "style-adjustment-probe.json"
+            report_path.write_text(
+                json.dumps({
+                    "camera": {"name": "unit-camera"},
+                    "variants": [
+                        {
+                            "name": "boolean-noise",
+                            "metric_delta_vs_baseline": {
+                                "normalized_mean_absolute_channel_delta": False,
+                                "normalized_rms_channel_delta": True,
+                            },
+                        }
+                    ],
+                }),
+                encoding="utf-8",
+            )
+
+            aggregate = build_style_adjustment_aggregate_report((report_path,))
+
+        self.assertEqual(aggregate["rows"], [])
+        self.assertEqual(aggregate["variant_totals"], [])
+
+    def test_aggregate_markdown_summary_surfaces_mixed_signal(self):
+        markdown = render_aggregate_markdown_summary({
+            "generated": "2026-05-24T15:00:00+00:00",
+            "input_reports": ["debug/first.json", "debug/second.json"],
+            "variant_totals": [
+                {
+                    "variant": "landcover-opacity-70",
+                    "delta_source": "rerender_control",
+                    "runs": 2,
+                    "camera_count": 1,
+                    "mean_delta_average": -0.000025,
+                    "rms_delta_average": -0.00005,
+                    "mean_delta_range": 0.00015,
+                    "rms_delta_range": 0.0003,
+                    "improving_runs": 1,
+                    "worsening_runs": 1,
+                    "other_runs": 0,
+                }
+            ],
+            "rows": [
+                {
+                    "variant": "landcover-opacity-70",
+                    "camera": "valais-geneva-outdoors",
+                    "delta_source": "rerender_control",
+                    "runs": 2,
+                    "mean_delta_average": -0.000025,
+                    "rms_delta_average": -0.00005,
+                    "mean_delta_range": 0.00015,
+                    "rms_delta_range": 0.0003,
+                    "improving_runs": 1,
+                    "worsening_runs": 1,
+                    "other_runs": 0,
+                }
+            ],
+        })
+
+        self.assertIn("style-adjustment aggregate", markdown)
+        self.assertIn("`landcover-opacity-70`", markdown)
+        self.assertIn("| `landcover-opacity-70` | `valais-geneva-outdoors` |", markdown)
+        self.assertIn("0.000300000", markdown)
+        self.assertIn("## Key", markdown)
+
     def test_main_builds_config_and_prints_latest_summary(self):
         captured = {}
 
@@ -334,7 +494,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                             ])
 
         config = captured["config"]
-        self.assertEqual(result, 0)
+        self.assertIsNone(result)
         self.assertIsInstance(config, StyleAdjustmentProbeConfig)
         self.assertEqual(config.baseline_manifest, root / "manifest.json")
         self.assertEqual(config.output_root, output_root)
@@ -346,6 +506,41 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         self.assertIn("Baseline manifest: debug/manifest.json", stdout.getvalue())
         self.assertIn("Run directory:", stdout.getvalue())
         self.assertIn("Summary:", stdout.getvalue())
+
+    def test_main_aggregate_mode_writes_markdown_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            report_path = root / "style-adjustment-probe.json"
+            output_path = root / "aggregate.md"
+            report_path.write_text(
+                json.dumps({
+                    "camera": {"name": "valais-geneva-outdoors"},
+                    "rerender_control_variant": "qgis-rerender-control",
+                    "variants": [
+                        {
+                            "name": "landcover-opacity-70",
+                            "metric_delta_vs_rerender_control": {
+                                "normalized_mean_absolute_channel_delta": -0.0001,
+                                "normalized_rms_channel_delta": -0.0002,
+                            },
+                        }
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = probe_module.main([
+                    "--aggregate-report",
+                    str(report_path),
+                    "--aggregate-output",
+                    str(output_path),
+                ])
+            output_markdown = output_path.read_text(encoding="utf-8")
+
+        self.assertIsNone(result)
+        self.assertIn("Aggregate summary:", stdout.getvalue())
+        self.assertIn("landcover-opacity-70", output_markdown)
 
 
 if __name__ == "__main__":

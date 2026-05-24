@@ -4,7 +4,6 @@ import argparse
 import dataclasses
 import datetime as dt
 import json
-import sys
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -77,6 +76,10 @@ QGIS_MOVEMENT_DIFF_OUTPUT = "qgis-vs-baseline-diff.png"
 CONTROL_MOVEMENT_DIFF_OUTPUT = "qgis-vs-rerender-control-diff.png"
 REPORT_JSON_OUTPUT = "style-adjustment-probe.json"
 SUMMARY_OUTPUT = "summary.md"
+AGGREGATE_METRIC_KEYS = (
+    "normalized_mean_absolute_channel_delta",
+    "normalized_rms_channel_delta",
+)
 METRIC_KEYS = (
     "changed_pixel_ratio",
     "normalized_mean_absolute_channel_delta",
@@ -545,9 +548,232 @@ def build_style_adjustment_probe_report(
 
 
 def _metric_delta_improves_both(delta: Mapping[str, object]) -> bool:
-    mean_delta = delta.get("normalized_mean_absolute_channel_delta")
-    rms_delta = delta.get("normalized_rms_channel_delta")
-    return isinstance(mean_delta, (int, float)) and mean_delta < 0 and isinstance(rms_delta, (int, float)) and rms_delta < 0
+    mean_delta = _numeric_metric_value(delta, "normalized_mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "normalized_rms_channel_delta")
+    return mean_delta is not None and mean_delta < 0 and rms_delta is not None and rms_delta < 0
+
+
+def _metric_delta_worsens_both(delta: Mapping[str, object]) -> bool:
+    mean_delta = _numeric_metric_value(delta, "normalized_mean_absolute_channel_delta")
+    rms_delta = _numeric_metric_value(delta, "normalized_rms_channel_delta")
+    return mean_delta is not None and mean_delta > 0 and rms_delta is not None and rms_delta > 0
+
+
+def _preferred_aggregate_delta(row: Mapping[str, object]) -> tuple[str | None, Mapping[str, object]]:
+    control_delta = _mapping_value(row.get("metric_delta_vs_rerender_control"))
+    if _has_aggregate_metric_pair(control_delta):
+        return "rerender_control", control_delta
+    baseline_delta = _mapping_value(row.get("metric_delta_vs_baseline"))
+    if _has_aggregate_metric_pair(baseline_delta):
+        return "baseline", baseline_delta
+    return None, {}
+
+
+def _numeric_metric_values(rows: Sequence[Mapping[str, object]], key: str) -> list[float]:
+    values: list[float] = []
+    for row in rows:
+        value = _numeric_metric_value(row, key)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _numeric_metric_value(row: Mapping[str, object], key: str) -> float | None:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _has_aggregate_metric_pair(delta: Mapping[str, object]) -> bool:
+    return all(_numeric_metric_value(delta, key) is not None for key in AGGREGATE_METRIC_KEYS)
+
+
+def _mean_value(values: Sequence[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _metric_range(values: Sequence[float]) -> float | None:
+    return max(values) - min(values) if values else None
+
+
+def _aggregate_metric_rows(rows: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    mean_delta_values = _numeric_metric_values(rows, "normalized_mean_absolute_channel_delta")
+    rms_delta_values = _numeric_metric_values(rows, "normalized_rms_channel_delta")
+    return {
+        "runs": len(rows),
+        "mean_delta_average": _mean_value(mean_delta_values),
+        "mean_delta_min": min(mean_delta_values) if mean_delta_values else None,
+        "mean_delta_max": max(mean_delta_values) if mean_delta_values else None,
+        "mean_delta_range": _metric_range(mean_delta_values),
+        "rms_delta_average": _mean_value(rms_delta_values),
+        "rms_delta_min": min(rms_delta_values) if rms_delta_values else None,
+        "rms_delta_max": max(rms_delta_values) if rms_delta_values else None,
+        "rms_delta_range": _metric_range(rms_delta_values),
+        "improving_runs": sum(1 for row in rows if _metric_delta_improves_both(row)),
+        "worsening_runs": sum(1 for row in rows if _metric_delta_worsens_both(row)),
+    }
+
+
+def _aggregate_other_runs(aggregate: Mapping[str, object]) -> int:
+    return int(aggregate["runs"]) - int(aggregate["improving_runs"]) - int(aggregate["worsening_runs"])
+
+
+def _aggregate_delta_entries(
+    report_path_value: Path,
+) -> tuple[str, list[tuple[str, str, str, Mapping[str, object]]]]:
+    report_path = report_path_value.expanduser().resolve()
+    report = load_json_object(report_path)
+    camera = _mapping_value(report.get("camera"))
+    camera_name = str(camera.get("name") or "(unknown camera)")
+    control_variant_name = report.get("rerender_control_variant")
+    entries: list[tuple[str, str, str, Mapping[str, object]]] = []
+    for variant in _list_of_mappings(report.get("variants")):
+        variant_name = variant.get("name")
+        if not isinstance(variant_name, str) or not variant_name:
+            continue
+        if variant.get("is_rerender_control") is True or variant_name == control_variant_name:
+            continue
+        delta_source, delta = _preferred_aggregate_delta(variant)
+        if delta_source is not None:
+            entries.append((variant_name, camera_name, delta_source, delta))
+    return _repo_relative(report_path), entries
+
+
+def _aggregate_camera_rows(
+    grouped_rows: Mapping[tuple[str, str, str], Sequence[Mapping[str, object]]],
+) -> list[dict[str, object]]:
+    rows = []
+    for variant_name, camera_name, delta_source in sorted(grouped_rows):
+        aggregate = _aggregate_metric_rows(grouped_rows[(variant_name, camera_name, delta_source)])
+        aggregate["variant"] = variant_name
+        aggregate["camera"] = camera_name
+        aggregate["delta_source"] = delta_source
+        aggregate["other_runs"] = _aggregate_other_runs(aggregate)
+        rows.append(aggregate)
+    return rows
+
+
+def _aggregate_variant_totals(
+    grouped_totals: Mapping[tuple[str, str], Sequence[Mapping[str, object]]],
+    total_cameras: Mapping[tuple[str, str], set[str]],
+) -> list[dict[str, object]]:
+    totals = []
+    for variant_name, delta_source in sorted(grouped_totals):
+        total_key = (variant_name, delta_source)
+        aggregate = _aggregate_metric_rows(grouped_totals[total_key])
+        aggregate["variant"] = variant_name
+        aggregate["delta_source"] = delta_source
+        aggregate["camera_count"] = len(total_cameras[total_key])
+        aggregate["other_runs"] = _aggregate_other_runs(aggregate)
+        totals.append(aggregate)
+    return totals
+
+
+def build_style_adjustment_aggregate_report(
+    report_paths: Sequence[Path],
+    *,
+    now: dt.datetime | None = None,
+) -> dict[str, object]:
+    grouped_rows: dict[tuple[str, str, str], list[Mapping[str, object]]] = {}
+    grouped_totals: dict[tuple[str, str], list[Mapping[str, object]]] = {}
+    total_cameras: dict[tuple[str, str], set[str]] = {}
+    input_paths: list[str] = []
+    for report_path_value in report_paths:
+        input_path, entries = _aggregate_delta_entries(report_path_value)
+        input_paths.append(input_path)
+        for variant_name, camera_name, delta_source, delta in entries:
+            grouped_rows.setdefault((variant_name, camera_name, delta_source), []).append(delta)
+            total_key = (variant_name, delta_source)
+            grouped_totals.setdefault(total_key, []).append(delta)
+            total_cameras.setdefault(total_key, set()).add(camera_name)
+
+    generated_at = now or dt.datetime.now(dt.timezone.utc)
+    return {
+        "generated": generated_at.isoformat(timespec="seconds"),
+        "input_reports": input_paths,
+        "rows": _aggregate_camera_rows(grouped_rows),
+        "variant_totals": _aggregate_variant_totals(grouped_totals, total_cameras),
+    }
+
+
+def _aggregate_summary_header_lines(report: Mapping[str, object]) -> list[str]:
+    input_reports = [str(path) for path in report.get("input_reports") or []]
+    lines = [
+        "# Mapbox Outdoors style-adjustment aggregate",
+        "",
+        f"Generated: `{report.get('generated')}`",
+        f"Input reports: `{len(input_reports)}`",
+    ]
+    if input_reports:
+        lines.append("")
+        lines.append("Inputs:")
+        lines.extend(f"- `{path}`" for path in input_reports[:20])
+        if len(input_reports) > 20:
+            lines.append(f"- ... {len(input_reports) - 20} more")
+    return lines
+
+
+def _aggregate_row(row: Mapping[str, object]) -> str:
+    return (
+        f"| `{row.get('variant')}` | `{row.get('camera')}` | `{row.get('delta_source')}` | "
+        f"{row.get('runs')} | "
+        f"{_format_number(row.get('mean_delta_average'))} | "
+        f"{_format_number(row.get('rms_delta_average'))} | "
+        f"{_format_number(row.get('mean_delta_range'))} | "
+        f"{_format_number(row.get('rms_delta_range'))} | "
+        f"{row.get('improving_runs')} | {row.get('worsening_runs')} | {row.get('other_runs')} |"
+    )
+
+
+def _aggregate_total_row(row: Mapping[str, object]) -> str:
+    return (
+        f"| `{row.get('variant')}` | `{row.get('delta_source')}` | "
+        f"{row.get('runs')} | {row.get('camera_count')} | "
+        f"{_format_number(row.get('mean_delta_average'))} | "
+        f"{_format_number(row.get('rms_delta_average'))} | "
+        f"{_format_number(row.get('mean_delta_range'))} | "
+        f"{_format_number(row.get('rms_delta_range'))} | "
+        f"{row.get('improving_runs')} | {row.get('worsening_runs')} | {row.get('other_runs')} |"
+    )
+
+
+def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
+    totals = _list_of_mappings(report.get("variant_totals"))
+    rows = _list_of_mappings(report.get("rows"))
+    lines = _aggregate_summary_header_lines(report)
+    lines.extend([
+        "",
+        "## Variant totals",
+        "",
+        "| Variant | Delta source | Runs | Cameras | Mean delta avg | RMS delta avg | Mean delta range | RMS delta range | Improving | Worsening | Other |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    if totals:
+        lines.extend(_aggregate_total_row(row) for row in totals)
+    else:
+        lines.append("| _none_ |  | 0 | 0 |  |  |  |  | 0 | 0 | 0 |")
+    lines.extend([
+        "",
+        "## Aggregated variant movement",
+        "",
+        "| Variant | Camera | Delta source | Runs | Mean delta avg | RMS delta avg | Mean delta range | RMS delta range | Improving | Worsening | Other |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    if rows:
+        lines.extend(_aggregate_row(row) for row in rows)
+    else:
+        lines.append("| _none_ |  |  | 0 |  |  |  |  | 0 | 0 | 0 |")
+    lines.extend([
+        "",
+        "## Key",
+        "",
+        "- Deltas are grouped by variant and camera, preferring rerender-control deltas when present.",
+        "- Negative mean/RMS averages indicate the variant moved closer to the Mapbox GL reference on average.",
+        "- Non-zero ranges or mixed improving/worsening counts indicate repeated-render or camera-matrix instability.",
+        "",
+    ])
+    return "\n".join(lines)
 
 
 def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
@@ -649,15 +875,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--baseline-manifest",
-        required=True,
         type=Path,
         help="Existing comparison manifest with Mapbox reference, QGIS render, and preprocessed style paths.",
     )
     parser.add_argument(
         "--variant-json",
-        required=True,
         type=Path,
         help="JSON plan containing variants and per-layer paint/layout/zoom/filter adjustments.",
+    )
+    parser.add_argument(
+        "--aggregate-report",
+        action="append",
+        type=Path,
+        default=[],
+        help="Existing style-adjustment-probe.json report to aggregate. Repeat for multiple reports.",
+    )
+    parser.add_argument(
+        "--aggregate-output",
+        type=Path,
+        help="Optional Markdown output path for --aggregate-report mode. Defaults to stdout.",
     )
     parser.add_argument(
         "--crop-box",
@@ -678,8 +914,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def main(argv: Sequence[str] | None = None) -> None:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.aggregate_report:
+        aggregate_report = build_style_adjustment_aggregate_report(tuple(args.aggregate_report))
+        markdown_summary = render_aggregate_markdown_summary(aggregate_report)
+        if args.aggregate_output is not None:
+            output_path = args.aggregate_output.expanduser().resolve()
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(markdown_summary, encoding="utf-8")
+            print(f"Aggregate summary: {_repo_relative(output_path)}")
+        else:
+            print(markdown_summary)
+        return
+    if args.baseline_manifest is None or args.variant_json is None:
+        parser.error("--baseline-manifest and --variant-json are required unless --aggregate-report is provided.")
     token = resolve_mapbox_token(provided_token=args.mapbox_token)
     report = build_style_adjustment_probe_report(
         StyleAdjustmentProbeConfig(
@@ -702,8 +952,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if newest is not None:
         print(f"Run directory: {_repo_relative(newest)}")
         print(f"Summary: {_repo_relative(newest / SUMMARY_OUTPUT)}")
-    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover - CLI entry point
-    sys.exit(main())
+    main()
