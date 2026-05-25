@@ -156,6 +156,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
 
         self.assertEqual(report["decoded_tile_count"], 1)
         self.assertEqual(report["tileset_ids"], ["mapbox.mapbox-streets-v8", "mapbox.mapbox-terrain-v2"])
+        self.assertEqual(report["comparison_summary_run"], {"qgis_runtimes": ["3.34.4-Prizren"]})
         self.assertNotIn("test-token", json.dumps(report))
         self.assertEqual(len(fetched_urls), 1)
         self.assertIn("test-token", fetched_urls[0])
@@ -214,6 +215,21 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertIn("Bbox coverage is a summed upper-bound attribution aid", markdown)
         self.assertIn("QGIS style-layer coverage evaluates camera-zoom-active filters", markdown)
         self.assertIn("QGIS filter missing props reports active style-layer filter properties", markdown)
+        self.assertIn("## Report read", markdown)
+        self.assertIn("| QGIS runtimes | 3.34.4-Prizren |", markdown)
+        self.assertIn(
+            "| Top source overlaps | landuse=0.128 (1 feature), contour=0.000 (2 features) |",
+            markdown,
+        )
+        self.assertIn(
+            (
+                "| Top QGIS style-layer coverage | landuse-park=0.128 (landuse), "
+                "landuse-park-sized=0.128 (landuse), contour-major=0.000 (contour), "
+                "contour-minor=0.000 (contour) |"
+            ),
+            markdown,
+        )
+        self.assertIn("| Zero-overlap source layers | landuse_overlay |", markdown)
         self.assertIn("## QGIS Style-Layer Paint Coverage", markdown)
         self.assertIn(
             "| `landuse` | `landuse-park` | `fill` | 1 | 0.128 | "
@@ -754,6 +770,7 @@ def _write_source_overlap_fixture(root, *, manual_crop_boxes=None, include_camer
         json.dumps(
             {
                 "comparison_summary_json": str(comparison_summary_path),
+                "comparison_summary_run": {"qgis_runtimes": ["3.34.4-Prizren"]},
                 "manual_crop_boxes": manual_crop_boxes,
                 "cameras": (
                     [{"camera": camera_name, "crops": [{"box": [240, 240, 272, 272]}]}]

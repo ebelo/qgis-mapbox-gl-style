@@ -1644,6 +1644,7 @@ def collect_source_crop_overlap_report(
         "tileset_ids": tileset_ids,
         "visual_crop_json": _repo_relative_path(visual_crop_path),
         "comparison_summary_json": _repo_relative_path(comparison_summary_path),
+        "comparison_summary_run": _comparison_summary_run_metadata(visual_crop_report),
         "manifest": _repo_relative_path(manifest_path),
         "qgis_preprocessed_style": _repo_relative_path(style_path),
         "source_layers": list(config.source_layers),
@@ -1850,6 +1851,122 @@ def _format_bounds(bounds: Mapping[str, object]) -> str:
     )
 
 
+def _comparison_summary_run_metadata(report: Mapping[str, object]) -> dict[str, object]:
+    run = report.get("comparison_summary_run")
+    if not isinstance(run, Mapping):
+        return {}
+    qgis_runtimes = run.get("qgis_runtimes")
+    if not isinstance(qgis_runtimes, list):
+        return {}
+    runtime_labels = [str(runtime) for runtime in qgis_runtimes if runtime not in (None, "")]
+    return {"qgis_runtimes": runtime_labels} if runtime_labels else {}
+
+
+def _summary_qgis_runtime_label(report: Mapping[str, object]) -> str:
+    run = report.get("comparison_summary_run")
+    if not isinstance(run, Mapping):
+        return ""
+    qgis_runtimes = run.get("qgis_runtimes")
+    if not isinstance(qgis_runtimes, list):
+        return ""
+    return " | ".join(str(runtime) for runtime in qgis_runtimes if runtime not in (None, ""))
+
+
+def _joined_read_labels(labels: Iterable[str]) -> str:
+    values = [label for label in labels if label]
+    return ", ".join(values) if values else "-"
+
+
+def _feature_count_label(value: object) -> str:
+    count = int(value or 0)
+    return f"{count} {'feature' if count == 1 else 'features'}"
+
+
+def _source_overlap_read_labels(report: Mapping[str, object]) -> list[str]:
+    records = [
+        record
+        for record in report.get("combined_source_layers", [])
+        if isinstance(record, Mapping)
+        and (
+            float(record.get("bbox_crop_coverage_ratio") or 0.0) > 0
+            or int(record.get("overlap_feature_count") or 0) > 0
+        )
+    ]
+    records.sort(
+        key=lambda record: (
+            -float(record.get("bbox_crop_coverage_ratio") or 0.0),
+            -int(record.get("overlap_feature_count") or 0),
+            str(record.get("source_layer") or MISSING_VALUE),
+        )
+    )
+    return [
+        (
+            f"{record.get('source_layer') or MISSING_VALUE}="
+            f"{float(record.get('bbox_crop_coverage_ratio') or 0.0):.3f} "
+            f"({_feature_count_label(record.get('overlap_feature_count'))})"
+        )
+        for record in records[:5]
+    ]
+
+
+def _style_layer_coverage_read_labels(report: Mapping[str, object]) -> list[str]:
+    rows = _style_layer_paint_rows(
+        [
+            record
+            for record in report.get("combined_source_layers", [])
+            if isinstance(record, Mapping)
+        ]
+    )
+    return [
+        f"{row['layer']}={float(row['coverage']):.3f} ({row['source_layer']})"
+        for row in sorted(rows, key=lambda row: (-float(row["coverage"]), str(row["layer"])))[:5]
+    ]
+
+
+def _zero_overlap_source_layer_labels(report: Mapping[str, object]) -> list[str]:
+    return [
+        str(record.get("source_layer") or MISSING_VALUE)
+        for record in report.get("combined_source_layers", [])
+        if isinstance(record, Mapping) and int(record.get("overlap_feature_count") or 0) == 0
+    ][:5]
+
+
+def _markdown_table_row(cells: Iterable[object]) -> str:
+    return "| " + " | ".join(_markdown_cell(cell) for cell in cells) + " |"
+
+
+def _summary_read_lines(report: Mapping[str, object]) -> list[str]:
+    rows: list[list[str]] = []
+    qgis_runtime_label = _summary_qgis_runtime_label(report)
+    if qgis_runtime_label:
+        rows.append(["QGIS runtimes", qgis_runtime_label])
+    source_labels = _source_overlap_read_labels(report)
+    if source_labels:
+        rows.append(["Top source overlaps", _joined_read_labels(source_labels)])
+    style_labels = _style_layer_coverage_read_labels(report)
+    if style_labels:
+        rows.append(["Top QGIS style-layer coverage", _joined_read_labels(style_labels)])
+    zero_overlap_labels = _zero_overlap_source_layer_labels(report)
+    if zero_overlap_labels:
+        rows.append(["Zero-overlap source layers", _joined_read_labels(zero_overlap_labels)])
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Report read",
+        "",
+        (
+            "Condenses the runtime, strongest source-layer bbox overlaps, and strongest "
+            "QGIS style-layer coverage before the full attribution tables."
+        ),
+        "",
+        "| Signal | Read |",
+        "| --- | --- |",
+    ]
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = [
         "# Mapbox Outdoors source/crop overlap",
@@ -1882,12 +1999,15 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
             "filter predicates after missing-property checks are removed, with candidate bbox coverage ratios "
             "attributed by feature-property value."
         ),
+    ]
+    lines.extend(_summary_read_lines(report))
+    lines.extend([
         "",
         "## Combined overlap by source layer",
         "",
         "| Source layer | Tile features | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage | QGIS filter missing props | Types | Index values | Elevation range |",
         "| --- | ---: | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
-    ]
+    ])
     for record in report.get("combined_source_layers", []):
         if not isinstance(record, dict):
             continue
