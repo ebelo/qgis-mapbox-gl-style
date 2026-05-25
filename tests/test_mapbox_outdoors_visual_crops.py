@@ -13,6 +13,7 @@ from tests import _path  # noqa: F401
 from qfit.validation.mapbox_outdoors_visual_crops import (
     VisualCropAnnotationInputs,
     _candidate_source_type_label,
+    _comparison_summary_run_metadata,
     _computed_crop_color_movement_group_records,
     _crop_color_metric,
     _path_pedestrian_focus_coverage_rows,
@@ -185,6 +186,11 @@ def _write_visual_triplet(
                     "browser_reference": str(browser_path),
                     "qgis_vector_render": str(qgis_path),
                     "diff": str(diff_path),
+                },
+                "qgis_runtime": {
+                    "qgis_version": "3.44.0-Solothurn",
+                    "qgis_version_int": 34400,
+                    "qgis_release_name": "Solothurn",
                 },
             }
         ],
@@ -505,6 +511,27 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertEqual(paths.json_path, run_dir / "visual-crops.json")
         self.assertEqual(paths.summary_path, run_dir / "summary.md")
         self.assertEqual(paths.contact_sheet_path, run_dir / "crop-sheet.jpg")
+
+    def test_comparison_summary_run_metadata_records_qgis_runtime_labels(self):
+        metadata = _comparison_summary_run_metadata(
+            {
+                "generated_at": "2026-05-20T20:00:00+00:00",
+                "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                "cameras": [
+                    {"qgis_runtime": {"qgis_version": "3.44.0-Solothurn"}},
+                    {"qgis_runtime": {"qgis_version_int": 0}},
+                    {"qgis_runtime": {"qgis_release_name": "Future"}},
+                    {"qgis_runtime": {}},
+                    {"status": "failed"},
+                ],
+            },
+            Path("debug/comparison/summary.json"),
+        )
+
+        self.assertEqual(
+            metadata["qgis_runtimes"],
+            ["(not captured)", "0", "3.44.0-Solothurn", "Future"],
+        )
 
     def test_parse_crop_size_requires_positive_width_and_height(self):
         self.assertEqual(parse_crop_size("320x240"), (320, 240))
@@ -1854,6 +1881,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "path": "debug/comparison/summary.json",
                     "generated_at": "2026-05-20T20:00:00+00:00",
                     "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                    "qgis_runtimes": ["3.44.0-Solothurn", "3.44.1-Solothurn"],
                 },
                 "crop_size": {"width": 4, "height": 4},
                 "crops_per_camera": 1,
@@ -1892,7 +1920,8 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
         self.assertIn(
             "Comparison summary run: `debug/comparison/summary.json` "
             "(generated_at=2026-05-20T20:00:00+00:00, "
-            "style_url=mapbox://styles/mapbox/outdoors-v12)",
+            "style_url=mapbox://styles/mapbox/outdoors-v12, "
+            "qgis_runtimes=3.44.0-Solothurn | 3.44.1-Solothurn)",
             markdown,
         )
         self.assertIn("zermatt-trails-z18-outdoors", markdown)
@@ -2670,6 +2699,7 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
                     "path": str(summary_path),
                     "generated_at": "2026-05-20T20:00:00+00:00",
                     "style_url": "mapbox://styles/mapbox/outdoors-v12",
+                    "qgis_runtimes": ["3.44.0-Solothurn"],
                 },
             )
             self.assertEqual(

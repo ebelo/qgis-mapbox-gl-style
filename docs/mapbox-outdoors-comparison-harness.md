@@ -139,6 +139,7 @@ python3 validation/mapbox_outdoors_visual_crops.py \
 ```
 
 Manual boxes are recorded in `visual-crops.json`, echoed in the Markdown report header, and marked as `manual` in the crop table's selection column.
+When the comparison summary includes token-free QGIS runtime metadata, visual crop JSON and Markdown reports list the distinct runtime labels in the comparison run header so crop evidence remains comparable after local QGIS upgrades.
 
 When path/pedestrian styling is under review, pass the matching focus report so each crop row is annotated with the strongest per-camera stroke-width, source-capped stroke, pedestrian core/case cap, and dash cues:
 

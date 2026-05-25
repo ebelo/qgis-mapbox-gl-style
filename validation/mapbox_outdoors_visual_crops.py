@@ -23,6 +23,7 @@ try:
         comparison_visual_artifacts_from_summary,
         load_json_object,
     )
+    from .mapbox_outdoors_runtime import format_qgis_runtime_label
 except ImportError:  # pragma: no cover - direct script execution
     from mapbox_outdoors_comparison import build_all_cameras_contact_sheet  # type: ignore[no-redef]
     from mapbox_outdoors_path_pedestrian_focus import (  # type: ignore[no-redef]
@@ -37,6 +38,7 @@ except ImportError:  # pragma: no cover - direct script execution
         comparison_visual_artifacts_from_summary,
         load_json_object,
     )
+    from mapbox_outdoors_runtime import format_qgis_runtime_label  # type: ignore[no-redef]
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-visual-crops"
 DEFAULT_CROP_SIZE = (320, 240)
@@ -52,6 +54,7 @@ DEFAULT_FOCUS_COVERAGE_SAMPLE_LIMIT = 3
 MAX_STYLE_AUDIT_SIMPLIFICATION_VALUE_LENGTH = 96
 MIN_SCORE_FOR_CROP = 1.0
 MAX_OVERLAP_RATIO = 0.35
+QGIS_RUNTIME_NOT_CAPTURED = "(not captured)"
 CROP_IMAGE_COLUMNS = (
     ("browser_reference", "Mapbox GL"),
     ("qgis_vector_render", "QGIS"),
@@ -1912,7 +1915,27 @@ def _comparison_summary_run_metadata(
         value = comparison_summary.get(key)
         if isinstance(value, str) and value:
             run_metadata[key] = value
+    qgis_runtimes = _comparison_summary_qgis_runtime_labels(comparison_summary)
+    if qgis_runtimes:
+        run_metadata["qgis_runtimes"] = qgis_runtimes
     return run_metadata
+
+
+def _comparison_summary_qgis_runtime_labels(
+    comparison_summary: Mapping[str, object],
+) -> list[str]:
+    cameras = comparison_summary.get("cameras")
+    if not isinstance(cameras, list):
+        return []
+    labels = {
+        format_qgis_runtime_label(
+            camera.get("qgis_runtime"),
+            missing_label=QGIS_RUNTIME_NOT_CAPTURED,
+        )
+        for camera in cameras
+        if isinstance(camera, Mapping) and "qgis_runtime" in camera
+    }
+    return sorted(labels)
 
 
 def _format_focus_number(value: object) -> str:
@@ -2110,6 +2133,11 @@ def _comparison_summary_run_markdown(value: object) -> str:
         for key in ("generated_at", "style_url")
         if isinstance((detail_value := value.get(key)), str) and detail_value
     ]
+    qgis_runtimes = value.get("qgis_runtimes")
+    if isinstance(qgis_runtimes, list):
+        runtime_labels = [str(runtime) for runtime in qgis_runtimes if runtime is not None]
+        if runtime_labels:
+            details.append(f"qgis_runtimes={' | '.join(runtime_labels)}")
     suffix = f" ({', '.join(details)})" if details else ""
     return f"`{path_value}`{suffix}"
 
