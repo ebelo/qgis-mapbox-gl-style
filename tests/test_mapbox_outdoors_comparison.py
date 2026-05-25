@@ -45,6 +45,7 @@ from qfit.validation.mapbox_outdoors_comparison import (
     _append_qgis_contour_boundary_generator_label_probe,
     _append_enabled_qgis_contour_label_probes,
     _append_qgis_contour_polygon_label_probe,
+    _format_qgis_runtime,
     _label_setting_value,
     _label_value,
     _load_optional_qgis_runtime_snapshot,
@@ -195,6 +196,12 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
         stderr_text = "".join(call.args[0] for call in stderr_mock.write.call_args_list)
         self.assertIn("QGIS runtime metadata was not written", stderr_text)
+
+    def test_format_qgis_runtime_keeps_zero_version_int(self):
+        self.assertEqual(_format_qgis_runtime({"qgis_version_int": 0}), "0")
+
+    def test_format_qgis_runtime_falls_back_to_release_name(self):
+        self.assertEqual(_format_qgis_runtime({"qgis_release_name": "Future"}), "Future")
 
     def test_load_optional_qgis_runtime_snapshot_ignores_invalid_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:

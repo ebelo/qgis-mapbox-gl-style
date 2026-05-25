@@ -1552,7 +1552,12 @@ def _format_qgis_runtime(value: object) -> str:
     if qgis_version:
         return str(qgis_version)
     qgis_version_int = value.get("qgis_version_int")
-    return str(qgis_version_int) if qgis_version_int else "—"
+    if qgis_version_int is not None:
+        return str(qgis_version_int)
+    qgis_release_name = value.get("qgis_release_name")
+    if qgis_release_name:
+        return str(qgis_release_name)
+    return "—"
 
 
 def _artifact_markdown_path(path_text: object, *, base_dir: Path | None) -> str:
