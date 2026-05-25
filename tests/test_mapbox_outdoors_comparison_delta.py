@@ -22,8 +22,8 @@ from qfit.validation.mapbox_outdoors_comparison_delta import (
 )
 
 
-def _camera_row(camera, *, mean, rms, changed=0.5, status="passed", zoom=14.25):
-    return {
+def _camera_row(camera, *, mean, rms, changed=0.5, status="passed", zoom=14.25, qgis_runtime=None):
+    row = {
         "camera": camera,
         "zoom": zoom,
         "status": status,
@@ -34,6 +34,9 @@ def _camera_row(camera, *, mean, rms, changed=0.5, status="passed", zoom=14.25):
             "normalized_rms_channel_delta": rms,
         },
     }
+    if qgis_runtime is not None:
+        row["qgis_runtime"] = qgis_runtime
+    return row
 
 
 class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
@@ -61,14 +64,38 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
     def test_build_comparison_delta_report_pairs_cameras_and_counts_directions(self):
         baseline = {
             "cameras": [
-                _camera_row("chamonix-trails-z14-outdoors", mean=0.04, rms=0.08, changed=0.95),
-                _camera_row("zermatt-trails-z18-outdoors", mean=0.03, rms=0.09, changed=0.99),
+                _camera_row(
+                    "chamonix-trails-z14-outdoors",
+                    mean=0.04,
+                    rms=0.08,
+                    changed=0.95,
+                    qgis_runtime={"qgis_version": "3.44.0-Solothurn"},
+                ),
+                _camera_row(
+                    "zermatt-trails-z18-outdoors",
+                    mean=0.03,
+                    rms=0.09,
+                    changed=0.99,
+                    qgis_runtime={"qgis_version_int": 33404},
+                ),
             ]
         }
         candidate = {
             "cameras": [
-                _camera_row("chamonix-trails-z14-outdoors", mean=0.035, rms=0.081, changed=0.94),
-                _camera_row("zermatt-trails-z18-outdoors", mean=0.031, rms=0.088, changed=0.99),
+                _camera_row(
+                    "chamonix-trails-z14-outdoors",
+                    mean=0.035,
+                    rms=0.081,
+                    changed=0.94,
+                    qgis_runtime={"qgis_version": "3.44.0-Solothurn"},
+                ),
+                _camera_row(
+                    "zermatt-trails-z18-outdoors",
+                    mean=0.031,
+                    rms=0.088,
+                    changed=0.99,
+                    qgis_runtime={"build_date": "2024-01-01"},
+                ),
             ]
         }
 
@@ -83,6 +110,8 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
         self.assertEqual(report["generated_at"], "20260520T185100Z")
         self.assertEqual(report["baseline_label"], "post-label-cleanups")
         self.assertEqual(report["candidate_label"], "probe")
+        self.assertEqual(report["qgis_runtimes"]["baseline"], ["3.44.0-Solothurn", "33404"])
+        self.assertEqual(report["qgis_runtimes"]["candidate"], ["(not captured)", "3.44.0-Solothurn"])
         self.assertEqual(report["camera_count"], 2)
         self.assertEqual(
             report["summary"],
@@ -110,6 +139,25 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
             ["chamonix-trails-z14-outdoors", "zermatt-trails-z18-outdoors"],
         )
         self.assertAlmostEqual(report["largest_metric_movements"][0]["mean_delta"], -0.005)
+
+    def test_build_comparison_delta_report_skips_unrecognized_runtime_shapes(self):
+        baseline = {
+            "cameras": [
+                _camera_row("zero-runtime", mean=0.04, rms=0.08, qgis_runtime={"qgis_version_int": 0}),
+                _camera_row(
+                    "future-runtime",
+                    mean=0.04,
+                    rms=0.08,
+                    qgis_runtime={"qgis_release_name": "Future"},
+                ),
+            ]
+        }
+        candidate = {"cameras": [_camera_row("zero-runtime", mean=0.03, rms=0.07)]}
+
+        report = build_comparison_delta_report(baseline, candidate)
+
+        self.assertEqual(report["qgis_runtimes"]["baseline"], ["(not captured)", "0"])
+        self.assertEqual(report["qgis_runtimes"]["candidate"], ["(not captured)"])
 
     def test_build_comparison_delta_report_preserves_missing_camera_rows(self):
         report = build_comparison_delta_report(
@@ -211,6 +259,8 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
 
         self.assertIn("# Mapbox Outdoors comparison delta", markdown)
         self.assertIn("Baseline: `baseline`", markdown)
+        self.assertIn("Baseline QGIS runtimes: `(not captured)`", markdown)
+        self.assertIn("Candidate QGIS runtimes: `(not captured)`", markdown)
         self.assertIn("## Largest Metric Movements", markdown)
         self.assertIn(
             "| `camera-a` | 18.00 | -0.010000000 | +0.010000000 | +0.010000000 | "

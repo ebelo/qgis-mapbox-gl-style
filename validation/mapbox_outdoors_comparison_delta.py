@@ -31,6 +31,7 @@ DELTA_METRIC_KEYS = (
 DIRECTION_BUCKETS = ("improved", "worsened", "unchanged", "unknown")
 TOP_MOVEMENT_LIMIT = 5
 DEFAULT_MOVEMENT_THRESHOLD = 0.0
+QGIS_RUNTIME_NOT_CAPTURED = "(not captured)"
 
 
 class ComparisonDeltaPaths(NamedTuple):
@@ -108,6 +109,25 @@ def _row_zoom(row: Mapping[str, object] | None) -> float | None:
     if isinstance(zoom, bool) or not isinstance(zoom, (int, float)):
         return None
     return float(zoom)
+
+
+def _qgis_runtime_label(value: object) -> str:
+    if not isinstance(value, Mapping):
+        return QGIS_RUNTIME_NOT_CAPTURED
+    if not value:
+        return QGIS_RUNTIME_NOT_CAPTURED
+    qgis_version = value.get("qgis_version")
+    if qgis_version:
+        return str(qgis_version)
+    qgis_version_int = value.get("qgis_version_int")
+    if qgis_version_int is not None:
+        return str(qgis_version_int)
+    return QGIS_RUNTIME_NOT_CAPTURED
+
+
+def _qgis_runtime_labels(rows: list[Mapping[str, object]]) -> list[str]:
+    labels = {_qgis_runtime_label(row.get("qgis_runtime")) for row in rows}
+    return sorted(labels)
 
 
 def _ordered_camera_names(
@@ -303,6 +323,10 @@ def build_comparison_delta_report(
         "candidate_label": candidate_label,
         "camera_count": len(rows),
         "movement_threshold": movement_threshold,
+        "qgis_runtimes": {
+            "baseline": _qgis_runtime_labels(baseline_rows),
+            "candidate": _qgis_runtime_labels(candidate_rows),
+        },
         "summary": _direction_counts("mean", mean_directions)
         | _direction_counts("rms", rms_directions),
         "cameras": rows,
@@ -426,8 +450,17 @@ def _append_largest_metric_movements_section(lines: list[str], report: Mapping[s
     lines.append("")
 
 
+def _qgis_runtime_line(label: str, runtimes: object) -> str:
+    if not isinstance(runtimes, list):
+        return f"{label} QGIS runtimes: `{QGIS_RUNTIME_NOT_CAPTURED}`"
+    runtime_values = [str(runtime) for runtime in runtimes]
+    runtime_text = ", ".join(runtime_values) if runtime_values else QGIS_RUNTIME_NOT_CAPTURED
+    return f"{label} QGIS runtimes: `{runtime_text}`"
+
+
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     summary = report.get("summary") if isinstance(report.get("summary"), Mapping) else {}
+    qgis_runtimes = report.get("qgis_runtimes") if isinstance(report.get("qgis_runtimes"), Mapping) else {}
     lines = [
         "# Mapbox Outdoors comparison delta",
         "",
@@ -435,6 +468,8 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
         "",
         f"Baseline: `{report.get('baseline_label', 'baseline')}`",
         f"Candidate: `{report.get('candidate_label', 'candidate')}`",
+        _qgis_runtime_line("Baseline", qgis_runtimes.get("baseline")),
+        _qgis_runtime_line("Candidate", qgis_runtimes.get("candidate")),
         "",
     ]
     _append_input_artifacts_section(lines, report)
