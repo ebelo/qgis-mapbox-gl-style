@@ -71,6 +71,9 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         self.assertEqual(adjustment.layout["line-cap"], "round")
         self.assertEqual(adjustment.minzoom, 16.0)
 
+    def test_format_qgis_runtime_keeps_zero_version_int(self):
+        self.assertEqual(probe_module._format_qgis_runtime({"qgis_version_int": 0}), "0")
+
     def test_load_style_adjustment_variants_rejects_empty_adjustments(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "variants.json"
@@ -150,6 +153,11 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                         "normalized_mean_absolute_channel_delta": 0.10,
                         "normalized_rms_channel_delta": 0.20,
                         "changed_pixel_ratio": 0.30,
+                    },
+                    "qgis_runtime": {
+                        "qgis_version": "3.44.0-Solothurn",
+                        "qgis_version_int": 34400,
+                        "qgis_release_name": "Solothurn",
                     },
                 }),
                 encoding="utf-8",
@@ -232,6 +240,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
             control = report["variants"][0]
             variant = report["variants"][1]
             self.assertEqual(report["generated"], "2026-05-24T14:30:00+00:00")
+            self.assertEqual(report["qgis_runtime"]["qgis_version"], "3.44.0-Solothurn")
             self.assertTrue(control["is_rerender_control"])
             self.assertFalse(variant["is_rerender_control"])
             self.assertEqual(variant["matched_layer_ids"], ["contour-minor"])
@@ -256,12 +265,15 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                 / "summary.md"
             )
             self.assertTrue(summary_path.exists())
-            self.assertIn("style-adjustment probe", summary_path.read_text(encoding="utf-8"))
+            summary_text = summary_path.read_text(encoding="utf-8")
+            self.assertIn("style-adjustment probe", summary_text)
+            self.assertIn("QGIS runtime: `3.44.0-Solothurn`", summary_text)
 
     def test_markdown_summary_lists_improving_variants(self):
         markdown = render_markdown_summary({
             "generated": "2026-05-24T14:30:00+00:00",
             "camera": {"name": "unit-camera"},
+            "qgis_runtime": {"qgis_version": "3.44.0-Solothurn"},
             "inputs": {"baseline_manifest": "debug/manifest.json"},
             "baseline": {"metrics": {"normalized_mean_absolute_channel_delta": 0.1}},
             "crop_boxes": [[0, 0, 1, 1], [1, 1, 2, 2]],
@@ -305,6 +317,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         })
 
         self.assertIn("## Crop movement", markdown)
+        self.assertIn("QGIS runtime: `3.44.0-Solothurn`", markdown)
         self.assertIn(
             "| `contour-strong` | 2 | `[1, 1, 2, 2]` | 4.000000000 | 5.000000000 | "
             "6.000000000 | 4.500000000 | 5.500000000 |",
@@ -319,9 +332,12 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
             first_report = root / "first-style-adjustment-probe.json"
             second_report = root / "second-style-adjustment-probe.json"
             third_report = root / "third-style-adjustment-probe.json"
+            legacy_report = root / "legacy-style-adjustment-probe.json"
+            unrecognized_runtime_report = root / "unrecognized-runtime-style-adjustment-probe.json"
             first_report.write_text(
                 json.dumps({
                     "camera": {"name": "valais-geneva-outdoors"},
+                    "qgis_runtime": {"qgis_version": "3.44.0-Solothurn"},
                     "rerender_control_variant": "qgis-rerender-control",
                     "crop_boxes": [[0, 0, 1, 1], [1, 1, 2, 2]],
                     "variants": [
@@ -353,6 +369,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
             second_report.write_text(
                 json.dumps({
                     "camera": {"name": "valais-geneva-outdoors"},
+                    "qgis_runtime": {"qgis_version": "3.44.0-Solothurn"},
                     "rerender_control_variant": "qgis-rerender-control",
                     "crop_boxes": [[0, 0, 1, 1], [1, 1, 2, 2]],
                     "variants": [
@@ -378,6 +395,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
             third_report.write_text(
                 json.dumps({
                     "camera": {"name": "geneva-airport-motorway-z14-outdoors"},
+                    "qgis_runtime": {"qgis_version_int": 33404},
                     "variants": [
                         {
                             "name": "landcover-opacity-70",
@@ -393,9 +411,30 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
+            legacy_report.write_text(
+                json.dumps({
+                    "camera": {"name": "legacy-camera"},
+                    "variants": [],
+                }),
+                encoding="utf-8",
+            )
+            unrecognized_runtime_report.write_text(
+                json.dumps({
+                    "camera": {"name": "future-camera"},
+                    "qgis_runtime": {"qgis_release_name": "Future"},
+                    "variants": [],
+                }),
+                encoding="utf-8",
+            )
 
             aggregate = build_style_adjustment_aggregate_report(
-                (first_report, second_report, third_report),
+                (
+                    first_report,
+                    second_report,
+                    third_report,
+                    legacy_report,
+                    unrecognized_runtime_report,
+                ),
                 now=dt.datetime(2026, 5, 24, 15, 0, tzinfo=dt.timezone.utc),
             )
 
@@ -405,6 +444,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         }
         valais_row = rows[("landcover-opacity-70", "valais-geneva-outdoors", "rerender_control")]
         self.assertEqual(aggregate["generated"], "2026-05-24T15:00:00+00:00")
+        self.assertEqual(aggregate["qgis_runtimes"], ["(not captured)", "3.44.0-Solothurn", "33404"])
         self.assertEqual(valais_row["runs"], 2)
         self.assertEqual(valais_row["improving_runs"], 1)
         self.assertEqual(valais_row["worsening_runs"], 1)
@@ -474,6 +514,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         markdown = render_aggregate_markdown_summary({
             "generated": "2026-05-24T15:00:00+00:00",
             "input_reports": ["debug/first.json", "debug/second.json"],
+            "qgis_runtimes": ["3.44.0-Solothurn"],
             "variant_totals": [
                 {
                     "variant": "landcover-opacity-70",
@@ -541,6 +582,7 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
         })
 
         self.assertIn("style-adjustment aggregate", markdown)
+        self.assertIn("QGIS runtimes: `3.44.0-Solothurn`", markdown)
         self.assertIn("`landcover-opacity-70`", markdown)
         self.assertIn("| `landcover-opacity-70` | `valais-geneva-outdoors` |", markdown)
         self.assertIn("## Aggregated crop movement", markdown)

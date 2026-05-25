@@ -137,6 +137,30 @@ def _optional_zoom(value: object, *, label: str) -> float | None:
     return float(value)
 
 
+def _qgis_runtime_from_mapping(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _qgis_runtime_version_label(value: object) -> str | None:
+    runtime = _qgis_runtime_from_mapping(value)
+    qgis_version = runtime.get("qgis_version")
+    if qgis_version:
+        return str(qgis_version)
+    qgis_version_int = runtime.get("qgis_version_int")
+    return str(qgis_version_int) if qgis_version_int is not None else None
+
+
+def _format_qgis_runtime(value: object) -> str:
+    return _qgis_runtime_version_label(value) or "(not captured)"
+
+
+def _aggregate_qgis_runtime_label(value: object) -> str | None:
+    runtime = _qgis_runtime_from_mapping(value)
+    if not runtime:
+        return "(not captured)"
+    return _qgis_runtime_version_label(runtime)
+
+
 def _style_adjustment_from_json(value: object, *, variant_name: str) -> StyleAdjustment:
     adjustment = _require_mapping(value, label=f"variant {variant_name} adjustment")
     layer_id = adjustment.get("layer_id")
@@ -528,6 +552,7 @@ def build_style_adjustment_probe_report(
     report: dict[str, object] = {
         "generated": generated_at.isoformat(timespec="seconds"),
         "camera": dataclasses.asdict(camera),
+        "qgis_runtime": _qgis_runtime_from_mapping(manifest.get("qgis_runtime")),
         "rerender_control_variant": control_name if config.include_rerender_control else None,
         "inputs": {
             "baseline_manifest": _repo_relative(manifest_path),
@@ -717,6 +742,7 @@ def _aggregate_delta_entries(
     report_path_value: Path,
 ) -> tuple[
     str,
+    str,
     list[tuple[str, str, str, Mapping[str, object]]],
     list[tuple[str, str, str, int, str, Mapping[str, object]]],
 ]:
@@ -724,6 +750,7 @@ def _aggregate_delta_entries(
     report = load_json_object(report_path)
     camera = _mapping_value(report.get("camera"))
     camera_name = str(camera.get("name") or "(unknown camera)")
+    qgis_runtime_label = _aggregate_qgis_runtime_label(report.get("qgis_runtime"))
     control_variant_name = report.get("rerender_control_variant")
     crop_boxes = report.get("crop_boxes")
     entries: list[tuple[str, str, str, Mapping[str, object]]] = []
@@ -747,7 +774,7 @@ def _aggregate_delta_entries(
                 variant=variant,
             )
         )
-    return _repo_relative(report_path), entries, crop_entries
+    return _repo_relative(report_path), qgis_runtime_label, entries, crop_entries
 
 
 def _aggregate_camera_rows(
@@ -808,9 +835,12 @@ def build_style_adjustment_aggregate_report(
     grouped_crop_rows: dict[tuple[str, str, str, int, str], list[Mapping[str, object]]] = {}
     total_cameras: dict[tuple[str, str], set[str]] = {}
     input_paths: list[str] = []
+    qgis_runtimes: set[str] = set()
     for report_path_value in report_paths:
-        input_path, entries, crop_entries = _aggregate_delta_entries(report_path_value)
+        input_path, qgis_runtime_label, entries, crop_entries = _aggregate_delta_entries(report_path_value)
         input_paths.append(input_path)
+        if qgis_runtime_label is not None:
+            qgis_runtimes.add(qgis_runtime_label)
         for variant_name, camera_name, delta_source, delta in entries:
             grouped_rows.setdefault((variant_name, camera_name, delta_source), []).append(delta)
             total_key = (variant_name, delta_source)
@@ -826,6 +856,7 @@ def build_style_adjustment_aggregate_report(
     return {
         "generated": generated_at.isoformat(timespec="seconds"),
         "input_reports": input_paths,
+        "qgis_runtimes": sorted(qgis_runtimes),
         "rows": _aggregate_camera_rows(grouped_rows),
         "variant_totals": _aggregate_variant_totals(grouped_totals, total_cameras),
         "crop_rows": _aggregate_crop_rows(grouped_crop_rows),
@@ -834,11 +865,13 @@ def build_style_adjustment_aggregate_report(
 
 def _aggregate_summary_header_lines(report: Mapping[str, object]) -> list[str]:
     input_reports = [str(path) for path in report.get("input_reports") or []]
+    qgis_runtimes = [str(runtime) for runtime in report.get("qgis_runtimes") or []]
     lines = [
         "# Mapbox Outdoors style-adjustment aggregate",
         "",
         f"Generated: `{report.get('generated')}`",
         f"Input reports: `{len(input_reports)}`",
+        f"QGIS runtimes: `{', '.join(qgis_runtimes) if qgis_runtimes else '(not captured)'}`",
     ]
     if input_reports:
         lines.append("")
@@ -1082,6 +1115,7 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
         "",
         f"Generated: `{report.get('generated')}`",
         f"Camera: `{camera.get('name')}`",
+        f"QGIS runtime: `{_format_qgis_runtime(report.get('qgis_runtime'))}`",
         "",
         "Inputs:",
     ]
