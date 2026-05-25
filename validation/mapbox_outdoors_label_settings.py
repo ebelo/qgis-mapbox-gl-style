@@ -11,8 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
-from qfit.validation.mapbox_outdoors_runtime import format_qgis_runtime_label
-from qfit.validation.mapbox_outdoors_runtime import qgis_runtime_snapshot
+try:
+    from qfit.validation.mapbox_outdoors_runtime import format_qgis_runtime_label
+    from qfit.validation.mapbox_outdoors_runtime import qgis_runtime_snapshot
+except ImportError:  # pragma: no cover - direct script execution
+    from mapbox_outdoors_runtime import format_qgis_runtime_label  # type: ignore[no-redef]
+    from mapbox_outdoors_runtime import qgis_runtime_snapshot  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = REPO_ROOT.parent
