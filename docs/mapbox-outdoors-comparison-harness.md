@@ -209,7 +209,7 @@ python3 validation/mapbox_outdoors_rendered_layer_mask.py \
   --variant commercial-area=landuse-other-z8-to-z10-commercial-area-low-zoom,landuse-other-z10-plus-commercial-area-low-zoom,landuse-other-z10-plus-commercial-area-high-zoom
 ```
 
-The probe reuses the baseline manifest's token-free Mapbox reference, QGIS render, and QGIS-preprocessed style. Each variant writes a transparent-mask style JSON, a fresh QGIS render, a Mapbox-vs-QGIS diff, a QGIS-baseline movement diff, whole-image metrics, optional crop metrics, matched/missing target layer IDs, and changed-pixel bounding boxes versus the baseline QGIS render. By default it also renders the unchanged style as a QGIS rerender control, so tiny movement can be separated from render noise. Non-control variants include whole-image and crop deltas against that rerender control; prefer those columns when deciding whether a mask identifies true rendered-pixel ownership. Use the probe after source/crop bbox attribution; a no-op mask means the target layer is not visibly painting that render, and a worsening mask means the removed layer was helping the current QGIS output.
+The probe reuses the baseline manifest's token-free Mapbox reference, QGIS render, QGIS runtime metadata, and QGIS-preprocessed style. Each variant writes a transparent-mask style JSON, a fresh QGIS render, a Mapbox-vs-QGIS diff, a QGIS-baseline movement diff, whole-image metrics, optional crop metrics, matched/missing target layer IDs, and changed-pixel bounding boxes versus the baseline QGIS render. By default it also renders the unchanged style as a QGIS rerender control, so tiny movement can be separated from render noise. Non-control variants include whole-image and crop deltas against that rerender control; prefer those columns when deciding whether a mask identifies true rendered-pixel ownership. Use the probe after source/crop bbox attribution; a no-op mask means the target layer is not visibly painting that render, and a worsening mask means the removed layer was helping the current QGIS output.
 
 To compare rendered-owner masks across cameras, aggregate the generated `summary.json` files:
 
@@ -220,7 +220,7 @@ python3 validation/mapbox_outdoors_rendered_layer_mask.py \
   --aggregate-output /tmp/rendered-mask-aggregate.md
 ```
 
-The aggregate report summarizes whole-image movement with the delta source used for each row, crop movement against the rerender control, mixed-camera variants, non-control-only crop improvements, and control-only crop improvements. Treat all-improving rows as leads for a follow-up style-adjustment probe, not as automatic approval for a production paint change.
+The aggregate report summarizes whole-image movement with the delta source used for each row, crop movement against the rerender control, distinct QGIS runtimes from the input reports, mixed-camera variants, non-control-only crop improvements, and control-only crop improvements. Treat all-improving rows as leads for a follow-up style-adjustment probe, not as automatic approval for a production paint change.
 
 When removal masks prove ownership but not a safe fix, run a style-adjustment probe against the same manifest before changing production preprocessing. The probe reads a JSON plan of named variants and per-layer paint, layout, zoom, or filter overrides, then renders each variant with the same baseline camera and token source:
 
