@@ -1701,7 +1701,7 @@ def _format_property_coverage(record: Mapping[str, object], key: str) -> str:
     if not isinstance(value_areas, dict) or not value_areas:
         return "-"
     return ", ".join(
-        f"{value}={float(area_record.get('crop_coverage_ratio', 0.0)):.3f}"
+        f"{value}={_format_coverage(area_record.get('crop_coverage_ratio', 0.0))}"
         for value, area_record in value_areas.items()
         if isinstance(area_record, dict)
     )
@@ -2208,6 +2208,7 @@ def _camera_source_row(
         "overlap_feature_count": _int_value(record.get("overlap_feature_count")),
         "bbox_crop_coverage_ratio": _float_value(record.get("bbox_crop_coverage_ratio")),
         "classes": _format_property_counts(record, "class"),
+        "class_coverage": _format_property_coverage(record, "class"),
         "qgis_style_layer_coverage": _format_style_layer_matches(record),
     }
 
@@ -2413,6 +2414,7 @@ def _aggregate_camera_source_row(row: Mapping[str, object]) -> str:
             row.get("overlap_feature_count"),
             _format_coverage(row.get("bbox_crop_coverage_ratio")),
             row.get("classes") or "-",
+            row.get("class_coverage") or "-",
             row.get("qgis_style_layer_coverage") or "-",
         ]
     )
@@ -2522,10 +2524,10 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         "",
         "## Per-camera source overlap",
         "",
-        "| Camera | Zoom | Source layer | Overlap features | Bbox crop coverage | Classes | QGIS style-layer coverage |",
-        "| --- | ---: | --- | ---: | ---: | --- | --- |",
+        "| Camera | Zoom | Source layer | Overlap features | Bbox crop coverage | Classes | Class coverage | QGIS style-layer coverage |",
+        "| --- | ---: | --- | ---: | ---: | --- | --- | --- |",
     ])
-    lines.extend(_aggregate_camera_source_row(row) for row in camera_rows) if camera_rows else lines.append("| _none_ | | | 0 | 0 | | |")
+    lines.extend(_aggregate_camera_source_row(row) for row in camera_rows) if camera_rows else lines.append("| _none_ | | | 0 | 0 | | | |")
     lines.append("")
     return "\n".join(lines)
 

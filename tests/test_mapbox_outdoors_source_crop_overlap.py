@@ -713,7 +713,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertIn("| `landuse` | `landuse-green` | `fill` | 2 | 2 | 7 | 2.250 | 1.500 |", markdown)
         self.assertIn(
             "| `geneva-airport-motorway-z14-outdoors` | 14 | `landuse` | 7 | 2.500 | "
-            "park=3, grass=2 | landuse-green=1.500, landuse-other=0.250 |",
+            "park=3, grass=2 | park=1.400, grass=1.100 | landuse-green=1.500, landuse-other=0.250 |",
             markdown,
         )
         self.assertIn("Top source-layer bbox coverage sums: landuse=3.750", markdown)
@@ -752,7 +752,7 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn("Aggregate summary:", stdout.getvalue())
         self.assertIn("source/crop overlap aggregate", output_markdown)
-        self.assertIn("| `unit-camera` | 10 | `landuse` | 1 | 0.500 | park=1 | - |", output_markdown)
+        self.assertIn("| `unit-camera` | 10 | `landuse` | 1 | 0.500 | park=1 | - | - |", output_markdown)
 
     def test_aggregate_class_readout_handles_non_numeric_coverage_values(self):
         markdown = render_aggregate_markdown_summary({
@@ -778,6 +778,33 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
 
         self.assertIn("Top source-layer class coverage sums: landuse: park=0.750, bad=-.", markdown)
         self.assertIn("| `landuse` | 1 | 1 | 2 | 1.000 | 1.000 | 0 | park=0.750, bad=- |", markdown)
+
+    def test_aggregate_camera_class_coverage_handles_non_numeric_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = _write_aggregate_source_overlap_report(
+                root / "source-crop-overlap.json",
+                camera="unit-camera",
+                camera_zoom=10.0,
+                qgis_runtimes=["3.34.4-Prizren"],
+                source_layers=[
+                    _aggregate_source_layer(
+                        "landuse",
+                        overlap_feature_count=2,
+                        coverage=1.0,
+                        classes={"park": 1, "bad": 1},
+                        class_coverage={"park": 0.75, "bad": "not-a-number"},
+                    )
+                ],
+            )
+
+            aggregate = build_source_crop_overlap_aggregate_report((report_path,))
+            markdown = render_aggregate_markdown_summary(aggregate)
+
+        self.assertIn(
+            "| `unit-camera` | 10 | `landuse` | 2 | 1.000 | park=1, bad=1 | park=0.750, bad=- | - |",
+            markdown,
+        )
 
     def test_collect_report_requires_crop_boxes_for_camera(self):
         with tempfile.TemporaryDirectory() as tmp:
