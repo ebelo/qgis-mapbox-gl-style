@@ -43,9 +43,11 @@ from qfit.validation.mapbox_outdoors_comparison import (
     _append_qgis_contour_bbox_edge_difference_source_style_label_probe,
     _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe,
     _append_qgis_contour_boundary_generator_label_probe,
+    _append_enabled_qgis_contour_label_probes,
     _append_qgis_contour_polygon_label_probe,
     _label_setting_value,
     _label_value,
+    _load_optional_qgis_runtime_snapshot,
     build_all_cameras_contact_sheet,
     build_comparison_paths,
     build_image_diff,
@@ -59,6 +61,7 @@ from qfit.validation.mapbox_outdoors_comparison import (
     is_valid_qgis_vector_tile_layer,
     list_cameras,
     load_style_definition,
+    qgis_runtime_snapshot,
     qgis_label_styles_snapshot,
     redact_sensitive_text,
     render_browser_reference,
@@ -66,6 +69,8 @@ from qfit.validation.mapbox_outdoors_comparison import (
     resolve_mapbox_token,
     run_comparison,
     write_qgis_label_styles_snapshot,
+    write_qgis_core_runtime_snapshot,
+    write_qgis_runtime_snapshot,
 )
 
 
@@ -131,7 +136,115 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(paths.metrics_json, Path("/tmp/run/metrics.json"))
         self.assertEqual(paths.qgis_preprocessed_style_json, Path("/tmp/run/qgis-preprocessed-style.json"))
         self.assertEqual(paths.qgis_label_styles_json, Path("/tmp/run/qgis-label-styles.json"))
+        self.assertEqual(paths.qgis_runtime_json, Path("/tmp/run/qgis-runtime.json"))
         self.assertEqual(paths.manifest_json, Path("/tmp/run/manifest.json"))
+
+    def test_qgis_runtime_snapshot_records_version_metadata(self):
+        fake_qgis = types.SimpleNamespace(
+            QGIS_VERSION="3.44.0-Solothurn",
+            QGIS_VERSION_INT=34400,
+            QGIS_RELEASE_NAME="Solothurn",
+        )
+
+        self.assertEqual(
+            qgis_runtime_snapshot(fake_qgis),
+            {
+                "qgis_version": "3.44.0-Solothurn",
+                "qgis_version_int": 34400,
+                "qgis_release_name": "Solothurn",
+            },
+        )
+
+    def test_write_qgis_runtime_snapshot_writes_json_and_allows_noop(self):
+        fake_qgis = types.SimpleNamespace(QGIS_VERSION="3.44.0-Solothurn")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "qgis-runtime.json"
+
+            write_qgis_runtime_snapshot(qgis_api=fake_qgis, output_path=output_path)
+            write_qgis_runtime_snapshot(qgis_api=fake_qgis, output_path=None)
+
+            runtime = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(runtime["qgis_version"], "3.44.0-Solothurn")
+        self.assertIsNone(runtime["qgis_version_int"])
+
+    def test_write_qgis_core_runtime_snapshot_uses_loaded_qgis_module(self):
+        fake_qgis = types.SimpleNamespace(
+            QGIS_VERSION="3.44.0-Solothurn",
+            QGIS_VERSION_INT=34400,
+            QGIS_RELEASE_NAME="Solothurn",
+        )
+        fake_core = types.SimpleNamespace(Qgis=fake_qgis)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "qgis-runtime.json"
+            with patch.dict(sys.modules, {"qgis.core": fake_core}):
+                write_qgis_core_runtime_snapshot(output_path=output_path)
+            runtime = json.loads(output_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(runtime["qgis_release_name"], "Solothurn")
+
+    def test_write_qgis_core_runtime_snapshot_ignores_write_failures(self):
+        fake_qgis = types.SimpleNamespace(QGIS_VERSION="3.44.0-Solothurn")
+        fake_core = types.SimpleNamespace(Qgis=fake_qgis)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(sys.modules, {"qgis.core": fake_core}), patch("sys.stderr") as stderr_mock:
+                write_qgis_core_runtime_snapshot(output_path=Path(tmpdir))
+
+        stderr_text = "".join(call.args[0] for call in stderr_mock.write.call_args_list)
+        self.assertIn("QGIS runtime metadata was not written", stderr_text)
+
+    def test_load_optional_qgis_runtime_snapshot_ignores_invalid_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            valid_path = root / "valid.json"
+            invalid_path = root / "invalid.json"
+            non_object_path = root / "non-object.json"
+            missing_path = root / "missing.json"
+            valid_path.write_text(json.dumps({"qgis_version": "3.44.0-Solothurn"}), encoding="utf-8")
+            invalid_path.write_text("{", encoding="utf-8")
+            non_object_path.write_text("[]", encoding="utf-8")
+
+            self.assertEqual(
+                _load_optional_qgis_runtime_snapshot(valid_path),
+                {"qgis_version": "3.44.0-Solothurn"},
+            )
+            self.assertEqual(_load_optional_qgis_runtime_snapshot(invalid_path), {})
+            self.assertEqual(_load_optional_qgis_runtime_snapshot(non_object_path), {})
+            self.assertEqual(_load_optional_qgis_runtime_snapshot(missing_path), {})
+
+    def test_append_enabled_qgis_contour_label_probes_routes_flags(self):
+        layer = object()
+
+        with patch(
+            "qfit.validation.mapbox_outdoors_comparison._append_qgis_contour_polygon_label_probe"
+        ) as polygon_probe, patch(
+            "qfit.validation.mapbox_outdoors_comparison._append_qgis_contour_boundary_generator_label_probe"
+        ) as boundary_probe, patch(
+            "qfit.validation.mapbox_outdoors_comparison._append_qgis_contour_bbox_edge_difference_label_probe"
+        ) as bbox_probe, patch(
+            "qfit.validation.mapbox_outdoors_comparison."
+            "_append_qgis_contour_bbox_edge_difference_source_style_label_probe"
+        ) as source_probe, patch(
+            "qfit.validation.mapbox_outdoors_comparison."
+            "_append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe"
+        ) as high_zoom_probe:
+            _append_enabled_qgis_contour_label_probes(
+                layer,
+                qgis_contour_polygon_label_probe=True,
+                qgis_contour_boundary_generator_label_probe=False,
+                qgis_contour_bbox_edge_difference_label_probe=True,
+                qgis_contour_bbox_edge_difference_source_style_label_probe=False,
+                qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=True,
+            )
+
+        polygon_probe.assert_called_once_with(layer)
+        boundary_probe.assert_not_called()
+        bbox_probe.assert_called_once_with(layer)
+        source_probe.assert_not_called()
+        high_zoom_probe.assert_called_once_with(layer)
 
     def test_resolve_token_prefers_argument_then_environment(self):
         self.assertEqual(
@@ -1334,10 +1447,27 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         def fake_browser_renderer(*, output_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
 
-        def fake_qgis_renderer(*, output_path, qgis_preprocessed_style_path, qgis_label_styles_path, **_kwargs):
+        def fake_qgis_renderer(
+            *,
+            output_path,
+            qgis_preprocessed_style_path,
+            qgis_label_styles_path,
+            qgis_runtime_path,
+            **_kwargs,
+        ):
             output_path.write_bytes(PNG_PLACEHOLDER)
             qgis_preprocessed_style_path.write_text(json.dumps(SAMPLE_STYLE), encoding="utf-8")
             qgis_label_styles_path.write_text(json.dumps([{"style_name": "contour-label"}]), encoding="utf-8")
+            qgis_runtime_path.write_text(
+                json.dumps(
+                    {
+                        "qgis_version": "3.44.0-Solothurn",
+                        "qgis_version_int": 34400,
+                        "qgis_release_name": "Solothurn",
+                    }
+                ),
+                encoding="utf-8",
+            )
 
         def fake_diff_builder(*, output_path, **_kwargs):
             output_path.write_bytes(PNG_PLACEHOLDER)
@@ -1361,12 +1491,14 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             metrics = json.loads(result.paths.metrics_json.read_text(encoding="utf-8"))
             preprocessed_style = json.loads(result.paths.qgis_preprocessed_style_json.read_text(encoding="utf-8"))
             label_styles = json.loads(result.paths.qgis_label_styles_json.read_text(encoding="utf-8"))
+            qgis_runtime = json.loads(result.paths.qgis_runtime_json.read_text(encoding="utf-8"))
 
         self.assertTrue(result.browser_captured)
         self.assertTrue(result.qgis_captured)
         self.assertTrue(result.diff_captured)
         self.assertTrue(result.qgis_preprocessed_style_captured)
         self.assertTrue(result.qgis_label_styles_captured)
+        self.assertTrue(result.qgis_runtime_captured)
         self.assertNotIn("test-mapbox-token", manifest_text)
         self.assertEqual(manifest["camera"]["name"], "valais-geneva-outdoors")
         self.assertEqual(manifest["style_url"], "mapbox://styles/mapbox/outdoors-v12")
@@ -1375,12 +1507,16 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(manifest["captured"]["diff"])
         self.assertTrue(manifest["captured"]["qgis_preprocessed_style"])
         self.assertTrue(manifest["captured"]["qgis_label_styles"])
+        self.assertTrue(manifest["captured"]["qgis_runtime"])
         self.assertTrue(manifest["outputs"]["qgis_preprocessed_style"].endswith("qgis-preprocessed-style.json"))
         self.assertTrue(manifest["outputs"]["qgis_label_styles"].endswith("qgis-label-styles.json"))
+        self.assertTrue(manifest["outputs"]["qgis_runtime"].endswith("qgis-runtime.json"))
         self.assertEqual(manifest["metrics"]["changed_pixel_ratio"], 0.25)
+        self.assertEqual(manifest["qgis_runtime"]["qgis_version"], "3.44.0-Solothurn")
         self.assertEqual(metrics["changed_pixel_ratio"], 0.25)
         self.assertEqual(preprocessed_style, SAMPLE_STYLE)
         self.assertEqual(label_styles, [{"style_name": "contour-label"}])
+        self.assertEqual(qgis_runtime["qgis_version_int"], 34400)
 
     def test_run_comparison_records_qgis_contour_label_probe_options(self):
         captured = {}
@@ -1664,7 +1800,12 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                                 "normalized_mean_absolute_channel_delta": 0.01 + camera_index / 100,
                                 "normalized_rms_channel_delta": 0.02 + camera_index / 100,
                                 "ssim_status": "unavailable",
-                            }
+                            },
+                            "qgis_runtime": {
+                                "qgis_version": "3.44.0-Solothurn",
+                                "qgis_version_int": 34400,
+                                "qgis_release_name": "Solothurn",
+                            },
                         }
                     ),
                     encoding="utf-8",
@@ -1712,6 +1853,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(summary["counts"], {"passed": len(CAMERAS), "failed": 0, "timeout": 0})
         self.assertEqual([entry["camera"] for entry in summary["cameras"]], list(CAMERAS))
         self.assertEqual(summary["cameras"][0]["artifact_status"], "metrics_available")
+        self.assertEqual(summary["cameras"][0]["qgis_runtime"]["qgis_version"], "3.44.0-Solothurn")
         self.assertEqual(summary["cameras"][0]["metrics"]["changed_pixel_ratio"], 0.1)
         self.assertTrue(summary["cameras"][0]["outputs"]["browser_reference"].endswith("mapbox-gl-reference.png"))
         self.assertTrue(summary["cameras"][0]["outputs"]["qgis_vector_render"].endswith("qgis-vector-render.png"))
@@ -1719,7 +1861,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertTrue(summary["contact_sheet"].endswith("contact-sheet.jpg"))
         self.assertIn("test-mapbox-token", contact_sheet_calls[0][0]["outputs"]["browser_reference"])
         self.assertIn(
-            "| `switzerland-alps-z5-outdoors` | passed | `metrics_available` | 5.35 | 0.1000 |",
+            "| `switzerland-alps-z5-outdoors` | passed | `metrics_available` | 3.44.0-Solothurn | 5.35 | 0.1000 |",
             summary_text,
         )
         self.assertIn("## Image artifacts", summary_text)
@@ -1794,6 +1936,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
                         "outputs": {"diff": str(diff_path), "browser_reference": str(tmp_path / "missing.png")},
                         "captured": {"diff": True, "browser_reference": False},
                         "metrics": {},
+                        "qgis_runtime": {"qgis_version": "3.44.0-Solothurn"},
                     }
                 ),
                 encoding="utf-8",
@@ -1815,6 +1958,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         self.assertEqual(metricless_status, "metrics_unavailable")
         self.assertEqual(metricless_metrics, {})
         self.assertEqual(metricless_full[2], {"diff": str(diff_path)})
+        self.assertEqual(metricless_full[3], {"qgis_version": "3.44.0-Solothurn"})
 
     def test_main_rejects_single_camera_with_all_cameras(self):
         from qfit.validation import mapbox_outdoors_comparison

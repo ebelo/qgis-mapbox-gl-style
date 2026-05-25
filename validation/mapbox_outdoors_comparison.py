@@ -216,6 +216,7 @@ class ComparisonPaths:
     metrics_json: Path
     qgis_preprocessed_style_json: Path
     qgis_label_styles_json: Path
+    qgis_runtime_json: Path
     manifest_json: Path
 
 
@@ -245,12 +246,14 @@ class ComparisonResult:
     diff_captured: bool
     qgis_preprocessed_style_captured: bool = False
     qgis_label_styles_captured: bool = False
+    qgis_runtime_captured: bool = False
     qgis_contour_polygon_label_probe: bool = False
     qgis_contour_boundary_generator_label_probe: bool = False
     qgis_contour_bbox_edge_difference_label_probe: bool = False
     qgis_contour_bbox_edge_difference_source_style_label_probe: bool = False
     qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe: bool = False
     image_metrics: dict[str, object] = dataclasses.field(default_factory=dict)
+    qgis_runtime: dict[str, object] = dataclasses.field(default_factory=dict)
     style_json_path: str | None = None
 
 
@@ -276,6 +279,7 @@ def build_comparison_paths(*, run_dir: Path) -> ComparisonPaths:
         metrics_json=run_dir / "metrics.json",
         qgis_preprocessed_style_json=run_dir / "qgis-preprocessed-style.json",
         qgis_label_styles_json=run_dir / "qgis-label-styles.json",
+        qgis_runtime_json=run_dir / "qgis-runtime.json",
         manifest_json=run_dir / "manifest.json",
     )
 
@@ -352,6 +356,7 @@ def _redacted_manifest(
             "metrics": str(result.paths.metrics_json),
             "qgis_preprocessed_style": str(result.paths.qgis_preprocessed_style_json),
             "qgis_label_styles": str(result.paths.qgis_label_styles_json),
+            "qgis_runtime": str(result.paths.qgis_runtime_json),
         },
         "style_json_path": result.style_json_path,
         "qgis_contour_polygon_label_probe": result.qgis_contour_polygon_label_probe,
@@ -373,11 +378,14 @@ def _redacted_manifest(
             "diff": result.diff_captured,
             "qgis_preprocessed_style": result.qgis_preprocessed_style_captured,
             "qgis_label_styles": result.qgis_label_styles_captured,
+            "qgis_runtime": result.qgis_runtime_captured,
         },
         "metrics": result.image_metrics,
+        "qgis_runtime": result.qgis_runtime,
         "notes": [
             "Mapbox tokens are intentionally excluded from this manifest.",
             "This is a manual visual QA aid, not a CI gate.",
+            "QGIS runtime metadata helps compare version-sensitive Mapbox GL style conversion output.",
         ],
     }
 
@@ -704,6 +712,42 @@ def write_qgis_label_styles_snapshot(*, layer: object, output_path: Path, token:
     output_path.write_text(redact_sensitive_text(snapshot_text, token) + "\n", encoding="utf-8")
 
 
+def qgis_runtime_snapshot(qgis_api: object) -> dict[str, object]:
+    """Return token-free QGIS runtime metadata for version-sensitive render probes."""
+
+    return {
+        "qgis_version": getattr(qgis_api, "QGIS_VERSION", None),
+        "qgis_version_int": getattr(qgis_api, "QGIS_VERSION_INT", None),
+        "qgis_release_name": getattr(qgis_api, "QGIS_RELEASE_NAME", None),
+    }
+
+
+def write_qgis_runtime_snapshot(*, qgis_api: object, output_path: Path | None) -> None:
+    if output_path is None:
+        return
+    output_path.write_text(
+        json.dumps(qgis_runtime_snapshot(qgis_api), indent=2, default=str) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_qgis_core_runtime_snapshot(*, output_path: Path | None) -> None:
+    qgis_core_module = sys.modules.get("qgis.core")
+    qgis_api = getattr(qgis_core_module, "Qgis", qgis_core_module)
+    try:
+        write_qgis_runtime_snapshot(qgis_api=qgis_api, output_path=output_path)
+    except OSError as exc:
+        print(f"warning: QGIS runtime metadata was not written: {exc}", file=sys.stderr)
+
+
+def _load_optional_qgis_runtime_snapshot(path: Path) -> dict[str, object]:
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _append_qgis_contour_polygon_label_probe(layer: object) -> None:
     from qgis.core import (  # type: ignore[import-not-found] # noqa: PLC0415
         QgsPalLayerSettings,
@@ -841,6 +885,27 @@ def _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe
     )
 
 
+def _append_enabled_qgis_contour_label_probes(
+    layer: object,
+    *,
+    qgis_contour_polygon_label_probe: bool,
+    qgis_contour_boundary_generator_label_probe: bool,
+    qgis_contour_bbox_edge_difference_label_probe: bool,
+    qgis_contour_bbox_edge_difference_source_style_label_probe: bool,
+    qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe: bool,
+) -> None:
+    if qgis_contour_polygon_label_probe:
+        _append_qgis_contour_polygon_label_probe(layer)
+    if qgis_contour_boundary_generator_label_probe:
+        _append_qgis_contour_boundary_generator_label_probe(layer)
+    if qgis_contour_bbox_edge_difference_label_probe:
+        _append_qgis_contour_bbox_edge_difference_label_probe(layer)
+    if qgis_contour_bbox_edge_difference_source_style_label_probe:
+        _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer)
+    if qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe:
+        _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe(layer)
+
+
 def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     *,
     camera: MapboxComparisonCamera,
@@ -849,6 +914,7 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
     style_definition: dict[str, object] | None = None,
     qgis_preprocessed_style_path: Path | None = None,
     qgis_label_styles_path: Path | None = None,
+    qgis_runtime_path: Path | None = None,
     qgis_contour_polygon_label_probe: bool = False,
     qgis_contour_boundary_generator_label_probe: bool = False,
     qgis_contour_bbox_edge_difference_label_probe: bool = False,
@@ -891,6 +957,8 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
         app.initQgis()
 
     try:
+        write_qgis_core_runtime_snapshot(output_path=qgis_runtime_path)
+
         resolved_style_definition = (
             style_definition
             if style_definition is not None
@@ -924,16 +992,18 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
         if not is_valid_qgis_vector_tile_layer(layer=layer, vector_tile_layer_type=QgsVectorTileLayer):
             raise RuntimeError("QGIS did not create a valid Mapbox vector tile layer.")
         BackgroundMapService()._apply_mapbox_gl_style(layer, simplified_style, sprite_resources=sprite_resources)
-        if qgis_contour_polygon_label_probe:
-            _append_qgis_contour_polygon_label_probe(layer)
-        if qgis_contour_boundary_generator_label_probe:
-            _append_qgis_contour_boundary_generator_label_probe(layer)
-        if qgis_contour_bbox_edge_difference_label_probe:
-            _append_qgis_contour_bbox_edge_difference_label_probe(layer)
-        if qgis_contour_bbox_edge_difference_source_style_label_probe:
-            _append_qgis_contour_bbox_edge_difference_source_style_label_probe(layer)
-        if qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe:
-            _append_qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe(layer)
+        _append_enabled_qgis_contour_label_probes(
+            layer,
+            qgis_contour_polygon_label_probe=qgis_contour_polygon_label_probe,
+            qgis_contour_boundary_generator_label_probe=qgis_contour_boundary_generator_label_probe,
+            qgis_contour_bbox_edge_difference_label_probe=qgis_contour_bbox_edge_difference_label_probe,
+            qgis_contour_bbox_edge_difference_source_style_label_probe=(
+                qgis_contour_bbox_edge_difference_source_style_label_probe
+            ),
+            qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe=(
+                qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe
+            ),
+        )
         if qgis_label_styles_path is not None:
             write_qgis_label_styles_snapshot(layer=layer, output_path=qgis_label_styles_path, token=token)
 
@@ -1032,7 +1102,9 @@ def run_comparison(
     diff_captured = False
     qgis_preprocessed_style_captured = False
     qgis_label_styles_captured = False
+    qgis_runtime_captured = False
     image_metrics: ImageMetrics = {}
+    qgis_runtime: dict[str, object] = {}
     style_definition = (
         load_style_definition(config.style_json_path)
         if config.style_json_path is not None
@@ -1057,6 +1129,7 @@ def run_comparison(
             style_definition=style_definition,
             qgis_preprocessed_style_path=paths.qgis_preprocessed_style_json,
             qgis_label_styles_path=paths.qgis_label_styles_json,
+            qgis_runtime_path=paths.qgis_runtime_json,
             qgis_contour_polygon_label_probe=config.qgis_contour_polygon_label_probe,
             qgis_contour_boundary_generator_label_probe=(
                 config.qgis_contour_boundary_generator_label_probe
@@ -1074,6 +1147,9 @@ def run_comparison(
         qgis_captured = True
         qgis_preprocessed_style_captured = paths.qgis_preprocessed_style_json.exists()
         qgis_label_styles_captured = paths.qgis_label_styles_json.exists()
+        qgis_runtime_captured = paths.qgis_runtime_json.exists()
+        if qgis_runtime_captured:
+            qgis_runtime = _load_optional_qgis_runtime_snapshot(paths.qgis_runtime_json)
 
     if config.diff and browser_captured and qgis_captured:
         image_metrics = diff_builder(
@@ -1091,6 +1167,7 @@ def run_comparison(
         diff_captured=diff_captured,
         qgis_preprocessed_style_captured=qgis_preprocessed_style_captured,
         qgis_label_styles_captured=qgis_label_styles_captured,
+        qgis_runtime_captured=qgis_runtime_captured,
         qgis_contour_polygon_label_probe=config.qgis_contour_polygon_label_probe,
         qgis_contour_boundary_generator_label_probe=(
             config.qgis_contour_boundary_generator_label_probe
@@ -1105,6 +1182,7 @@ def run_comparison(
             config.qgis_contour_bbox_edge_difference_source_style_high_zoom_label_probe
         ),
         image_metrics=image_metrics,
+        qgis_runtime=qgis_runtime,
         style_json_path=str(config.style_json_path) if config.style_json_path is not None else None,
     )
     write_manifest(camera=config.camera, result=result)
@@ -1386,29 +1464,31 @@ def _manifest_artifact_status_metrics_and_outputs(
     *,
     token: str,
     redact_outputs: bool = True,
-) -> tuple[str, dict[str, object], dict[str, str]]:
+) -> tuple[str, dict[str, object], dict[str, str], dict[str, object]]:
     if manifest_path is None:
-        return MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING, {}, {}
+        return MANIFEST_ARTIFACT_STATUS_MANIFEST_MISSING, {}, {}, {}
     try:
         loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE, {}, {}
+        return MANIFEST_ARTIFACT_STATUS_MANIFEST_UNREADABLE, {}, {}, {}
     metrics = loaded.get("metrics") if isinstance(loaded, dict) else None
     outputs = (
         _manifest_visual_outputs(loaded, token=token, redact_outputs=redact_outputs)
         if isinstance(loaded, dict)
         else {}
     )
+    runtime = loaded.get("qgis_runtime") if isinstance(loaded, dict) else None
+    qgis_runtime = runtime if isinstance(runtime, dict) else {}
     if not isinstance(metrics, dict):
-        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs
+        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs, qgis_runtime
     metric_summary = {key: metrics[key] for key in MATRIX_SUMMARY_METRIC_KEYS if key in metrics}
     if not metric_summary:
-        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs
-    return MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE, metric_summary, outputs
+        return MANIFEST_ARTIFACT_STATUS_METRICS_UNAVAILABLE, {}, outputs, qgis_runtime
+    return MANIFEST_ARTIFACT_STATUS_METRICS_AVAILABLE, metric_summary, outputs, qgis_runtime
 
 
 def _manifest_artifact_status_and_metrics(manifest_path: Path | None) -> tuple[str, dict[str, object]]:
-    status, metrics, _outputs = _manifest_artifact_status_metrics_and_outputs(manifest_path, token="")
+    status, metrics, _outputs, _qgis_runtime = _manifest_artifact_status_metrics_and_outputs(manifest_path, token="")
     return status, metrics
 
 
@@ -1421,7 +1501,10 @@ def _all_camera_summary_entry(
     manifest_path: Path | None,
     token: str,
 ) -> dict[str, object]:
-    artifact_status, metrics, outputs = _manifest_artifact_status_metrics_and_outputs(manifest_path, token=token)
+    artifact_status, metrics, outputs, qgis_runtime = _manifest_artifact_status_metrics_and_outputs(
+        manifest_path,
+        token=token,
+    )
     return {
         "camera": camera.name,
         "description": camera.description,
@@ -1433,6 +1516,7 @@ def _all_camera_summary_entry(
         "manifest": redact_sensitive_text(str(manifest_path), token) if manifest_path is not None else None,
         "metrics": metrics,
         "outputs": outputs,
+        "qgis_runtime": qgis_runtime,
     }
 
 
@@ -1441,7 +1525,7 @@ def _all_camera_contact_sheet_entry(
     camera: MapboxComparisonCamera,
     manifest_path: Path | None,
 ) -> dict[str, object]:
-    _artifact_status, _metrics, outputs = _manifest_artifact_status_metrics_and_outputs(
+    _artifact_status, _metrics, outputs, _qgis_runtime = _manifest_artifact_status_metrics_and_outputs(
         manifest_path,
         token="",
         redact_outputs=False,
@@ -1459,6 +1543,16 @@ def _format_summary_metric(metrics: dict[str, object], key: str) -> str:
     if isinstance(value, float):
         return f"{value:.4f}"
     return str(value)
+
+
+def _format_qgis_runtime(value: object) -> str:
+    if not isinstance(value, dict):
+        return "—"
+    qgis_version = value.get("qgis_version")
+    if qgis_version:
+        return str(qgis_version)
+    qgis_version_int = value.get("qgis_version_int")
+    return str(qgis_version_int) if qgis_version_int else "—"
 
 
 def _artifact_markdown_path(path_text: object, *, base_dir: Path | None) -> str:
@@ -1665,8 +1759,8 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
         "",
         f"Generated: `{summary['generated_at']}`",
         "",
-        "| Camera | Status | Artifacts | z | Changed ratio | Mean Δ | RMS Δ | SSIM | Manifest |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
+        "| Camera | Status | Artifacts | QGIS | z | Changed ratio | Mean Δ | RMS Δ | SSIM | Manifest |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | --- | --- |",
     ]
     for entry in summary["cameras"]:
         metrics = entry["metrics"] if isinstance(entry.get("metrics"), dict) else {}
@@ -1677,6 +1771,7 @@ def _all_cameras_summary_markdown(summary: dict[str, object]) -> str:
             f"`{entry['camera']}` | "
             f"{entry['status']} | "
             f"`{artifact_status}` | "
+            f"{_format_qgis_runtime(entry.get('qgis_runtime'))} | "
             f"{entry['zoom']:g} | "
             f"{_format_summary_metric(metrics, 'changed_pixel_ratio')} | "
             f"{_format_summary_metric(metrics, 'normalized_mean_absolute_channel_delta')} | "
