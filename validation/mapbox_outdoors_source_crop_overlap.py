@@ -10,7 +10,7 @@ import os
 import sys
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -49,6 +49,7 @@ STYLE_LAYER_PAINT_KEYS = (
     "line-width",
 )
 MISSING_VALUE = "(missing)"
+QGIS_RUNTIME_NOT_CAPTURED = "(not captured)"
 _DROPPED_FILTER = object()
 
 TileFetcher = Callable[[str], bytes]
@@ -73,6 +74,29 @@ class SourceCropOverlapPaths:
     run_dir: Path
     json_path: Path
     summary_path: Path
+
+
+@dataclass
+class _AggregateSourceLayerTotal:
+    source_layer: str
+    reports: set[str] = field(default_factory=set)
+    cameras: set[str] = field(default_factory=set)
+    overlap_feature_count: int = 0
+    coverage_sum: float = 0.0
+    max_coverage: float = 0.0
+    zero_overlap_reports: int = 0
+
+
+@dataclass
+class _AggregateStyleLayerTotal:
+    source_layer: str
+    layer: str
+    layer_type: str
+    reports: set[str] = field(default_factory=set)
+    cameras: set[str] = field(default_factory=set)
+    feature_count: int = 0
+    coverage_sum: float = 0.0
+    max_coverage: float = 0.0
 
 
 def _ensure_package_parent_on_path() -> None:
@@ -2072,6 +2096,393 @@ def build_summary_markdown(report: Mapping[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _list_of_mappings(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _int_value(value: object) -> int:
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _float_value(value: object) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+
+def _report_qgis_runtimes(report: Mapping[str, object]) -> list[str]:
+    run = report.get("comparison_summary_run")
+    if not isinstance(run, Mapping):
+        return []
+    runtimes = run.get("qgis_runtimes")
+    if not isinstance(runtimes, list):
+        return []
+    return [str(runtime) for runtime in runtimes if runtime not in (None, "")]
+
+
+def _update_source_layer_total(
+    total: _AggregateSourceLayerTotal,
+    *,
+    record: Mapping[str, object],
+    camera_name: str,
+    input_report: str,
+) -> None:
+    coverage = _float_value(record.get("bbox_crop_coverage_ratio"))
+    overlap_feature_count = _int_value(record.get("overlap_feature_count"))
+    total.reports.add(input_report)
+    total.cameras.add(camera_name)
+    total.overlap_feature_count += overlap_feature_count
+    total.coverage_sum += coverage
+    total.max_coverage = max(total.max_coverage, coverage)
+    if overlap_feature_count == 0:
+        total.zero_overlap_reports += 1
+
+
+def _update_style_layer_totals(
+    totals: dict[tuple[str, str], _AggregateStyleLayerTotal],
+    *,
+    record: Mapping[str, object],
+    camera_name: str,
+    input_report: str,
+) -> None:
+    source_layer = str(record.get("source_layer") or MISSING_VALUE)
+    matches = record.get("qgis_style_layer_matches")
+    if not isinstance(matches, Mapping):
+        return
+    for layer_id, match in matches.items():
+        if not isinstance(match, Mapping):
+            continue
+        layer_key = str(layer_id)
+        total = totals.setdefault(
+            (source_layer, layer_key),
+            _AggregateStyleLayerTotal(
+                source_layer=source_layer,
+                layer=layer_key,
+                layer_type=str(match.get("type") or MISSING_VALUE),
+            ),
+        )
+        coverage = _float_value(match.get("crop_coverage_ratio"))
+        total.reports.add(input_report)
+        total.cameras.add(camera_name)
+        total.feature_count += _int_value(match.get("feature_count"))
+        total.coverage_sum += coverage
+        total.max_coverage = max(total.max_coverage, coverage)
+
+
+def _camera_source_row(
+    *,
+    record: Mapping[str, object],
+    camera_name: str,
+    camera_zoom: object,
+    input_report: str,
+) -> dict[str, object]:
+    return {
+        "input_report": input_report,
+        "camera": camera_name,
+        "camera_zoom": _float_value(camera_zoom),
+        "source_layer": str(record.get("source_layer") or MISSING_VALUE),
+        "overlap_feature_count": _int_value(record.get("overlap_feature_count")),
+        "bbox_crop_coverage_ratio": _float_value(record.get("bbox_crop_coverage_ratio")),
+        "classes": _format_property_counts(record, "class"),
+        "qgis_style_layer_coverage": _format_style_layer_matches(record),
+    }
+
+
+def _source_layer_total_row(total: _AggregateSourceLayerTotal) -> dict[str, object]:
+    return {
+        "source_layer": total.source_layer,
+        "report_count": len(total.reports),
+        "camera_count": len(total.cameras),
+        "overlap_feature_count": total.overlap_feature_count,
+        "coverage_sum": _rounded_float(total.coverage_sum),
+        "max_bbox_crop_coverage_ratio": _rounded_float(total.max_coverage),
+        "zero_overlap_reports": total.zero_overlap_reports,
+        "cameras": sorted(total.cameras),
+    }
+
+
+def _style_layer_total_row(total: _AggregateStyleLayerTotal) -> dict[str, object]:
+    return {
+        "source_layer": total.source_layer,
+        "layer": total.layer,
+        "type": total.layer_type,
+        "report_count": len(total.reports),
+        "camera_count": len(total.cameras),
+        "feature_count": total.feature_count,
+        "coverage_sum": _rounded_float(total.coverage_sum),
+        "max_coverage": _rounded_float(total.max_coverage),
+        "cameras": sorted(total.cameras),
+    }
+
+
+def _aggregate_one_source_crop_report(
+    report_path: Path,
+    *,
+    source_totals: dict[str, _AggregateSourceLayerTotal],
+    style_totals: dict[tuple[str, str], _AggregateStyleLayerTotal],
+    camera_rows: list[dict[str, object]],
+    qgis_runtimes: set[str],
+) -> str:
+    resolved_path = report_path.expanduser().resolve()
+    report = load_json_object(resolved_path)
+    input_report = _repo_relative_path(resolved_path)
+    camera_name = str(report.get("camera") or MISSING_VALUE)
+    qgis_runtimes.update(_report_qgis_runtimes(report))
+    for record in _list_of_mappings(report.get("combined_source_layers")):
+        source_layer = str(record.get("source_layer") or MISSING_VALUE)
+        total = source_totals.setdefault(source_layer, _AggregateSourceLayerTotal(source_layer=source_layer))
+        _update_source_layer_total(
+            total,
+            record=record,
+            camera_name=camera_name,
+            input_report=input_report,
+        )
+        _update_style_layer_totals(
+            style_totals,
+            record=record,
+            camera_name=camera_name,
+            input_report=input_report,
+        )
+        camera_rows.append(
+            _camera_source_row(
+                record=record,
+                camera_name=camera_name,
+                camera_zoom=report.get("camera_zoom"),
+                input_report=input_report,
+            )
+        )
+    return input_report
+
+
+def _sorted_source_layer_rows(totals: Mapping[str, _AggregateSourceLayerTotal]) -> list[dict[str, object]]:
+    return sorted(
+        (_source_layer_total_row(total) for total in totals.values()),
+        key=lambda row: (
+            -float(row["coverage_sum"]),
+            -int(row["overlap_feature_count"]),
+            str(row["source_layer"]),
+        ),
+    )
+
+
+def _sorted_style_layer_rows(
+    totals: Mapping[tuple[str, str], _AggregateStyleLayerTotal],
+) -> list[dict[str, object]]:
+    return sorted(
+        (_style_layer_total_row(total) for total in totals.values()),
+        key=lambda row: (
+            -float(row["coverage_sum"]),
+            -int(row["feature_count"]),
+            str(row["source_layer"]),
+            str(row["layer"]),
+        ),
+    )
+
+
+def _deduplicated_report_paths(report_paths: Sequence[Path]) -> list[Path]:
+    unique_paths: list[Path] = []
+    seen_paths: set[Path] = set()
+    for report_path in report_paths:
+        resolved_path = report_path.expanduser().resolve()
+        if resolved_path in seen_paths:
+            continue
+        seen_paths.add(resolved_path)
+        unique_paths.append(resolved_path)
+    return unique_paths
+
+
+def build_source_crop_overlap_aggregate_report(
+    report_paths: Sequence[Path],
+    *,
+    now: dt.datetime | None = None,
+) -> dict[str, object]:
+    if not report_paths:
+        raise ValueError("At least one source/crop overlap report is required.")
+    deduplicated_report_paths = _deduplicated_report_paths(report_paths)
+    source_totals: dict[str, _AggregateSourceLayerTotal] = {}
+    style_totals: dict[tuple[str, str], _AggregateStyleLayerTotal] = {}
+    camera_rows: list[dict[str, object]] = []
+    qgis_runtimes: set[str] = set()
+    input_reports = [
+        _aggregate_one_source_crop_report(
+            report_path,
+            source_totals=source_totals,
+            style_totals=style_totals,
+            camera_rows=camera_rows,
+            qgis_runtimes=qgis_runtimes,
+        )
+        for report_path in deduplicated_report_paths
+    ]
+    generated = now or dt.datetime.now(dt.timezone.utc)
+    return {
+        "generated": generated.astimezone(dt.timezone.utc).isoformat(timespec="seconds"),
+        "input_reports": input_reports,
+        "qgis_runtimes": sorted(qgis_runtimes),
+        "source_layer_rows": _sorted_source_layer_rows(source_totals),
+        "style_layer_rows": _sorted_style_layer_rows(style_totals),
+        "camera_source_rows": sorted(
+            camera_rows,
+            key=lambda row: (
+                str(row["camera"]),
+                -float(row["bbox_crop_coverage_ratio"]),
+                str(row["source_layer"]),
+            ),
+        ),
+    }
+
+
+def _camera_list_label(value: object) -> str:
+    if not isinstance(value, list) or not value:
+        return "-"
+    return ", ".join(f"`{camera}`" for camera in value)
+
+
+def _aggregate_source_layer_row(row: Mapping[str, object]) -> str:
+    return _markdown_table_row(
+        [
+            f"`{row.get('source_layer')}`",
+            row.get("report_count"),
+            row.get("camera_count"),
+            row.get("overlap_feature_count"),
+            _format_coverage(row.get("coverage_sum")),
+            _format_coverage(row.get("max_bbox_crop_coverage_ratio")),
+            row.get("zero_overlap_reports"),
+            _camera_list_label(row.get("cameras")),
+        ]
+    )
+
+
+def _aggregate_style_layer_row(row: Mapping[str, object]) -> str:
+    return _markdown_table_row(
+        [
+            f"`{row.get('source_layer')}`",
+            f"`{row.get('layer')}`",
+            f"`{row.get('type')}`",
+            row.get("report_count"),
+            row.get("camera_count"),
+            row.get("feature_count"),
+            _format_coverage(row.get("coverage_sum")),
+            _format_coverage(row.get("max_coverage")),
+            _camera_list_label(row.get("cameras")),
+        ]
+    )
+
+
+def _format_camera_zoom(value: object) -> str:
+    return f"{float(value):g}" if isinstance(value, (int, float)) and not isinstance(value, bool) else "-"
+
+
+def _aggregate_camera_source_row(row: Mapping[str, object]) -> str:
+    return _markdown_table_row(
+        [
+            f"`{row.get('camera')}`",
+            _format_camera_zoom(row.get("camera_zoom")),
+            f"`{row.get('source_layer')}`",
+            row.get("overlap_feature_count"),
+            _format_coverage(row.get("bbox_crop_coverage_ratio")),
+            row.get("classes") or "-",
+            row.get("qgis_style_layer_coverage") or "-",
+        ]
+    )
+
+
+def _aggregate_source_read_labels(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    return [
+        (
+            f"{row.get('source_layer') or MISSING_VALUE}={float(row.get('coverage_sum') or 0.0):.3f} "
+            f"({_feature_count_label(row.get('overlap_feature_count'))}, {row.get('camera_count')} cameras)"
+        )
+        for row in rows
+        if float(row.get("coverage_sum") or 0.0) > 0.0 or int(row.get("overlap_feature_count") or 0) > 0
+    ][:5]
+
+
+def _aggregate_style_read_labels(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    return [
+        (
+            f"{row.get('layer') or MISSING_VALUE}={float(row.get('coverage_sum') or 0.0):.3f} "
+            f"({row.get('source_layer') or MISSING_VALUE}, {row.get('camera_count')} cameras)"
+        )
+        for row in rows
+        if float(row.get("coverage_sum") or 0.0) > 0.0 or int(row.get("feature_count") or 0) > 0
+    ][:5]
+
+
+def _aggregate_zero_overlap_labels(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    return [
+        str(row.get("source_layer") or MISSING_VALUE)
+        for row in rows
+        if int(row.get("report_count") or 0) > 0
+        and int(row.get("zero_overlap_reports") or 0) == int(row.get("report_count") or 0)
+    ][:5]
+
+
+def _aggregate_read_lines(
+    *,
+    source_rows: Sequence[Mapping[str, object]],
+    style_rows: Sequence[Mapping[str, object]],
+) -> list[str]:
+    return [
+        "",
+        "## Read",
+        "",
+        f"- Top source-layer bbox coverage sums: {_joined_read_labels(_aggregate_source_read_labels(source_rows))}.",
+        f"- Top QGIS style-layer bbox coverage sums: {_joined_read_labels(_aggregate_style_read_labels(style_rows))}.",
+        (
+            "- Source layers with zero overlap wherever requested: "
+            f"{_joined_read_labels(_aggregate_zero_overlap_labels(source_rows))}."
+        ),
+        "- Treat aggregate coverage as bbox attribution across reports, not pixel ownership or a production styling recommendation.",
+    ]
+
+
+def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
+    input_reports = [str(path) for path in report.get("input_reports") or []]
+    qgis_runtimes = [str(runtime) for runtime in report.get("qgis_runtimes") or []]
+    source_rows = _list_of_mappings(report.get("source_layer_rows"))
+    style_rows = _list_of_mappings(report.get("style_layer_rows"))
+    camera_rows = _list_of_mappings(report.get("camera_source_rows"))
+    lines = [
+        "# Mapbox Outdoors source/crop overlap aggregate",
+        "",
+        f"Generated: `{report.get('generated')}`",
+        f"Input reports: `{len(input_reports)}`",
+        f"QGIS runtimes: `{', '.join(qgis_runtimes) if qgis_runtimes else QGIS_RUNTIME_NOT_CAPTURED}`",
+    ]
+    if input_reports:
+        lines.extend(["", "Inputs:"])
+        lines.extend(f"- `{path}`" for path in input_reports[:20])
+        if len(input_reports) > 20:
+            lines.append(f"- ... {len(input_reports) - 20} more")
+    lines.extend(_aggregate_read_lines(source_rows=source_rows, style_rows=style_rows))
+    lines.extend([
+        "",
+        "## Source layer totals",
+        "",
+        "| Source layer | Reports | Cameras | Overlap features | Coverage sum | Max coverage | Zero-overlap reports | Cameras |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ])
+    lines.extend(_aggregate_source_layer_row(row) for row in source_rows) if source_rows else lines.append("| _none_ | 0 | 0 | 0 | 0 | 0 | 0 | |")
+    lines.extend([
+        "",
+        "## QGIS style-layer coverage totals",
+        "",
+        "| Source layer | QGIS style layer | Type | Reports | Cameras | Features | Coverage sum | Max coverage | Cameras |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ])
+    lines.extend(_aggregate_style_layer_row(row) for row in style_rows) if style_rows else lines.append("| _none_ | | | 0 | 0 | 0 | 0 | 0 | |")
+    lines.extend([
+        "",
+        "## Per-camera source overlap",
+        "",
+        "| Camera | Zoom | Source layer | Overlap features | Bbox crop coverage | Classes | QGIS style-layer coverage |",
+        "| --- | ---: | --- | ---: | ---: | --- | --- |",
+    ])
+    lines.extend(_aggregate_camera_source_row(row) for row in camera_rows) if camera_rows else lines.append("| _none_ | | | 0 | 0 | | |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_report(report: Mapping[str, object], paths: SourceCropOverlapPaths) -> None:
     paths.run_dir.mkdir(parents=True, exist_ok=True)
     paths.json_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
@@ -2082,7 +2493,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Count live Mapbox vector source features overlapping Mapbox Outdoors visual crop boxes.",
     )
-    parser.add_argument("--visual-crop-json", required=True, type=Path)
+    parser.add_argument("--visual-crop-json", type=Path)
     parser.add_argument("--camera", default=DEFAULT_CAMERA_NAME)
     parser.add_argument("--mapbox-token")
     parser.add_argument("--style-owner", default=DEFAULT_MAPBOX_STYLE_OWNER)
@@ -2090,16 +2501,50 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tile-zoom", type=int)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument(
+        "--aggregate-report",
+        action="append",
+        type=Path,
+        default=[],
+        help="Existing source-crop-overlap.json report to aggregate. Repeat for multiple reports.",
+    )
+    parser.add_argument(
+        "--aggregate-output",
+        type=Path,
+        help="Optional Markdown output path for --aggregate-report mode. Defaults to stdout.",
+    )
+    parser.add_argument(
         "--source-layer",
         action="append",
         dest="source_layers",
         help="Mapbox vector source-layer to count. Repeat to inspect multiple layers.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.aggregate_report:
+        if args.visual_crop_json is not None:
+            parser.error("--visual-crop-json cannot be combined with --aggregate-report.")
+        return args
+    if args.visual_crop_json is None:
+        parser.error("--visual-crop-json is required unless --aggregate-report is provided.")
+    return args
+
+
+def _run_aggregate_mode(args: argparse.Namespace) -> int:
+    aggregate_report = build_source_crop_overlap_aggregate_report(tuple(args.aggregate_report))
+    markdown_summary = render_aggregate_markdown_summary(aggregate_report)
+    if args.aggregate_output is not None:
+        output_path = args.aggregate_output.expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(markdown_summary, encoding="utf-8")
+        print(f"Aggregate summary: {_repo_relative_path(output_path)}")
+    else:
+        print(markdown_summary)
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
+    if args.aggregate_report:
+        return _run_aggregate_mode(args)
     source_layers = tuple(args.source_layers) if args.source_layers else DEFAULT_SOURCE_LAYERS
     config = SourceCropOverlapConfig(
         token=args.mapbox_token,

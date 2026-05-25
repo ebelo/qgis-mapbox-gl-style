@@ -200,6 +200,17 @@ python3 validation/mapbox_outdoors_source_crop_overlap.py \
 The report fetches only the live vector tiles intersecting that camera's crop boxes, decodes the requested source layers, and counts features whose transformed lon/lat geometry bounds overlap each crop. It also reports bbox-area crop coverage ratios by source layer and feature property, then evaluates camera-zoom-active filters from the QGIS-preprocessed style to show which style layers the overlapping features would hit. Missing filter-property diagnostics include candidate counts, candidate feature-property value counts, and candidate bbox coverage by feature-property value after dropping only the checks that depend on a feature's absent properties, which helps separate true missing-property gates from ordinary class-filter mismatches. This helps separate broad landuse fills from incidental bbox hits before changing rendering behavior. Treat coverage as summed upper-bound attribution rather than pixel ownership; ratios can exceed 1.0 when feature bboxes overlap or line-feature bboxes span the same crop area. Token-bearing tile URLs are intentionally omitted from the JSON and Markdown output. Use this when active style-audit rows such as landuse, contour, wetland, or tint-band candidates need source-layer evidence before becoming a styling slice.
 The Markdown report also starts with a compact readout of QGIS runtimes, strongest source-layer overlaps, strongest QGIS style-layer coverage, and zero-overlap source layers, so follow-up owner-mask probes can be chosen without manually scanning every per-crop row first.
 
+To compare source/crop overlap across multiple camera reports, aggregate the generated JSON files:
+
+```bash
+python3 validation/mapbox_outdoors_source_crop_overlap.py \
+  --aggregate-report debug/mapbox-outdoors-source-crop-overlap/<camera-a>/<timestamp>/source-crop-overlap.json \
+  --aggregate-report debug/mapbox-outdoors-source-crop-overlap/<camera-b>/<timestamp>/source-crop-overlap.json \
+  --aggregate-output /tmp/source-crop-overlap-aggregate.md
+```
+
+The aggregate Markdown summarizes source-layer coverage sums, QGIS style-layer coverage sums, distinct QGIS runtimes, and per-camera rows from the input reports. Use it to choose the next owner-mask or missing-class probe across the camera matrix; it remains bbox attribution, not rendered-pixel ownership or a production style-change recommendation.
+
 When source/crop overlap points at a possible rendered owner, run QGIS-only transparent layer masks against an existing comparison manifest before changing production paint:
 
 ```bash

@@ -1,11 +1,14 @@
 import datetime as dt
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from tests import _path  # noqa: F401
 
+from qfit.validation import mapbox_outdoors_source_crop_overlap as source_overlap_module
 from qfit.validation.mapbox_outdoors_source_crop_overlap import (
     SourceCropOverlapConfig,
     _candidate_missing_filter_property_summary,
@@ -17,6 +20,7 @@ from qfit.validation.mapbox_outdoors_source_crop_overlap import (
     _style_layer_active_at_zoom,
     bbox_overlaps_lon_lat_bounds,
     build_run_directory,
+    build_source_crop_overlap_aggregate_report,
     build_source_crop_overlap_paths,
     build_summary_markdown,
     collect_source_crop_overlap_report,
@@ -24,6 +28,7 @@ from qfit.validation.mapbox_outdoors_source_crop_overlap import (
     feature_lon_lat_bbox,
     lon_lat_to_tile,
     recommended_tile_zoom,
+    render_aggregate_markdown_summary,
     resolve_mapbox_token,
     source_layer_overlap_record,
     tiles_for_lon_lat_bounds,
@@ -626,6 +631,118 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             self.assertEqual(json.loads(paths.json_path.read_text(encoding="utf-8"))["camera"], "test-camera")
             self.assertIn("# Mapbox Outdoors source/crop overlap", paths.summary_path.read_text(encoding="utf-8"))
 
+    def test_aggregate_report_summarizes_source_and_style_layer_coverage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            geneva_report = _write_aggregate_source_overlap_report(
+                root / "geneva.json",
+                camera="geneva-airport-motorway-z14-outdoors",
+                camera_zoom=14.0,
+                qgis_runtimes=["3.34.4-Prizren"],
+                source_layers=[
+                    _aggregate_source_layer(
+                        "landuse",
+                        overlap_feature_count=7,
+                        coverage=2.5,
+                        classes={"park": 3, "grass": 2},
+                        style_matches={
+                            "landuse-green": {"type": "fill", "feature_count": 5, "crop_coverage_ratio": 1.5},
+                            "landuse-other": {"type": "fill", "feature_count": 2, "crop_coverage_ratio": 0.25},
+                        },
+                    ),
+                    _aggregate_source_layer("aeroway", overlap_feature_count=0, coverage=0.0),
+                ],
+            )
+            switzerland_report = _write_aggregate_source_overlap_report(
+                root / "switzerland.json",
+                camera="switzerland-alps-z5-outdoors",
+                camera_zoom=5.0,
+                qgis_runtimes=["Future"],
+                source_layers=[
+                    _aggregate_source_layer(
+                        "landuse",
+                        overlap_feature_count=4,
+                        coverage=1.25,
+                        classes={"residential": 4},
+                        style_matches={
+                            "landuse-green": {"type": "fill", "feature_count": 2, "crop_coverage_ratio": 0.75}
+                        },
+                    ),
+                    _aggregate_source_layer(
+                        "landuse_overlay",
+                        overlap_feature_count=1,
+                        coverage=0.5,
+                        classes={"national_park": 1},
+                    ),
+                ],
+            )
+
+            aggregate = build_source_crop_overlap_aggregate_report(
+                (geneva_report, switzerland_report, geneva_report),
+                now=dt.datetime(2026, 5, 25, 12, 30, tzinfo=dt.timezone.utc),
+            )
+            markdown = render_aggregate_markdown_summary(aggregate)
+
+        source_rows = {row["source_layer"]: row for row in aggregate["source_layer_rows"]}
+        style_rows = {
+            (row["source_layer"], row["layer"]): row
+            for row in aggregate["style_layer_rows"]
+        }
+        self.assertEqual(aggregate["qgis_runtimes"], ["3.34.4-Prizren", "Future"])
+        self.assertEqual(len(aggregate["input_reports"]), 2)
+        self.assertEqual(source_rows["landuse"]["report_count"], 2)
+        self.assertEqual(source_rows["landuse"]["camera_count"], 2)
+        self.assertEqual(source_rows["landuse"]["overlap_feature_count"], 11)
+        self.assertEqual(source_rows["landuse"]["coverage_sum"], 3.75)
+        self.assertEqual(source_rows["aeroway"]["zero_overlap_reports"], 1)
+        self.assertEqual(style_rows[("landuse", "landuse-green")]["feature_count"], 7)
+        self.assertEqual(style_rows[("landuse", "landuse-green")]["coverage_sum"], 2.25)
+        self.assertIn("# Mapbox Outdoors source/crop overlap aggregate", markdown)
+        self.assertIn("QGIS runtimes: `3.34.4-Prizren, Future`", markdown)
+        self.assertIn("| `landuse` | 2 | 2 | 11 | 3.750 | 2.500 | 0 |", markdown)
+        self.assertIn("| `landuse` | `landuse-green` | `fill` | 2 | 2 | 7 | 2.250 | 1.500 |", markdown)
+        self.assertIn(
+            "| `geneva-airport-motorway-z14-outdoors` | 14 | `landuse` | 7 | 2.500 | "
+            "park=3, grass=2 | landuse-green=1.500, landuse-other=0.250 |",
+            markdown,
+        )
+        self.assertIn("Top source-layer bbox coverage sums: landuse=3.750", markdown)
+        self.assertIn("Source layers with zero overlap wherever requested: aeroway.", markdown)
+        self.assertIn("Treat aggregate coverage as bbox attribution across reports", markdown)
+
+    def test_main_aggregate_mode_writes_markdown_summary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            report_path = _write_aggregate_source_overlap_report(
+                root / "source-crop-overlap.json",
+                camera="unit-camera",
+                camera_zoom=10.0,
+                qgis_runtimes=[],
+                source_layers=[
+                    _aggregate_source_layer(
+                        "landuse",
+                        overlap_feature_count=1,
+                        coverage=0.5,
+                        classes={"park": 1},
+                    )
+                ],
+            )
+            output_path = root / "aggregate.md"
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = source_overlap_module.main([
+                    "--aggregate-report",
+                    str(report_path),
+                    "--aggregate-output",
+                    str(output_path),
+                ])
+            output_markdown = output_path.read_text(encoding="utf-8")
+
+        self.assertEqual(result, 0)
+        self.assertIn("Aggregate summary:", stdout.getvalue())
+        self.assertIn("source/crop overlap aggregate", output_markdown)
+        self.assertIn("| `unit-camera` | 10 | `landuse` | 1 | 0.500 | park=1 | - |", output_markdown)
+
     def test_collect_report_requires_crop_boxes_for_camera(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -668,6 +785,46 @@ def _feature(geometry_type, coordinates, properties):
         "geometry": {"type": geometry_type, "coordinates": coordinates},
         "properties": properties,
     }
+
+
+def _aggregate_source_layer(
+    source_layer,
+    *,
+    overlap_feature_count,
+    coverage,
+    classes=None,
+    style_matches=None,
+):
+    return {
+        "source_layer": source_layer,
+        "overlap_feature_count": overlap_feature_count,
+        "bbox_crop_coverage_ratio": coverage,
+        "property_counts": {"class": classes or {}},
+        "qgis_style_layer_matches": style_matches or {},
+    }
+
+
+def _write_aggregate_source_overlap_report(
+    path,
+    *,
+    camera,
+    camera_zoom,
+    qgis_runtimes,
+    source_layers,
+):
+    path.write_text(
+        json.dumps(
+            {
+                "generated": "2026-05-25T12:30:00+00:00",
+                "camera": camera,
+                "camera_zoom": camera_zoom,
+                "comparison_summary_run": {"qgis_runtimes": qgis_runtimes},
+                "combined_source_layers": source_layers,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _write_source_overlap_fixture(root, *, manual_crop_boxes=None, include_camera_crops=True):
