@@ -231,6 +231,14 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                 10.0 / 9.0,
             )
             self.assertEqual(
+                variant["metric_delta_vs_rerender_control"]["normalized_mean_absolute_channel_delta"],
+                0.02,
+            )
+            self.assertEqual(
+                variant["metric_delta_vs_rerender_control"]["normalized_rms_channel_delta"],
+                0.03,
+            )
+            self.assertEqual(
                 variant["crop_delta_vs_baseline"][0]["mean_absolute_channel_delta"],
                 10.0 / 3.0,
             )
@@ -246,7 +254,9 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                 / "summary.md"
             )
             self.assertTrue(summary_path.exists())
-            self.assertIn("rendered-layer mask probe", summary_path.read_text(encoding="utf-8"))
+            summary_markdown = summary_path.read_text(encoding="utf-8")
+            self.assertIn("rendered-layer mask probe", summary_markdown)
+            self.assertIn("Mean delta vs control", summary_markdown)
 
     def test_markdown_summary_lists_render_moving_variants(self):
         markdown = render_markdown_summary({
@@ -448,6 +458,10 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                                 "normalized_mean_absolute_channel_delta": 0.01,
                                 "normalized_rms_channel_delta": 0.02,
                             },
+                            "metric_delta_vs_rerender_control": {
+                                "normalized_mean_absolute_channel_delta": 0.015,
+                                "normalized_rms_channel_delta": 0.025,
+                            },
                             "crop_delta_vs_baseline": [{
                                 "mean_absolute_channel_delta": 0.1,
                                 "rms_channel_delta": 0.2,
@@ -497,6 +511,10 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                                 "normalized_mean_absolute_channel_delta": -0.03,
                                 "normalized_rms_channel_delta": -0.04,
                             },
+                            "metric_delta_vs_rerender_control": {
+                                "normalized_mean_absolute_channel_delta": -0.04,
+                                "normalized_rms_channel_delta": -0.05,
+                            },
                             "crop_delta_vs_baseline": [{
                                 "mean_absolute_channel_delta": -0.5,
                                 "rms_channel_delta": -0.6,
@@ -527,6 +545,11 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
         self.assertIn("rendered-layer mask aggregate", markdown)
         self.assertIn("| `contour-z13-lines` | 2 | 2 | 1 | 1 | 0 | 0 |", markdown)
         self.assertIn("| `park-grass-fills` | 2 | 2 | 1 | 0 | 0 | 1 |", markdown)
+        self.assertIn(
+            "| `contour-z13-lines` | `chamonix-trails-z14-outdoors` | `improving` | "
+            "`rerender-control` | -0.040000000 | -0.050000000 | yes |",
+            markdown,
+        )
         self.assertIn(
             "| `contour-labels` | `geneva-airport-motorway-z14-outdoors` | 1 | `[0, 0, 1, 1]` | "
             "`improving` | -0.300000000 | -0.400000000 | yes |",

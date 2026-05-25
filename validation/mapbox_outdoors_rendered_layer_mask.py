@@ -422,6 +422,7 @@ def _variant_report(
     variant: RenderedLayerMaskVariant,
     context: RenderedLayerMaskContext,
     control_qgis_path: Path | None = None,
+    control_metrics: Mapping[str, object] | None = None,
     control_crop_metrics: Sequence[Mapping[str, object]] = (),
 ) -> dict[str, object]:
     variant_dir = _variant_directory(context.run_dir, variant.name)
@@ -504,6 +505,15 @@ def _variant_report(
         "crop_delta_vs_baseline": crop_delta_vs_baseline,
     }
     if control_qgis_path is not None:
+        report["metric_delta_vs_rerender_control"] = metric_delta(
+            metrics,
+            _mapping_value(control_metrics),
+            keys=(
+                "changed_pixel_ratio",
+                "normalized_mean_absolute_channel_delta",
+                "normalized_rms_channel_delta",
+            ),
+        )
         report["qgis_movement_vs_rerender_control_metrics"] = context.diff_builder(
             reference_path=control_qgis_path,
             candidate_path=qgis_path,
@@ -576,6 +586,7 @@ def build_rendered_layer_mask_report(
 
     variants: list[dict[str, object]] = []
     control_qgis_path: Path | None = None
+    control_metrics: Mapping[str, object] | None = None
     control_crop_metrics: Sequence[Mapping[str, object]] = ()
     context = RenderedLayerMaskContext(
         run_dir=paths.run_dir,
@@ -595,11 +606,17 @@ def build_rendered_layer_mask_report(
             variant=variant,
             context=context,
             control_qgis_path=control_qgis_path,
+            control_metrics=control_metrics,
             control_crop_metrics=control_crop_metrics,
         )
         if variant.name == control_variant_name:
             variant_report["is_rerender_control"] = True
             control_qgis_path = _variant_directory(paths.run_dir, variant.name) / QGIS_RENDER_OUTPUT
+            control_metrics = (
+                variant_report.get("metrics")
+                if isinstance(variant_report.get("metrics"), Mapping)
+                else {}
+            )
             control_crop_metrics = (
                 variant_report.get("crop_metrics")
                 if isinstance(variant_report.get("crop_metrics"), list)
@@ -694,6 +711,7 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
 def _whole_image_row(row: Mapping[str, object]) -> str:
     metrics = _mapping_value(row.get("metrics"))
     delta = _mapping_value(row.get("metric_delta_vs_baseline"))
+    control_delta = _mapping_value(row.get("metric_delta_vs_rerender_control"))
     control_movement = _mapping_value(row.get("qgis_movement_vs_rerender_control_metrics"))
     return (
         f"| `{row.get('name')}` | {len(row.get('target_layer_ids') or [])} | "
@@ -702,6 +720,8 @@ def _whole_image_row(row: Mapping[str, object]) -> str:
         f"{_format_number(metrics.get('normalized_rms_channel_delta'))} | "
         f"{_format_number(delta.get('normalized_mean_absolute_channel_delta'))} | "
         f"{_format_number(delta.get('normalized_rms_channel_delta'))} | "
+        f"{_format_number(control_delta.get('normalized_mean_absolute_channel_delta'))} | "
+        f"{_format_number(control_delta.get('normalized_rms_channel_delta'))} | "
         f"{_format_number(control_movement.get('normalized_mean_absolute_channel_delta'))} | "
         f"{_format_number(control_movement.get('normalized_rms_channel_delta'))} |"
     )
@@ -716,12 +736,12 @@ def _whole_image_lines(
         "",
         "## Whole-image metrics",
         "",
-        "| Variant | Target layers | Render changed | Mean abs delta | RMS delta | Mean delta vs baseline | RMS delta vs baseline | QGIS mean vs control | QGIS RMS vs control |",
-        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Variant | Target layers | Render changed | Mean abs delta | RMS delta | Mean delta vs baseline | RMS delta vs baseline | Mean delta vs control | RMS delta vs control | QGIS mean vs control | QGIS RMS vs control |",
+        "| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
         (
             "| `baseline` |  |  | "
             f"{_format_number(baseline_metrics.get('normalized_mean_absolute_channel_delta'))} | "
-            f"{_format_number(baseline_metrics.get('normalized_rms_channel_delta'))} |  |  |  |  |"
+            f"{_format_number(baseline_metrics.get('normalized_rms_channel_delta'))} |  |  |  |  |  |  |"
         ),
         *[_whole_image_row(row) for row in variant_rows],
     ]
@@ -925,8 +945,15 @@ def _read_lines(
     ]
 
 
+def _whole_image_delta(row: Mapping[str, object]) -> tuple[Mapping[str, object], str]:
+    control_delta = _mapping_value(row.get("metric_delta_vs_rerender_control"))
+    if control_delta:
+        return control_delta, "rerender-control"
+    return _mapping_value(row.get("metric_delta_vs_baseline")), "baseline"
+
+
 def _whole_image_signal(row: Mapping[str, object]) -> str | None:
-    delta = _mapping_value(row.get("metric_delta_vs_baseline"))
+    delta, _source = _whole_image_delta(row)
     mean_delta = _numeric_metric_value(delta, "normalized_mean_absolute_channel_delta")
     rms_delta = _numeric_metric_value(delta, "normalized_rms_channel_delta")
     if mean_delta is None or rms_delta is None:
@@ -953,11 +980,12 @@ def _aggregate_mask_variant_entry(
     variant_name: str,
     camera_name: str,
 ) -> dict[str, object]:
-    delta = _mapping_value(row.get("metric_delta_vs_baseline"))
+    delta, delta_source = _whole_image_delta(row)
     return {
         "variant": variant_name,
         "camera": camera_name,
         "signal": _whole_image_signal(row) or "none",
+        "delta_source": delta_source,
         "mean_delta": _numeric_metric_value(delta, "normalized_mean_absolute_channel_delta"),
         "rms_delta": _numeric_metric_value(delta, "normalized_rms_channel_delta"),
         "render_changed": bool(row.get("render_changed")),
@@ -1094,6 +1122,7 @@ def _aggregate_mask_total_row(row: Mapping[str, object]) -> str:
 def _aggregate_mask_variant_row(row: Mapping[str, object]) -> str:
     return (
         f"| `{row.get('variant')}` | `{row.get('camera')}` | `{row.get('signal')}` | "
+        f"`{row.get('delta_source')}` | "
         f"{_format_number(row.get('mean_delta'))} | {_format_number(row.get('rms_delta'))} | "
         f"{'yes' if row.get('render_changed') else 'no'} |"
     )
@@ -1173,10 +1202,10 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         "",
         "## Whole-image movement",
         "",
-        "| Variant | Camera | Signal | Mean delta vs baseline | RMS delta vs baseline | Render changed |",
-        "| --- | --- | --- | ---: | ---: | --- |",
+        "| Variant | Camera | Signal | Delta source | Mean delta | RMS delta | Render changed |",
+        "| --- | --- | --- | --- | ---: | ---: | --- |",
     ])
-    lines.extend(_aggregate_mask_variant_row(row) for row in variant_rows) if variant_rows else lines.append("| _none_ |  |  |  |  |  |")
+    lines.extend(_aggregate_mask_variant_row(row) for row in variant_rows) if variant_rows else lines.append("| _none_ |  |  |  |  |  |  |")
     lines.extend([
         "",
         "## Crop movement",
