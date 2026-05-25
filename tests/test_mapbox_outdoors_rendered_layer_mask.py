@@ -147,6 +147,11 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                         "normalized_rms_channel_delta": 0.0,
                         "changed_pixel_ratio": 0.0,
                     },
+                    "qgis_runtime": {
+                        "qgis_version": "3.44.0-Solothurn",
+                        "qgis_version_int": 34400,
+                        "qgis_release_name": "Solothurn",
+                    },
                 }),
                 encoding="utf-8",
             )
@@ -220,6 +225,7 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
 
             control = report["variants"][0]
             variant = report["variants"][1]
+            self.assertEqual(report["qgis_runtime"]["qgis_version"], "3.44.0-Solothurn")
             self.assertTrue(control["is_rerender_control"])
             self.assertEqual(control["name"], "qgis-rerender-control")
             self.assertTrue(variant["render_changed"])
@@ -256,12 +262,14 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
             self.assertTrue(summary_path.exists())
             summary_markdown = summary_path.read_text(encoding="utf-8")
             self.assertIn("rendered-layer mask probe", summary_markdown)
+            self.assertIn("QGIS runtime: `3.44.0-Solothurn`", summary_markdown)
             self.assertIn("Mean delta vs control", summary_markdown)
 
     def test_markdown_summary_lists_render_moving_variants(self):
         markdown = render_markdown_summary({
             "generated": "2026-05-22T07:30:00+00:00",
             "camera": {"name": "unit-camera"},
+            "qgis_runtime": {"qgis_version_int": 34400},
             "inputs": {"baseline_manifest": "debug/manifest.json"},
             "baseline": {"metrics": {"normalized_mean_absolute_channel_delta": 0.1}},
             "crop_boxes": [[0, 0, 1, 1]],
@@ -336,6 +344,7 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
         })
 
         self.assertIn("`moving`", markdown)
+        self.assertIn("QGIS runtime: `34400`", markdown)
         self.assertIn("## Crop movement", markdown)
         self.assertIn("| `moving` | 1 | `[0, 0, 1, 1]` | 1.000000000 | 2.000000000 | 3.000000000 |", markdown)
         self.assertIn("Control-adjusted render-moving variants: `moving`.", markdown)
@@ -447,6 +456,7 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
             geneva_report.write_text(
                 json.dumps({
                     "camera": {"name": "geneva-airport-motorway-z14-outdoors"},
+                    "qgis_runtime": {"qgis_version": "3.44.0-Solothurn"},
                     "rerender_control_variant": "qgis-rerender-control",
                     "crop_boxes": [[0, 0, 1, 1]],
                     "variants": [
@@ -501,6 +511,7 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
             chamonix_report.write_text(
                 json.dumps({
                     "camera": {"name": "chamonix-trails-z14-outdoors"},
+                    "qgis_runtime": {"qgis_release_name": "Future"},
                     "rerender_control_variant": "qgis-rerender-control",
                     "crop_boxes": [[0, 0, 1, 1]],
                     "variants": [
@@ -542,7 +553,9 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
             )
             markdown = render_aggregate_markdown_summary(aggregate)
 
+        self.assertEqual(aggregate["qgis_runtimes"], ["3.44.0-Solothurn", "Future"])
         self.assertIn("rendered-layer mask aggregate", markdown)
+        self.assertIn("QGIS runtimes: `3.44.0-Solothurn, Future`", markdown)
         self.assertIn("| `contour-z13-lines` | 2 | 2 | 1 | 1 | 0 | 0 |", markdown)
         self.assertIn("| `park-grass-fills` | 2 | 2 | 1 | 0 | 0 | 1 |", markdown)
         self.assertIn(

@@ -55,6 +55,7 @@ REPORT_CAMERA_DIRECTORY = "comparison-camera"
 VARIANT_SPEC_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*=[^=]+$")
 SAFE_PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 LUMINANCE_WEIGHTS = (0.2126, 0.7152, 0.0722)
+QGIS_RUNTIME_NOT_CAPTURED = "(not captured)"
 
 
 @dataclass(frozen=True)
@@ -148,6 +149,25 @@ def load_json_object(path: Path) -> dict[str, object]:
     if not isinstance(loaded, dict):
         raise ValueError(f"Expected JSON object: {path}")
     return loaded
+
+
+def _qgis_runtime_from_mapping(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _qgis_runtime_label(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return QGIS_RUNTIME_NOT_CAPTURED
+    qgis_version = value.get("qgis_version")
+    if qgis_version:
+        return str(qgis_version)
+    qgis_version_int = value.get("qgis_version_int")
+    if qgis_version_int is not None:
+        return str(qgis_version_int)
+    qgis_release_name = value.get("qgis_release_name")
+    if qgis_release_name:
+        return str(qgis_release_name)
+    return QGIS_RUNTIME_NOT_CAPTURED
 
 
 def _resolve_artifact_path(path_text: object, *, manifest_path: Path) -> Path:
@@ -626,6 +646,7 @@ def build_rendered_layer_mask_report(
     report: dict[str, object] = {
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "camera": dataclasses.asdict(camera),
+        "qgis_runtime": _qgis_runtime_from_mapping(manifest.get("qgis_runtime")),
         "rerender_control_variant": control_variant_name if config.include_rerender_control else None,
         "inputs": {
             "baseline_manifest": _repo_relative(manifest_path),
@@ -701,6 +722,7 @@ def _summary_header_lines(report: Mapping[str, object]) -> list[str]:
         "",
         f"Generated: `{report.get('generated')}`",
         f"Camera: `{camera.get('name')}`",
+        f"QGIS runtime: `{_qgis_runtime_label(report.get('qgis_runtime'))}`",
         "",
         "Inputs:",
     ]
@@ -1037,11 +1059,12 @@ def _aggregate_mask_crop_entries(
 
 def _aggregate_mask_entries(
     report_path_value: Path,
-) -> tuple[str, list[dict[str, object]], list[dict[str, object]]]:
+) -> tuple[str, str, list[dict[str, object]], list[dict[str, object]]]:
     report_path = report_path_value.expanduser().resolve()
     report = load_json_object(report_path)
     camera = _mapping_value(report.get("camera"))
     camera_name = str(camera.get("name") or "(unknown camera)")
+    qgis_runtime_label = _qgis_runtime_label(report.get("qgis_runtime"))
     control_name = report.get("rerender_control_variant")
     crop_boxes = report.get("crop_boxes")
     variant_entries: list[dict[str, object]] = []
@@ -1061,7 +1084,7 @@ def _aggregate_mask_entries(
                 crop_boxes=crop_boxes,
             )
         )
-    return _repo_relative(report_path), variant_entries, crop_entries
+    return _repo_relative(report_path), qgis_runtime_label, variant_entries, crop_entries
 
 
 def _aggregate_mask_totals(variant_entries: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
@@ -1092,17 +1115,22 @@ def build_rendered_layer_mask_aggregate_report(
     now: dt.datetime | None = None,
 ) -> dict[str, object]:
     input_reports = []
+    qgis_runtimes: set[str] = set()
     variant_entries: list[dict[str, object]] = []
     crop_entries: list[dict[str, object]] = []
     for report_path in report_paths:
-        input_path, report_variant_entries, report_crop_entries = _aggregate_mask_entries(report_path)
+        input_path, qgis_runtime_label, report_variant_entries, report_crop_entries = _aggregate_mask_entries(
+            report_path
+        )
         input_reports.append(input_path)
+        qgis_runtimes.add(qgis_runtime_label)
         variant_entries.extend(report_variant_entries)
         crop_entries.extend(report_crop_entries)
     generated = now or dt.datetime.now(dt.timezone.utc)
     return {
         "generated": generated.isoformat(timespec="seconds"),
         "input_reports": input_reports,
+        "qgis_runtimes": sorted(qgis_runtimes),
         "variant_totals": _aggregate_mask_totals(variant_entries),
         "variant_rows": sorted(variant_entries, key=lambda row: (str(row["variant"]), str(row["camera"]))),
         "crop_rows": sorted(
@@ -1176,6 +1204,7 @@ def _aggregate_read_lines(
 
 def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
     input_reports = [str(path) for path in report.get("input_reports") or []]
+    qgis_runtimes = [str(runtime) for runtime in report.get("qgis_runtimes") or []]
     totals = _list_of_mappings(report.get("variant_totals"))
     variant_rows = _list_of_mappings(report.get("variant_rows"))
     crop_rows = _list_of_mappings(report.get("crop_rows"))
@@ -1184,6 +1213,7 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         "",
         f"Generated: `{report.get('generated')}`",
         f"Input reports: `{len(input_reports)}`",
+        f"QGIS runtimes: `{', '.join(qgis_runtimes) if qgis_runtimes else QGIS_RUNTIME_NOT_CAPTURED}`",
     ]
     if input_reports:
         lines.extend(["", "Inputs:"])
