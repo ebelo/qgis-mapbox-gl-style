@@ -81,6 +81,7 @@ class _AggregateSourceLayerTotal:
     source_layer: str
     reports: set[str] = field(default_factory=set)
     cameras: set[str] = field(default_factory=set)
+    class_coverage: Counter[str] = field(default_factory=Counter)
     overlap_feature_count: int = 0
     coverage_sum: float = 0.0
     max_coverage: float = 0.0
@@ -2120,6 +2121,28 @@ def _report_qgis_runtimes(report: Mapping[str, object]) -> list[str]:
     return [str(runtime) for runtime in runtimes if runtime not in (None, "")]
 
 
+def _update_class_coverage(counter: Counter[str], record: Mapping[str, object]) -> None:
+    property_areas = record.get("property_overlap_areas")
+    if not isinstance(property_areas, Mapping):
+        return
+    class_areas = property_areas.get("class")
+    if not isinstance(class_areas, Mapping):
+        return
+    for class_name, area_record in class_areas.items():
+        if not isinstance(area_record, Mapping):
+            continue
+        coverage = _float_value(area_record.get("crop_coverage_ratio"))
+        if coverage > 0.0:
+            counter.update({str(class_name): coverage})
+
+
+def _class_coverage_row(counter: Counter[str]) -> dict[str, float]:
+    return {
+        class_name: _rounded_float(coverage)
+        for class_name, coverage in counter.most_common(MAX_COUNT_VALUES)
+    }
+
+
 def _update_source_layer_total(
     total: _AggregateSourceLayerTotal,
     *,
@@ -2131,6 +2154,7 @@ def _update_source_layer_total(
     overlap_feature_count = _int_value(record.get("overlap_feature_count"))
     total.reports.add(input_report)
     total.cameras.add(camera_name)
+    _update_class_coverage(total.class_coverage, record)
     total.overlap_feature_count += overlap_feature_count
     total.coverage_sum += coverage
     total.max_coverage = max(total.max_coverage, coverage)
@@ -2197,6 +2221,7 @@ def _source_layer_total_row(total: _AggregateSourceLayerTotal) -> dict[str, obje
         "coverage_sum": _rounded_float(total.coverage_sum),
         "max_bbox_crop_coverage_ratio": _rounded_float(total.max_coverage),
         "zero_overlap_reports": total.zero_overlap_reports,
+        "class_coverage": _class_coverage_row(total.class_coverage),
         "cameras": sorted(total.cameras),
     }
 
@@ -2337,6 +2362,12 @@ def _camera_list_label(value: object) -> str:
     return ", ".join(f"`{camera}`" for camera in value)
 
 
+def _format_class_coverage(value: object) -> str:
+    if not isinstance(value, Mapping) or not value:
+        return "-"
+    return ", ".join(f"{class_name}={_format_coverage(coverage)}" for class_name, coverage in value.items())
+
+
 def _aggregate_source_layer_row(row: Mapping[str, object]) -> str:
     return _markdown_table_row(
         [
@@ -2347,6 +2378,7 @@ def _aggregate_source_layer_row(row: Mapping[str, object]) -> str:
             _format_coverage(row.get("coverage_sum")),
             _format_coverage(row.get("max_bbox_crop_coverage_ratio")),
             row.get("zero_overlap_reports"),
+            _format_class_coverage(row.get("class_coverage")),
             _camera_list_label(row.get("cameras")),
         ]
     )
@@ -2408,6 +2440,20 @@ def _aggregate_style_read_labels(rows: Sequence[Mapping[str, object]]) -> list[s
     ][:5]
 
 
+def _aggregate_class_read_labels(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    labels = []
+    for row in rows:
+        class_coverage = row.get("class_coverage")
+        if not isinstance(class_coverage, Mapping) or not class_coverage:
+            continue
+        class_labels = ", ".join(
+            f"{class_name}={_format_coverage(coverage)}"
+            for class_name, coverage in list(class_coverage.items())[:3]
+        )
+        labels.append(f"{row.get('source_layer') or MISSING_VALUE}: {class_labels}")
+    return labels[:5]
+
+
 def _aggregate_zero_overlap_labels(rows: Sequence[Mapping[str, object]]) -> list[str]:
     return [
         str(row.get("source_layer") or MISSING_VALUE)
@@ -2428,6 +2474,7 @@ def _aggregate_read_lines(
         "",
         f"- Top source-layer bbox coverage sums: {_joined_read_labels(_aggregate_source_read_labels(source_rows))}.",
         f"- Top QGIS style-layer bbox coverage sums: {_joined_read_labels(_aggregate_style_read_labels(style_rows))}.",
+        f"- Top source-layer class coverage sums: {_joined_read_labels(_aggregate_class_read_labels(source_rows))}.",
         (
             "- Source layers with zero overlap wherever requested: "
             f"{_joined_read_labels(_aggregate_zero_overlap_labels(source_rows))}."
@@ -2459,10 +2506,10 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         "",
         "## Source layer totals",
         "",
-        "| Source layer | Reports | Cameras | Overlap features | Coverage sum | Max coverage | Zero-overlap reports | Cameras |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Source layer | Reports | Cameras | Overlap features | Coverage sum | Max coverage | Zero-overlap reports | Top class coverage | Cameras |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |",
     ])
-    lines.extend(_aggregate_source_layer_row(row) for row in source_rows) if source_rows else lines.append("| _none_ | 0 | 0 | 0 | 0 | 0 | 0 | |")
+    lines.extend(_aggregate_source_layer_row(row) for row in source_rows) if source_rows else lines.append("| _none_ | 0 | 0 | 0 | 0 | 0 | 0 | | |")
     lines.extend([
         "",
         "## QGIS style-layer coverage totals",

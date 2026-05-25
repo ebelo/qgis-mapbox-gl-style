@@ -209,7 +209,7 @@ python3 validation/mapbox_outdoors_source_crop_overlap.py \
   --aggregate-output /tmp/source-crop-overlap-aggregate.md
 ```
 
-The aggregate Markdown summarizes source-layer coverage sums, QGIS style-layer coverage sums, distinct QGIS runtimes, and per-camera rows from the input reports. Use it to choose the next owner-mask or missing-class probe across the camera matrix; it remains bbox attribution, not rendered-pixel ownership or a production style-change recommendation.
+The aggregate Markdown summarizes source-layer coverage sums, top class coverage within each source layer, QGIS style-layer coverage sums, distinct QGIS runtimes, and per-camera rows from the input reports. Use it to choose the next owner-mask or missing-class probe across the camera matrix; it remains bbox attribution, not rendered-pixel ownership or a production style-change recommendation.
 
 When source/crop overlap points at a possible rendered owner, run QGIS-only transparent layer masks against an existing comparison manifest before changing production paint:
 
