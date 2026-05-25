@@ -378,7 +378,7 @@ python3 validation/mapbox_outdoors_label_settings.py \
 
 Add `--qgis-contour-bbox-edge-difference-source-style-label-probe` or `--qgis-contour-bbox-edge-difference-source-style-high-zoom-label-probe` to include source-style variants in the same report.
 
-The report keeps the probe separate from source Mapbox layers, so the summary can distinguish converted production labels from diagnostic-only QGIS rules.
+The report keeps the probe separate from source Mapbox layers, so the summary can distinguish converted production labels from diagnostic-only QGIS rules. It also records token-free QGIS runtime metadata so label-conversion evidence can be compared safely across QGIS upgrades.
 
 ## Road feature diagnostic
 

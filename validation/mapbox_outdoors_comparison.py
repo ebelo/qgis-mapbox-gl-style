@@ -16,6 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, TypeAlias
 
+from qfit.validation.mapbox_outdoors_runtime import format_qgis_runtime_label
+from qfit.validation.mapbox_outdoors_runtime import qgis_runtime_snapshot as _runtime_snapshot
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = REPO_ROOT.parent
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-comparison"
@@ -714,12 +717,7 @@ def write_qgis_label_styles_snapshot(*, layer: object, output_path: Path, token:
 
 def qgis_runtime_snapshot(qgis_api: object) -> dict[str, object]:
     """Return token-free QGIS runtime metadata for version-sensitive render probes."""
-
-    return {
-        "qgis_version": getattr(qgis_api, "QGIS_VERSION", None),
-        "qgis_version_int": getattr(qgis_api, "QGIS_VERSION_INT", None),
-        "qgis_release_name": getattr(qgis_api, "QGIS_RELEASE_NAME", None),
-    }
+    return _runtime_snapshot(qgis_api)
 
 
 def write_qgis_runtime_snapshot(*, qgis_api: object, output_path: Path | None) -> None:
@@ -1546,18 +1544,7 @@ def _format_summary_metric(metrics: dict[str, object], key: str) -> str:
 
 
 def _format_qgis_runtime(value: object) -> str:
-    if not isinstance(value, dict):
-        return "—"
-    qgis_version = value.get("qgis_version")
-    if qgis_version:
-        return str(qgis_version)
-    qgis_version_int = value.get("qgis_version_int")
-    if qgis_version_int is not None:
-        return str(qgis_version_int)
-    qgis_release_name = value.get("qgis_release_name")
-    if qgis_release_name:
-        return str(qgis_release_name)
-    return "—"
+    return format_qgis_runtime_label(value, missing_label="—")
 
 
 def _artifact_markdown_path(path_text: object, *, base_dir: Path | None) -> str:

@@ -20,6 +20,7 @@ from qfit.validation.mapbox_outdoors_label_settings import (
     _data_defined_expression_issue_rows,
     _ensure_qgis_application,
     _fetch_sprite_resources,
+    _format_qgis_runtime,
     _geometry_generator_markdown_value,
     _label_settings_report,
     _label_style_summary_rows,
@@ -378,7 +379,12 @@ def _fake_qgis_modules():
     core_module.QgsPalLayerSettings = FakeQgsPalLayerSettings
     core_module.QgsProperty = FakeQgsProperty
     core_module.QgsTextBackgroundSettings = FakeQgsTextBackgroundSettings
-    core_module.Qgis = SimpleNamespace(RenderUnit=SimpleNamespace(Millimeters="millimeters"))
+    core_module.Qgis = SimpleNamespace(
+        RenderUnit=SimpleNamespace(Millimeters="millimeters"),
+        QGIS_VERSION="3.44.0-Solothurn",
+        QGIS_VERSION_INT=34400,
+        QGIS_RELEASE_NAME="Solothurn",
+    )
     qgis_module.core = core_module
     return {"qgis": qgis_module, "qgis.core": core_module}
 
@@ -541,20 +547,20 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         self.assertTrue(app.initialized)
         self.assertIs(FakeQgsApplication.instance(), app)
 
-    def test_qgis_duplicate_label_controls_report_runtime_support(self):
-        class FakeQgis:
-            QGIS_VERSION = "3.44.0"
-
+    def test_qgis_duplicate_label_controls_report_available_controls(self):
         class FakePalLayerSettings:
             RemoveDuplicateLabels = 1
             RemoveDuplicateLabelDistance = 2
 
-        controls = _qgis_duplicate_label_controls(FakePalLayerSettings, FakeQgis)
+        controls = _qgis_duplicate_label_controls(FakePalLayerSettings)
 
-        self.assertEqual(controls["qgis_version"], "3.44.0")
         self.assertTrue(controls["remove_duplicate_labels"])
         self.assertTrue(controls["remove_duplicate_label_distance"])
         self.assertFalse(controls["label_margin_distance"])
+
+    def test_format_qgis_runtime_uses_release_name_fallback(self):
+        self.assertEqual(_format_qgis_runtime({"qgis_release_name": "Future"}), "Future")
+        self.assertEqual(_format_qgis_runtime({"qgis_version_int": 0}), "0")
 
     def test_qgis_pal_layer_property_names_by_value_reports_enum_names(self):
         names = _qgis_pal_layer_property_names_by_value(FakeQgsPalLayerSettings)
@@ -2032,6 +2038,14 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         append_source_style_probe.assert_called_once()
         append_source_style_high_zoom_probe.assert_called_once()
         self.assertEqual(report["qgis_converter_result"], "success")
+        self.assertEqual(
+            report["qgis_runtime"],
+            {
+                "qgis_version": "3.44.0-Solothurn",
+                "qgis_version_int": 34400,
+                "qgis_release_name": "Solothurn",
+            },
+        )
         self.assertEqual(report["sprite_definition_count"], 1)
         self.assertFalse(report["sprite_context_loaded"])
         self.assertTrue(report["qgis_contour_bbox_edge_difference_label_probe"])
@@ -2073,10 +2087,14 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
             "style_owner": "mapbox",
             "style_id": "outdoors-v12",
             "generated": "2026-05-18T08:22:00+00:00",
+            "qgis_runtime": {
+                "qgis_version": "3.34.4-Prizren",
+                "qgis_version_int": 33404,
+                "qgis_release_name": "Prizren",
+            },
             "sprite_context_loaded": True,
             "sprite_definition_count": 440,
             "qgis_duplicate_label_controls": {
-                "qgis_version": "3.34.4-Prizren",
                 "remove_duplicate_labels": False,
                 "remove_duplicate_label_distance": False,
                 "label_margin_distance": False,
@@ -2324,10 +2342,11 @@ class MapboxOutdoorsLabelSettingsTests(unittest.TestCase):
         markdown = build_summary_markdown(report)
 
         self.assertIn("# Mapbox Outdoors QGIS label settings — mapbox/outdoors-v12", markdown)
+        self.assertIn("QGIS runtime: `3.34.4-Prizren`", markdown)
         self.assertIn("Converted label styles: 1", markdown)
         self.assertIn("Sprite context loaded: yes", markdown)
         self.assertIn(
-            "QGIS duplicate-label controls: QGIS 3.34.4-Prizren; remove_duplicate_labels=no; remove_duplicate_label_distance=no; label_margin_distance=no",
+            "QGIS duplicate-label controls: remove_duplicate_labels=no; remove_duplicate_label_distance=no; label_margin_distance=no",
             markdown,
         )
         self.assertIn("Bbox-edge contour label probe: yes", markdown)

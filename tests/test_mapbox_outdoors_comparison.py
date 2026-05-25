@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from tests import _path  # noqa: F401
 
+from qfit.validation.mapbox_outdoors_runtime import format_qgis_runtime_label
 from qfit.validation.mapbox_outdoors_comparison import (
     CAMERAS,
     CONTACT_SHEET_COLUMN_GAP,
@@ -202,6 +203,9 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
 
     def test_format_qgis_runtime_falls_back_to_release_name(self):
         self.assertEqual(_format_qgis_runtime({"qgis_release_name": "Future"}), "Future")
+
+    def test_format_qgis_runtime_label_uses_configured_missing_label(self):
+        self.assertEqual(format_qgis_runtime_label({}, missing_label="missing"), "missing")
 
     def test_load_optional_qgis_runtime_snapshot_ignores_invalid_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 
+from qfit.validation.mapbox_outdoors_runtime import format_qgis_runtime_label
+from qfit.validation.mapbox_outdoors_runtime import qgis_runtime_snapshot
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_PARENT = REPO_ROOT.parent
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "debug" / "mapbox-outdoors-label-settings"
@@ -626,9 +629,8 @@ def _ensure_qgis_application(qgs_application):
     return app, created_app
 
 
-def _qgis_duplicate_label_controls(qgs_pal_layer_settings, qgis_api) -> dict[str, object]:
+def _qgis_duplicate_label_controls(qgs_pal_layer_settings) -> dict[str, object]:
     return {
-        "qgis_version": getattr(qgis_api, "QGIS_VERSION", None),
         **{
             key: hasattr(qgs_pal_layer_settings, property_name)
             for key, property_name in _QGIS_DUPLICATE_LABEL_CONTROL_PROPERTIES
@@ -1908,12 +1910,14 @@ def _label_settings_report(
     records: list[dict[str, object]],
     source_label_layers: list[dict[str, object]] | None = None,
     qgis_duplicate_label_controls: dict[str, object] | None = None,
+    qgis_runtime: dict[str, object] | None = None,
 ) -> dict[str, object]:
     source_label_layer_rows = source_label_layers or []
     return {
         "style_owner": config.style_owner,
         "style_id": config.style_id,
         "generated": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "qgis_runtime": qgis_runtime or {},
         "qgis_converter_result": result,
         "sprite_context_requested": config.include_sprite_context,
         "sprite_context_loaded": sprite_loaded,
@@ -2001,7 +2005,8 @@ def collect_label_settings(config: LabelSettingsConfig) -> dict[str, object]:
             sprite_count=sprite_count,
             records=records,
             source_label_layers=source_label_layers,
-            qgis_duplicate_label_controls=_qgis_duplicate_label_controls(QgsPalLayerSettings, Qgis),
+            qgis_duplicate_label_controls=_qgis_duplicate_label_controls(QgsPalLayerSettings),
+            qgis_runtime=qgis_runtime_snapshot(Qgis),
         )
     finally:
         if created_app:
@@ -2127,6 +2132,10 @@ def _qgis_duplicate_label_controls_markdown_value(value: object) -> str:
     if qgis_version:
         controls.insert(0, f"QGIS {_markdown_value(qgis_version)}")
     return "; ".join(controls)
+
+
+def _format_qgis_runtime(value: object) -> str:
+    return format_qgis_runtime_label(value, missing_label="(not captured)")
 
 
 def _zoom_range_markdown_value(minzoom: object, maxzoom: object) -> str:
@@ -2590,6 +2599,7 @@ def build_summary_markdown(report: dict[str, object]) -> str:
         f"# Mapbox Outdoors QGIS label settings — {report.get('style_owner')}/{report.get('style_id')}",
         "",
         f"Generated: {report.get('generated')}",
+        f"QGIS runtime: `{_format_qgis_runtime(report.get('qgis_runtime'))}`",
         f"Converted label styles: {report.get('label_count', len(rows))}",
         f"Sprite context loaded: {_markdown_value(report.get('sprite_context_loaded'))}",
         f"Sprite definitions: {_markdown_value(report.get('sprite_definition_count'))}",
