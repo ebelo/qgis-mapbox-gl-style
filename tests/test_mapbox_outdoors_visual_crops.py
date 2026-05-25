@@ -2242,6 +2242,117 @@ class MapboxOutdoorsVisualCropsTest(unittest.TestCase):
             markdown,
         )
 
+    def test_build_summary_markdown_adds_report_read(self):
+        markdown = build_summary_markdown(
+            {
+                "generated": "2026-05-20T20:00:00+00:00",
+                "comparison_summary_json": "debug/comparison/summary.json",
+                "comparison_summary_run": {
+                    "path": "debug/comparison/summary.json",
+                    "qgis_runtimes": ["3.34.4-Prizren"],
+                },
+                "crop_size": {"width": 4, "height": 4},
+                "crops_per_camera": 1,
+                "camera_count": 2,
+                "crop_count": 3,
+                "crop_color_movement_groups": [
+                    {
+                        "movement": "lighter + blue higher",
+                        "crop_count": 3,
+                        "cameras": {
+                            "geneva-airport-motorway-z14-outdoors": 1,
+                            "zermatt-trails-z18-outdoors": 2,
+                        },
+                        "representative_crop": {
+                            "camera": "zermatt-trails-z18-outdoors",
+                            "crop": 1,
+                            "qgis_minus_mapbox_rgb": [2.0, 0.0, 16.0],
+                            "qgis_minus_mapbox_luminance": 8.0,
+                        },
+                    }
+                ],
+                "style_audit_area_fill_focus": [
+                    {
+                        "label": "Terrain/landcover",
+                        "candidate_count": 9,
+                        "by_source_layer": [
+                            {"source_layer": "landuse_overlay", "count": 4},
+                            {"source_layer": "landuse", "count": 2},
+                            {"source_layer": "contour", "count": 1},
+                        ],
+                        "qgis_dependent_by_property": [
+                            {"property": "filter", "count": 9},
+                            {"property": "paint.fill-pattern", "count": 1},
+                        ],
+                    },
+                    {
+                        "label": "Airport/special landuse",
+                        "candidate_count": 7,
+                        "by_source_layer": [
+                            {"source_layer": "landuse", "count": 4},
+                            {"source_layer": "aeroway", "count": 2},
+                        ],
+                        "qgis_dependent_by_property": [
+                            {"property": "filter", "count": 7},
+                        ],
+                    },
+                ],
+                "style_audit_area_fill_camera_focus": [
+                    {
+                        "camera": "geneva-airport-motorway-z14-outdoors",
+                        "areas": [
+                            {
+                                "label": "Terrain/landcover",
+                                "active_candidate_count": 5,
+                            },
+                            {
+                                "label": "Airport/special landuse",
+                                "active_candidate_count": 3,
+                            },
+                        ],
+                    },
+                    {
+                        "camera": "zermatt-trails-z18-outdoors",
+                        "areas": [
+                            {
+                                "label": "Terrain/landcover",
+                                "active_candidate_count": 4,
+                            }
+                        ],
+                    },
+                ],
+                "cameras": [],
+            }
+        )
+
+        report_read = markdown.split("## Report read", 1)[1].split(
+            "Crops are selected",
+            1,
+        )[0]
+        self.assertIn("| QGIS runtimes | 3.34.4-Prizren |", report_read)
+        self.assertIn(
+            (
+                "| Top crop color movements | lighter + blue higher=3 "
+                "(rep 2.0, 0.0, 16.0 / +8.0) |"
+            ),
+            report_read,
+        )
+        self.assertIn(
+            (
+                "Terrain/landcover (9 candidates; sources landuse_overlay=4, "
+                "landuse=2, contour=1; QGIS-dependent filter=9, "
+                "paint.fill-pattern=1)"
+            ),
+            report_read,
+        )
+        self.assertIn(
+            (
+                "Airport/special landuse=3 active candidates across 1 camera row, "
+                "Terrain/landcover=9 active candidates across 2 camera rows"
+            ),
+            report_read,
+        )
+
     def test_build_summary_markdown_handles_malformed_color_delta_values(self):
         markdown = build_summary_markdown(
             {

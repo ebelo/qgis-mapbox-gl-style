@@ -2142,6 +2142,128 @@ def _comparison_summary_run_markdown(value: object) -> str:
     return f"`{path_value}`{suffix}"
 
 
+def _summary_read_qgis_runtime_label(report: Mapping[str, object]) -> str:
+    comparison_summary_run = report.get("comparison_summary_run")
+    if not isinstance(comparison_summary_run, Mapping):
+        return ""
+    qgis_runtimes = comparison_summary_run.get("qgis_runtimes")
+    if not isinstance(qgis_runtimes, list):
+        return ""
+    labels = [str(runtime) for runtime in qgis_runtimes if runtime not in (None, "")]
+    return " | ".join(labels)
+
+
+def _mapping_rows(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, Mapping)]
+
+
+def _summary_read_area_fill_detail_parts(row: Mapping[str, object]) -> list[str]:
+    parts = []
+    candidate_count = row.get("candidate_count")
+    if isinstance(candidate_count, int) and not isinstance(candidate_count, bool):
+        parts.append(f"{candidate_count} candidates")
+    source_layers = _count_summary_labels(row.get("by_source_layer"), "source_layer")[:3]
+    if source_layers:
+        parts.append(f"sources {_joined_summary_labels(source_layers)}")
+    qgis_dependent = _count_summary_labels(
+        row.get("qgis_dependent_by_property"),
+        "property",
+    )[:3]
+    if qgis_dependent:
+        parts.append(f"QGIS-dependent {_joined_summary_labels(qgis_dependent)}")
+    return parts
+
+
+def _summary_read_area_fill_label(row: Mapping[str, object]) -> str:
+    area_label = row.get("label")
+    if not isinstance(area_label, str) or not area_label:
+        return ""
+    detail_parts = _summary_read_area_fill_detail_parts(row)
+    if not detail_parts:
+        return area_label
+    return f"{area_label} ({'; '.join(detail_parts)})"
+
+
+def _summary_read_area_fill_labels(report: Mapping[str, object]) -> list[str]:
+    return [
+        label
+        for row in _mapping_rows(report.get("style_audit_area_fill_focus"))
+        if (label := _summary_read_area_fill_label(row))
+    ]
+
+
+def _add_summary_read_active_area_fill_count(
+    area_counts: dict[str, dict[str, int]],
+    area: Mapping[str, object],
+) -> None:
+    label = area.get("label")
+    if not isinstance(label, str) or not label:
+        return
+    counts = area_counts.setdefault(label, {"camera_rows": 0, "active_candidates": 0})
+    counts["camera_rows"] += 1
+    active_candidate_count = area.get("active_candidate_count")
+    if isinstance(active_candidate_count, int) and not isinstance(
+        active_candidate_count,
+        bool,
+    ):
+        counts["active_candidates"] += active_candidate_count
+
+
+def _summary_read_active_area_fill_labels(report: Mapping[str, object]) -> list[str]:
+    area_counts: dict[str, dict[str, int]] = {}
+    camera_focus_rows = _mapping_rows(report.get("style_audit_area_fill_camera_focus"))
+    for camera_focus in camera_focus_rows:
+        for area in _mapping_rows(camera_focus.get("areas")):
+            _add_summary_read_active_area_fill_count(area_counts, area)
+    return [
+        (
+            f"{label}={counts['active_candidates']} active candidates "
+            f"across {counts['camera_rows']} camera "
+            f"{'row' if counts['camera_rows'] == 1 else 'rows'}"
+        )
+        for label, counts in sorted(area_counts.items())
+    ]
+
+
+def _summary_read_lines(report: Mapping[str, object]) -> list[str]:
+    rows = []
+    qgis_runtime_label = _summary_read_qgis_runtime_label(report)
+    if qgis_runtime_label:
+        rows.append(["QGIS runtimes", qgis_runtime_label])
+    movement_labels = _area_fill_crop_movement_labels(report)[:3]
+    if movement_labels:
+        rows.append(["Top crop color movements", _joined_summary_labels(movement_labels)])
+    area_fill_labels = _summary_read_area_fill_labels(report)
+    if area_fill_labels:
+        rows.append(["Style audit area-fill candidates", _joined_summary_labels(area_fill_labels)])
+    active_area_fill_labels = _summary_read_active_area_fill_labels(report)
+    if active_area_fill_labels:
+        rows.append(
+            [
+                "Active area-fill candidates at crop zooms",
+                _joined_summary_labels(active_area_fill_labels),
+            ]
+        )
+    if not rows:
+        return []
+    lines = [
+        "",
+        "## Report read",
+        "",
+        (
+            "Condenses the runtime, repeated crop tint families, and style-audit area-fill "
+            "cues that are most useful before choosing a follow-up Mapbox Outdoors style slice."
+        ),
+        "",
+        "| Signal | Read |",
+        "| --- | --- |",
+    ]
+    lines.extend(_markdown_table_row(row) for row in rows)
+    return lines
+
+
 def _include_comparison_delta_columns(report: Mapping[str, object]) -> bool:
     return any(
         isinstance(camera, Mapping) and isinstance(camera.get("comparison_delta"), Mapping)
@@ -3355,6 +3477,7 @@ def _style_audit_area_fill_candidate_detail_lines(report: Mapping[str, object]) 
 def build_summary_markdown(report: Mapping[str, object]) -> str:
     lines = _summary_header_lines(report)
     include_comparison_delta = _include_comparison_delta_columns(report)
+    lines.extend(_summary_read_lines(report))
     lines.extend(_summary_table_intro_lines(report))
     for camera in report.get("cameras", []):
         if not isinstance(camera, Mapping):
