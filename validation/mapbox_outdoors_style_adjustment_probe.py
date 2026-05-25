@@ -930,6 +930,30 @@ def _crop_signal_label(row: Mapping[str, object]) -> str:
     )
 
 
+def _has_repeated_render_range(row: Mapping[str, object]) -> bool:
+    if _runs_count(row) < 2:
+        return False
+    mean_range = _numeric_metric_value(row, "mean_delta_range") or 0.0
+    rms_range = _numeric_metric_value(row, "rms_delta_range") or 0.0
+    return mean_range > 0.0 or rms_range > 0.0
+
+
+def _repeat_range_label(row: Mapping[str, object]) -> str:
+    return (
+        f"`{row.get('variant')}` on `{row.get('camera')}` "
+        f"(`{row.get('delta_source')}`, {_runs_count(row)} runs, mean/RMS range "
+        f"{_format_number(row.get('mean_delta_range'))}/{_format_number(row.get('rms_delta_range'))})"
+    )
+
+
+def _crop_repeat_range_label(row: Mapping[str, object]) -> str:
+    return (
+        f"`{row.get('variant')}` on `{row.get('camera')}` crop {row.get('crop')} "
+        f"(`{row.get('delta_source')}`, {_runs_count(row)} runs, mean/RMS range "
+        f"{_format_number(row.get('mean_delta_range'))}/{_format_number(row.get('rms_delta_range'))})"
+    )
+
+
 def _metric_sort_value(row: Mapping[str, object]) -> float:
     mean_delta = _numeric_metric_value(row, "mean_delta_average") or 0.0
     rms_delta = _numeric_metric_value(row, "rms_delta_average") or 0.0
@@ -948,10 +972,22 @@ def _format_limited(labels: Sequence[str], *, limit: int = 5) -> str:
 def _aggregate_read_lines(
     *,
     totals: Sequence[Mapping[str, object]],
+    rows: Sequence[Mapping[str, object]],
     crop_rows: Sequence[Mapping[str, object]],
 ) -> list[str]:
     all_improving_totals = [_variant_signal_label(row) for row in totals if _is_all_improving(row)]
     mixed_totals = [_variant_signal_label(row) for row in totals if _is_mixed_signal(row)]
+    unstable_rows = [
+        _repeat_range_label(row)
+        for row in sorted(
+            (row for row in rows if _has_repeated_render_range(row)),
+            key=lambda row: (
+                str(row.get("variant")),
+                str(row.get("camera")),
+                str(row.get("delta_source")),
+            ),
+        )
+    ]
     all_improving_crops = [
         _crop_signal_label(row)
         for row in sorted(
@@ -960,14 +996,28 @@ def _aggregate_read_lines(
         )
     ]
     mixed_crops = [_crop_signal_label(row) for row in crop_rows if _is_mixed_signal(row)]
+    unstable_crops = [
+        _crop_repeat_range_label(row)
+        for row in sorted(
+            (row for row in crop_rows if _has_repeated_render_range(row)),
+            key=lambda row: (
+                str(row.get("variant")),
+                str(row.get("camera")),
+                _count_value(row, "crop"),
+                str(row.get("delta_source")),
+            ),
+        )
+    ]
     return [
         "",
         "## Read",
         "",
         f"- Whole-image all-improving variants: {_format_limited(all_improving_totals)}.",
         f"- Whole-image mixed-signal variants: {_format_limited(mixed_totals)}.",
+        f"- Repeated-render unstable whole-image rows: {_format_limited(unstable_rows)}.",
         f"- Crop rows all-improving: {_format_limited(all_improving_crops)}.",
         f"- Crop rows mixed-signal: {_format_limited(mixed_crops)}.",
+        f"- Repeated-render unstable crop rows: {_format_limited(unstable_crops)}.",
         "- Treat crop-only wins as diagnostic leads; promote a style change only after camera-matrix validation avoids regressions.",
     ]
 
@@ -1010,7 +1060,7 @@ def render_aggregate_markdown_summary(report: Mapping[str, object]) -> str:
         lines.extend(_aggregate_crop_row(row) for row in crop_rows)
     else:
         lines.append("| _none_ |  |  | 0 |  | 0 |  |  |  |  |  | 0 | 0 | 0 |")
-    lines.extend(_aggregate_read_lines(totals=totals, crop_rows=crop_rows))
+    lines.extend(_aggregate_read_lines(totals=totals, rows=rows, crop_rows=crop_rows))
     lines.extend([
         "",
         "## Key",

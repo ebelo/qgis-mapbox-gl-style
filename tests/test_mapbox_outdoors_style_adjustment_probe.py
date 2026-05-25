@@ -556,9 +556,21 @@ class MapboxOutdoorsStyleAdjustmentProbeTests(unittest.TestCase):
             markdown,
         )
         self.assertIn(
+            "Repeated-render unstable whole-image rows: "
+            "`landcover-opacity-70` on `valais-geneva-outdoors` "
+            "(`rerender_control`, 2 runs, mean/RMS range 0.000150000/0.000300000).",
+            markdown,
+        )
+        self.assertIn(
             "Crop rows all-improving: "
             "`water-deeper` on `switzerland-alps-z5-outdoors` crop 1 "
             "(`rerender_control`, 2/2 improving, 0/2 worsening).",
+            markdown,
+        )
+        self.assertIn(
+            "Repeated-render unstable crop rows: "
+            "`water-deeper` on `switzerland-alps-z5-outdoors` crop 1 "
+            "(`rerender_control`, 2 runs, mean/RMS range 0.200000000/0.300000000).",
             markdown,
         )
         self.assertIn("0.000300000", markdown)
