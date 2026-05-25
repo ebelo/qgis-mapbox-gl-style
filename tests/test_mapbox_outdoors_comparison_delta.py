@@ -140,7 +140,7 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
         )
         self.assertAlmostEqual(report["largest_metric_movements"][0]["mean_delta"], -0.005)
 
-    def test_build_comparison_delta_report_skips_unrecognized_runtime_shapes(self):
+    def test_build_comparison_delta_report_labels_release_name_runtime(self):
         baseline = {
             "cameras": [
                 _camera_row("zero-runtime", mean=0.04, rms=0.08, qgis_runtime={"qgis_version_int": 0}),
@@ -156,7 +156,7 @@ class MapboxOutdoorsComparisonDeltaTests(unittest.TestCase):
 
         report = build_comparison_delta_report(baseline, candidate)
 
-        self.assertEqual(report["qgis_runtimes"]["baseline"], ["(not captured)", "0"])
+        self.assertEqual(report["qgis_runtimes"]["baseline"], ["0", "Future"])
         self.assertEqual(report["qgis_runtimes"]["candidate"], ["(not captured)"])
 
     def test_build_comparison_delta_report_preserves_missing_camera_rows(self):

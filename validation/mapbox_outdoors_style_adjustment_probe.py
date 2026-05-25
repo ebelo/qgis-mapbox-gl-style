@@ -147,7 +147,10 @@ def _qgis_runtime_version_label(value: object) -> str | None:
     if qgis_version:
         return str(qgis_version)
     qgis_version_int = runtime.get("qgis_version_int")
-    return str(qgis_version_int) if qgis_version_int is not None else None
+    if qgis_version_int is not None:
+        return str(qgis_version_int)
+    qgis_release_name = runtime.get("qgis_release_name")
+    return str(qgis_release_name) if qgis_release_name else None
 
 
 def _format_qgis_runtime(value: object) -> str:
