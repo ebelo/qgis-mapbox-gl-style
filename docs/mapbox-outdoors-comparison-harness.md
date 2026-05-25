@@ -19,7 +19,8 @@ A complete run writes:
 - `mapbox-gl-vs-qgis-diff.png` — pixel diff for quick drift inspection
 - `metrics.json` — simple image-diff metrics such as changed-pixel ratio when diff generation runs
 - `qgis-label-styles.json` — token-free QGIS vector-tile label rule and label-setting snapshot when QGIS capture runs
-- `manifest.json` — camera, output paths, capture status, and metrics without any token values
+- `qgis-runtime.json` — token-free QGIS version and release metadata when QGIS capture runs
+- `manifest.json` — camera, output paths, capture status, metrics, and QGIS runtime metadata without any token values
 - `contact-sheet.jpg` — all-camera side-by-side thumbnail sheet when running the matrix mode
 
 ## Cameras
@@ -88,7 +89,7 @@ python3 validation/mapbox_outdoors_comparison.py \
 `--all-cameras` uses the same capture options as a single-camera run, so you can combine it with setup-isolation flags such as `--skip-qgis` or `--skip-browser`.
 Do not pass a positional camera name with `--all-cameras`; use one mode or the other.
 Each camera is captured in its own child Python process so a local Chromium/PyQGIS crash in one camera does not kill the whole matrix runner or expose token values on the command line. If any camera fails or times out, the runner continues with the remaining cameras and exits non-zero with the failed camera names.
-The parent run also writes token-free aggregate `summary.json` and `summary.md` files under `debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/` with per-camera subprocess status, artifact status, manifest paths, captured image artifact paths, and the main diff metrics. When captured images are available and Pillow can load them, the same directory includes `contact-sheet.jpg` so the Mapbox GL reference, QGIS render, and diff columns can be inspected as one overview image. Treat rows with missing manifests or unavailable metrics as operational smoke-test output, not visual parity evidence.
+The parent run also writes token-free aggregate `summary.json` and `summary.md` files under `debug/mapbox-outdoors-comparison/all-cameras/<timestamp>/` with per-camera subprocess status, artifact status, QGIS runtime, manifest paths, captured image artifact paths, and the main diff metrics. When captured images are available and Pillow can load them, the same directory includes `contact-sheet.jpg` so the Mapbox GL reference, QGIS render, and diff columns can be inspected as one overview image. Treat rows with missing manifests or unavailable metrics as operational smoke-test output, not visual parity evidence.
 
 ## Partial captures
 
@@ -251,7 +252,7 @@ python3 validation/mapbox_outdoors_style_adjustment_probe.py \
   --crop-box 0,450,420,750
 ```
 
-Outputs are written under `debug/mapbox-outdoors-style-adjustment-probe/comparison-camera/<timestamp>/`. Each variant records the adjusted style JSON, fresh QGIS render, Mapbox-vs-QGIS diff, QGIS-baseline movement diff, whole-image metric deltas against both the baseline and rerender control, crop metric deltas, matched/missing adjusted layer IDs, and changed-pixel bounding boxes. Treat this as diagnostic-only evidence; promote a variant only after all-camera validation shows a real improvement without unacceptable regressions.
+Outputs are written under `debug/mapbox-outdoors-style-adjustment-probe/comparison-camera/<timestamp>/`. The probe report copies QGIS runtime metadata from the baseline comparison manifest, and each variant records the adjusted style JSON, fresh QGIS render, Mapbox-vs-QGIS diff, QGIS-baseline movement diff, whole-image metric deltas against both the baseline and rerender control, crop metric deltas, matched/missing adjusted layer IDs, and changed-pixel bounding boxes. Aggregate style-adjustment summaries list the distinct QGIS runtimes from their input reports so before/after evidence stays comparable across local QGIS upgrades. Treat this as diagnostic-only evidence; promote a variant only after all-camera validation shows a real improvement without unacceptable regressions.
 
 The focus cues are triage context only. Candidate-backed rows, source-capped rows, and zero-candidate dash rows still need visual inspection before becoming a rendering change.
 
