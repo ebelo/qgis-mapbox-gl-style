@@ -701,6 +701,41 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
             source_rows["landuse"]["class_coverage"],
             {"park": 1.4, "residential": 1.25, "grass": 1.1},
         )
+        self.assertEqual(
+            aggregate["camera_class_rows"][:3],
+            [
+                {
+                    "input_report": str(geneva_report),
+                    "camera": "geneva-airport-motorway-z14-outdoors",
+                    "camera_zoom": 14.0,
+                    "source_layer": "landuse",
+                    "class": "park",
+                    "class_coverage": 1.4,
+                    "overlap_feature_count": 7,
+                    "qgis_style_layer_coverage": "landuse-green=1.500, landuse-other=0.250",
+                },
+                {
+                    "input_report": str(switzerland_report),
+                    "camera": "switzerland-alps-z5-outdoors",
+                    "camera_zoom": 5.0,
+                    "source_layer": "landuse",
+                    "class": "residential",
+                    "class_coverage": 1.25,
+                    "overlap_feature_count": 4,
+                    "qgis_style_layer_coverage": "landuse-green=0.750",
+                },
+                {
+                    "input_report": str(geneva_report),
+                    "camera": "geneva-airport-motorway-z14-outdoors",
+                    "camera_zoom": 14.0,
+                    "source_layer": "landuse",
+                    "class": "grass",
+                    "class_coverage": 1.1,
+                    "overlap_feature_count": 7,
+                    "qgis_style_layer_coverage": "landuse-green=1.500, landuse-other=0.250",
+                },
+            ],
+        )
         self.assertEqual(source_rows["aeroway"]["zero_overlap_reports"], 1)
         self.assertEqual(style_rows[("landuse", "landuse-green")]["feature_count"], 7)
         self.assertEqual(style_rows[("landuse", "landuse-green")]["coverage_sum"], 2.25)
@@ -718,8 +753,17 @@ class MapboxOutdoorsSourceCropOverlapTests(unittest.TestCase):
         )
         self.assertIn("Top source-layer bbox coverage sums: landuse=3.750", markdown)
         self.assertIn("Top source-layer class coverage sums: landuse: park=1.400", markdown)
+        self.assertIn(
+            "Top camera/class coverage candidates: geneva-airport-motorway-z14-outdoors landuse/park=1.400",
+            markdown,
+        )
         self.assertIn("Source layers with zero overlap wherever requested: aeroway.", markdown)
         self.assertIn("Treat aggregate coverage as bbox attribution across reports", markdown)
+        self.assertIn("## Camera/class probe candidates", markdown)
+        self.assertIn(
+            "| `geneva-airport-motorway-z14-outdoors` | 14 | `landuse` | park | 1.400 | 7 | landuse-green=1.500, landuse-other=0.250 |",
+            markdown,
+        )
 
     def test_main_aggregate_mode_writes_markdown_summary(self):
         with tempfile.TemporaryDirectory() as tmp:
