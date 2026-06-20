@@ -6,6 +6,7 @@ from qgis.PyQt.QtWidgets import QAction
 
 from .qfit_config_dialog import QfitConfigDialog
 from .qfit_dockwidget import QfitDockWidget
+from .ui.about_dock import QfitAboutDock
 
 MENU_NAME = "&qfit"
 
@@ -15,8 +16,10 @@ class QfitPlugin:
         self.iface = iface
         self.activities_action = None
         self.config_action = None
+        self.about_action = None
         self.dockwidget = None
         self._config_dialog = None
+        self._about_dock = None
 
     def initGui(self):
         icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
@@ -31,6 +34,10 @@ class QfitPlugin:
         self.config_action.triggered.connect(self.show_config)
         self.iface.addPluginToMenu(MENU_NAME, self.config_action)
 
+        self.about_action = QAction(icon, "About", self.iface.mainWindow())
+        self.about_action.triggered.connect(self.show_about)
+        self.iface.addPluginToMenu(MENU_NAME, self.about_action)
+
     def unload(self):
         if self.activities_action is not None:
             self.iface.removePluginMenu(MENU_NAME, self.activities_action)
@@ -41,10 +48,19 @@ class QfitPlugin:
             self.iface.removePluginMenu(MENU_NAME, self.config_action)
             self.config_action = None
 
+        if self.about_action is not None:
+            self.iface.removePluginMenu(MENU_NAME, self.about_action)
+            self.about_action = None
+
         if self.dockwidget is not None:
             self.iface.removeDockWidget(self.dockwidget)
             self.dockwidget.deleteLater()
             self.dockwidget = None
+
+        if self._about_dock is not None:
+            self.iface.removeDockWidget(self._about_dock)
+            self._about_dock.deleteLater()
+            self._about_dock = None
 
         if self._config_dialog is not None:
             self._config_dialog.close()
@@ -69,6 +85,15 @@ class QfitPlugin:
         self._config_dialog.show()
         self._config_dialog.raise_()
         self._config_dialog.activateWindow()
+
+    def show_about(self):
+        if self._about_dock is None:
+            self._about_dock = QfitAboutDock(parent=self.iface.mainWindow())
+            self.iface.addDockWidget(Qt.RightDockWidgetArea, self._about_dock)
+            self._about_dock.setFloating(True)
+        self._about_dock.show()
+        self._about_dock.raise_()
+        self._about_dock.activateWindow()
 
     def _refresh_dock_configuration(self) -> None:
         if self.dockwidget is not None:
