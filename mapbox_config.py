@@ -50,7 +50,7 @@ def _format_mapbox_sprite_url(
     )
 
 
-BACKGROUND_LAYER_PREFIX = "qfit background"
+BACKGROUND_LAYER_PREFIX = "QGIS Mapbox GL Style background"
 DEFAULT_BACKGROUND_PRESET = "Outdoor"
 DEFAULT_MAPBOX_TILE_SIZE = 512
 DEFAULT_MAPBOX_RETINA = False
@@ -3013,8 +3013,8 @@ def _aeroway_line_width_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
-def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
-    """Return the original Mapbox layer id for qfit-created layer variants."""
+def base_mapbox_style_layer_id_for_qgis(layer_id: object) -> str:
+    """Return the original Mapbox layer id for QGIS-created layer variants."""
     for resolved_layer_id in (
         _road_class_line_color_base_layer_id(layer_id),
         _hillshade_base_layer_id(layer_id),
@@ -3051,6 +3051,11 @@ def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
         if matches_layer_id(layer_id):
             return base_layer_id
     return str(layer_id or "")
+
+
+def base_mapbox_style_layer_id_for_qfit(layer_id: object) -> str:
+    """Compatibility wrapper for qfit-originated validation scripts."""
+    return base_mapbox_style_layer_id_for_qgis(layer_id)
 
 
 def _is_waterway_label_layer_id(layer_id: object) -> bool:

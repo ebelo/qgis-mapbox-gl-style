@@ -39,7 +39,7 @@ class ScanResult:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build qfit's plugin ZIP, extract it, and run Bandit, detect-secrets, "
+            "Build the plugin ZIP, extract it, and run Bandit, detect-secrets, "
             "and Flake8 against the packaged contents."
         )
     )

@@ -405,7 +405,7 @@ class MapboxOutdoorsRenderedLayerMaskTests(unittest.TestCase):
                 )
         self.assertEqual(captured["env"]["MAPBOX_ACCESS_TOKEN"], "test-token")
         self.assertNotIn("test-token", " ".join(str(part) for part in captured["command"]))
-        self.assertTrue(str(captured["cwd"]).endswith("qfit"))
+        self.assertTrue(str(captured["cwd"]).endswith("qgis-mapbox-gl-style"))
 
     def test_main_builds_config_and_prints_latest_summary(self):
         captured = {}

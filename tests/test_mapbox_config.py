@@ -100,11 +100,11 @@ class MapboxConfigTests(unittest.TestCase):
     def test_layer_name_prefers_preset_label(self):
         self.assertEqual(
             build_background_layer_name("Satellite", "mapbox", "satellite-streets-v12"),
-            "qfit background — Satellite",
+            "QGIS Mapbox GL Style background — Satellite",
         )
         self.assertEqual(
             build_background_layer_name("Custom", "ebelo", "winter-wonderland"),
-            "qfit background — ebelo/winter-wonderland",
+            "QGIS Mapbox GL Style background — ebelo/winter-wonderland",
         )
 
     def test_native_web_mercator_resolution_for_zoom_zero_matches_world_tile_width(self):

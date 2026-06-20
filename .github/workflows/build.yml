@@ -22,9 +22,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install packaging dependencies
-        run: python -m pip install --upgrade pypdf
-
       - name: Build plugin ZIP
         id: package
         run: |
@@ -39,11 +36,11 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           if [ "$EVENT_NAME" = "pull_request" ]; then
-            echo "name=qfit-plugin-pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "name=qgis-mapbox-gl-style-plugin-pr-${PR_NUMBER}-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           elif [ "$REF_NAME" = "main" ]; then
-            echo "name=qfit-plugin-main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "name=qgis-mapbox-gl-style-plugin-main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           else
-            echo "name=qfit-plugin-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "name=qgis-mapbox-gl-style-plugin-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upload plugin ZIP

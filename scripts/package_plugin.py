@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Build a distributable QGIS plugin zip for qfit."""
+"""Build a distributable QGIS plugin zip."""
 
 from __future__ import annotations
 
 import configparser
-import importlib.util
 import pathlib
 import shutil
 import tempfile
 import zipfile
-
-from importlib import metadata
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DIST_DIR = ROOT / "dist"
@@ -23,6 +20,7 @@ EXCLUDED_DIRS = {
     "debug",
     "dist",
     "docs",
+    "qfit",
     "scripts",
     "tests",
     "validation",
@@ -62,55 +60,10 @@ def _copy_project_tree(destination: pathlib.Path) -> None:
         shutil.copy2(path, target)
 
 
-def _resolve_package_dir(package_name: str) -> pathlib.Path:
-    spec = importlib.util.find_spec(package_name)
-    origin = getattr(spec, "origin", None) if spec is not None else None
-    if not origin:
-        raise RuntimeError(
-            f"Packaging requires the '{package_name}' package to be installed locally. "
-            f"Run: python -m pip install {package_name}"
-        )
-    return pathlib.Path(origin).resolve().parent
-
-
-def _resolve_distribution_license(package_name: str) -> pathlib.Path | None:
-    try:
-        dist = metadata.distribution(package_name)
-    except metadata.PackageNotFoundError:
-        return None
-
-    for file in dist.files or []:
-        parts = pathlib.Path(file).parts
-        if not parts:
-            continue
-        lowered = [part.lower() for part in parts]
-        filename = lowered[-1]
-        if filename.startswith("license") or filename.startswith("copying"):
-            return pathlib.Path(dist.locate_file(file)).resolve()
-        if "licenses" in lowered:
-            return pathlib.Path(dist.locate_file(file)).resolve()
-    return None
-
-
-def _vendor_runtime_dependencies(plugin_dir: pathlib.Path) -> None:
-    vendor_dir = plugin_dir / "vendor"
-    vendor_dir.mkdir(parents=True, exist_ok=True)
-
-    pypdf_source = _resolve_package_dir("pypdf")
-    shutil.copytree(pypdf_source, vendor_dir / "pypdf", dirs_exist_ok=True)
-
-    license_path = _resolve_distribution_license("pypdf")
-    if license_path and license_path.is_file():
-        licenses_dir = vendor_dir / "licenses"
-        licenses_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(license_path, licenses_dir / "pypdf_LICENSE.txt")
-
-
 def _build_staging_tree(plugin_name: str) -> pathlib.Path:
-    staging_root = pathlib.Path(tempfile.mkdtemp(prefix="qfit-package-"))
+    staging_root = pathlib.Path(tempfile.mkdtemp(prefix="qgis-mapbox-gl-style-package-"))
     plugin_dir = staging_root / plugin_name
     _copy_project_tree(plugin_dir)
-    _vendor_runtime_dependencies(plugin_dir)
     return staging_root
 
 

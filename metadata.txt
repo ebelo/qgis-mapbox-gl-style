@@ -1,17 +1,17 @@
 [general]
-name=qfit
+name=qgis_mapbox_gl_style
 qgisMinimumVersion=3.28
-description=Explore fitness data spatially in QGIS
-version=0.50
+description=Load Mapbox vector tiles in QGIS and adapt Mapbox GL JS styles to the QGIS styling engine.
+version=0.1.0
 author=Emmanuel Belo
 email=emmanuel.nicolas.belo@gmail.com
-about=qfit imports and visualizes fitness activity data in QGIS, starting with Strava and expanding toward broader FIT/GPX workflows.
+about=QGIS Mapbox GL Style loads Mapbox vector tiles, applies the qfit-derived Mapbox Outdoors style adaptation, and keeps an iteration history for visual parity work.
 license=GPL-2.0-or-later
 copyright=(C) Emmanuel Belo
-tracker=https://github.com/ebelo/qfit/issues
-repository=https://github.com/ebelo/qfit
-homepage=https://github.com/ebelo/qfit
+tracker=https://github.com/ebelo/qgis-mapbox-gl-style/issues
+repository=https://github.com/ebelo/qgis-mapbox-gl-style
+homepage=https://github.com/ebelo/qgis-mapbox-gl-style
 icon=icon.png
 experimental=False
 deprecated=False
-tags=strava,fitness,gis,qgis,gpx,fit,geopackage,activities
+tags=mapbox,vector tiles,mapbox gl,qgis,cartography,style conversion

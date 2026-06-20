@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "project": "qgis-mapbox-gl-style",
+  "source_history": {
+    "repo": "ebelo/qfit",
+    "issue": 949,
+    "filter": "Mapbox/QGIS plugin, validation, and documentation paths retained with git-filter-repo"
+  },
+  "style": {
+    "owner": "mapbox",
+    "id": "outdoors-v12"
+  },
+  "default_camera_set": "issue-949",
+  "camera_sets": {
+    "issue-949": {
+      "description": "Full retained Mapbox Outdoors z5-z18 camera matrix from the qfit issue-949 validation harness.",
+      "render_arguments": [
+        "--all-cameras"
+      ]
+    }
+  },
+  "iterations": [
+    {
+      "id": "001",
+      "label": "Mapbox background selector",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "a245bd6dbdd80391c95bc697a465ff79663cc5b9",
+      "filtered_commit": "2611b4a32d575f0e653bf9d84b6314d5a21cc4c2",
+      "source_prs": [
+        3
+      ],
+      "source_issue": null,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-03-21T17:52:01+01:00",
+      "notes": "Initial qfit Mapbox background selector that introduced the user-facing Mapbox basemap path."
+    },
+    {
+      "id": "002",
+      "label": "Raster/vector tile mode and first vector conversion",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "30e62c245991187dd0a96aeda30428d01d7eba36",
+      "filtered_commit": "22644176cb44d01a500044d026cb8e1a82c9916b",
+      "source_prs": [
+        36,
+        37
+      ],
+      "source_issue": null,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-03-22T14:01:14+01:00",
+      "notes": "Added vector tile mode, fetched source ids from style JSON, and began expression simplification for QGIS conversion."
+    },
+    {
+      "id": "003",
+      "label": "Label hierarchy for vector basemap",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "2da2b2ac4402c410e3ab2a88ab54c75691a58e0a",
+      "filtered_commit": "6c7d16ec53e39f4c3888b0d0ff3940aac539767e",
+      "source_prs": [
+        44
+      ],
+      "source_issue": null,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-03-22T15:15:10+01:00",
+      "notes": "Early settlement and label-priority work to make the QGIS-rendered vector basemap readable."
+    },
+    {
+      "id": "004",
+      "label": "Style simplification for issue 949",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "d980f3f67411e00c906e9059c63f41bcd2e10ee2",
+      "filtered_commit": "2d80c11b489e31389d5295ac70a902ede57a30b8",
+      "source_prs": [
+        951
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-10T21:25:34+02:00",
+      "notes": "Improved Mapbox vector style simplification and preserved non-zoom interpolation outputs."
+    },
+    {
+      "id": "005",
+      "label": "Browser versus QGIS comparison harness",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "e479a95bdf485990860fac07f588e2f39a1d6e9a",
+      "filtered_commit": "1fb7a0fafd9dc0067617affc2eae218c023299c1",
+      "source_prs": [
+        956
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-10T22:37:24+02:00",
+      "notes": "Introduced the retained Mapbox Outdoors browser/QGIS visual comparison harness."
+    },
+    {
+      "id": "006",
+      "label": "Sprite resources passed into QGIS conversion",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "554c6b2641effe352b1eeb39b51af62d7da568eb",
+      "filtered_commit": "d6eb4a0d750ec1ccbc43fafe311500ca81b400cf",
+      "source_prs": [
+        987
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-12T03:42:02+02:00",
+      "notes": "Resolved Mapbox sprites from style JSON and supplied them to the QGIS style conversion context."
+    },
+    {
+      "id": "007",
+      "label": "Label density audit candidates",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "a867935cd1dd5dba621e253e6804e1f065fce74d",
+      "filtered_commit": "86cfc9d6d079e1e4bd7771c19b77bf5ec1a482ef",
+      "source_prs": [
+        1012
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-13T00:55:59+02:00",
+      "notes": "Added label density diagnostics for ranking missing Mapbox/QGIS parity work."
+    },
+    {
+      "id": "008",
+      "label": "Road and trail audit candidates",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "12775fb771a41884e6aa4807c7fa35b97557e3bd",
+      "filtered_commit": "96e0b55c8bfc3c287578ae64a0e204e57c736798",
+      "source_prs": [
+        1013
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-13T01:16:23+02:00",
+      "notes": "Added road and trail audit candidates to focus future style parity passes."
+    },
+    {
+      "id": "009",
+      "label": "QGIS label priority post-processing",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "cf4e2c78f12e7e78da04f6ebde135c3556f21957",
+      "filtered_commit": "2af78515a89fb659d87a8c6dafe3edb07dc39d37",
+      "source_prs": [],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-17T11:12:30+02:00",
+      "notes": "Persisted mutated QGIS vector tile label styles and applied Mapbox label priorities in QGIS."
+    },
+    {
+      "id": "010",
+      "label": "Outdoor trail overlay legibility",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "1896288fcad4adb236924c734643119258489d66",
+      "filtered_commit": "e191bf1b9be80d9155f50c46df47f35a79e4235f",
+      "source_prs": [
+        1119
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-17T21:05:11+02:00",
+      "notes": "Scaled QGIS hiking, mountain-bike, and trail overlay widths for Mapbox Outdoors parity."
+    },
+    {
+      "id": "011",
+      "label": "Wetland pattern fill approximation",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "045be0b8ff3990bfb6ca35d1667e7bcedc3180ab",
+      "filtered_commit": "4dae8166bfce016b2e3e3895a68fbc5a5b1e2500",
+      "source_prs": [],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-21T14:02:42+02:00",
+      "notes": "Approximated the wetland-pattern layer by splitting opacity fade into static zoom bands and using a solid fill fallback."
+    },
+    {
+      "id": "012",
+      "label": "Source class probe candidates",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "11cb208829dee8b0716bbffeced426e713faf93c",
+      "filtered_commit": "a9e2749aeeea338a15d4d6bf0f4069417b935f76",
+      "source_prs": [
+        1356
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-05-27T19:38:50+02:00",
+      "notes": "Added ranked camera/class probe candidates to the aggregate source/crop report."
+    }
+  ]
+}

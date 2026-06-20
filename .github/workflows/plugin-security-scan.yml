@@ -22,7 +22,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install scan dependencies
-        run: python -m pip install --upgrade pypdf bandit detect-secrets flake8
+        run: python -m pip install --upgrade bandit detect-secrets flake8
 
       - name: Build packaged plugin and run local-style scans
         run: python scripts/run_plugin_security_scan.py --allow-findings

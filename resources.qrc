@@ -1,4 +1,4 @@
 <RCC>
-    <qresource prefix="/plugins/qfit">
+    <qresource prefix="/plugins/qgis_mapbox_gl_style">
     </qresource>
 </RCC>

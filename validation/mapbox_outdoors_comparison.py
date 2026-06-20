@@ -1091,6 +1091,11 @@ def run_comparison(
     qgis_renderer: Callable[..., None] = render_qgis_vector,
     diff_builder: Callable[..., ImageMetrics | None] = build_image_diff,
 ) -> ComparisonResult:
+    style_definition = (
+        load_style_definition(config.style_json_path)
+        if config.style_json_path is not None
+        else None
+    )
     run_dir = build_run_directory(
         output_root=config.output_root,
         camera_name=config.camera.name,
@@ -1107,11 +1112,6 @@ def run_comparison(
     qgis_runtime_captured = False
     image_metrics: ImageMetrics = {}
     qgis_runtime: dict[str, object] = {}
-    style_definition = (
-        load_style_definition(config.style_json_path)
-        if config.style_json_path is not None
-        else None
-    )
 
     if config.browser:
         browser_renderer(
