@@ -4,6 +4,26 @@ QGIS plugin and validation harness for loading Mapbox vector tiles in QGIS and a
 
 The first target style is Mapbox Outdoors (`mapbox/outdoors-v12`). The project keeps the qfit history that built the current QGIS symbology, then continues that work in a smaller repository focused only on Mapbox vector tiles and QGIS style parity.
 
+## Style Maturity At A Glance
+
+The Chamonix sequence below shows how the QGIS rendering of Mapbox Outdoors evolved from an early converter pass to a mature outdoor style with clearer terrain, hillshade relief, paths, landcover, labels, and contour balance. Each frame is a fresh QGIS render from a historical iteration of the style work.
+
+| Early conversion | Style audit |
+| --- | --- |
+| ![Initial comparable QGIS render of Mapbox Outdoors around Chamonix](docs/images/style-progression/chamonix/01_initial_llm_guess.png) | ![Style audit iteration of the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/02_first_visual_pass.png) |
+
+| Symbols and labels | Opacity simplification |
+| --- | --- |
+| ![Sprites provided to QGIS for Mapbox Outdoors labels and symbols around Chamonix](docs/images/style-progression/chamonix/03_label_and_terrain_iteration.png) | ![Opacity simplification pass for Mapbox Outdoors in QGIS around Chamonix](docs/images/style-progression/chamonix/04_landcover_rebalance.png) |
+
+| Landcover separation | Hillshade relief |
+| --- | --- |
+| ![Landcover color separation in the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/05_area_fill_and_trails.png) | ![Hillshade relief preserved in the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/06_road_label_refinement.png) |
+
+| Trail legibility | Mature result |
+| --- | --- |
+| ![Trail overlay legibility improved in the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/07_high_zoom_outdoor_detail.png) | ![Mature QGIS Mapbox Outdoors render around Chamonix with terrain, paths, labels, and contour balance](docs/images/style-progression/chamonix/08_late_vision_tuned_result.png) |
+
 ## What It Does
 
 - adds a QGIS action to load Mapbox Outdoors as a vector tile layer
