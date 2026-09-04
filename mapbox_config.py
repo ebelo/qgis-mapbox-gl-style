@@ -707,8 +707,12 @@ _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("z18-plus", 18.0, None, 18.0),
 )
 _OUTDOORS_STREET_WIDTH_PROPS_BY_LAYER_ID = {
+    "bridge-street": "line-width",
+    "bridge-street-case": "line-gap-width",
     "road-street": "line-width",
     "road-street-case": "line-gap-width",
+    "tunnel-street": "line-width",
+    "tunnel-street-case": "line-gap-width",
 }
 _OUTDOORS_STREET_WIDTH_LOW_BAND_SUFFIX = "below-z14"
 _OUTDOORS_STREET_WIDTH_MID_BAND_SUFFIX = "z14-to-z15"

@@ -5997,6 +5997,91 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             "road-street",
         )
 
+    def test_outdoors_structure_street_widths_use_the_same_z14_band(self):
+        width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            12,
+            0.5,
+            18,
+            20,
+            22,
+            200,
+        ]
+        case_width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            0.8,
+            22,
+            2,
+        ]
+        layers = []
+        for structure in ("bridge", "tunnel"):
+            layers.extend(
+                [
+                    {
+                        "id": f"{structure}-street-case",
+                        "type": "line",
+                        "minzoom": 14,
+                        "paint": {
+                            "line-width": copy.deepcopy(case_width_expression),
+                            "line-gap-width": copy.deepcopy(width_expression),
+                        },
+                    },
+                    {
+                        "id": f"{structure}-street",
+                        "type": "line",
+                        "minzoom": 13,
+                        "paint": {
+                            "line-width": copy.deepcopy(width_expression),
+                            "line-opacity": ["step", ["zoom"], 0, 14, 1],
+                        },
+                    },
+                ]
+            )
+        style = {"owner": "mapbox", "id": "outdoors-v12", "layers": layers}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        expected_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(
+                width_expression,
+                mapbox_config._OUTDOORS_STREET_WIDTH_SAMPLE_ZOOM,
+            )
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        for structure in ("bridge", "tunnel"):
+            case_id = f"{structure}-street-case"
+            street_id = f"{structure}-street"
+            case_mid = by_id[f"{case_id}-z14-to-z15"]
+            street_low = by_id[f"{street_id}-below-z14"]
+            street_mid = by_id[f"{street_id}-z14-to-z15"]
+            with self.subTest(structure=structure):
+                self.assertEqual((case_mid["minzoom"], case_mid["maxzoom"]), (14, 15))
+                self.assertAlmostEqual(
+                    case_mid["paint"]["line-gap-width"], expected_width_mm
+                )
+                self.assertEqual((street_mid["minzoom"], street_mid["maxzoom"]), (14, 15))
+                self.assertAlmostEqual(
+                    street_mid["paint"]["line-width"], expected_width_mm
+                )
+                self.assertEqual((street_low["minzoom"], street_low["maxzoom"]), (13, 14))
+                self.assertEqual(street_low["paint"]["line-opacity"], 0.0)
+                self.assertEqual(by_id[case_id]["minzoom"], 15)
+                self.assertEqual(by_id[street_id]["minzoom"], 15)
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(case_mid["id"]),
+                    case_id,
+                )
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(street_mid["id"]),
+                    street_id,
+                )
+
     def test_outdoors_street_width_split_keeps_other_style_identities_unchanged(self):
         width_expression = [
             "interpolate",
