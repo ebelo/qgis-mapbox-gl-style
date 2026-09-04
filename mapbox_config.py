@@ -706,6 +706,15 @@ _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
     ("z16-to-z18", 16.0, 18.0, 17.0),
     ("z18-plus", 18.0, None, 18.0),
 )
+_OUTDOORS_STREET_WIDTH_PROPS_BY_LAYER_ID = {
+    "road-street": "line-width",
+    "road-street-case": "line-gap-width",
+}
+_OUTDOORS_STREET_WIDTH_LOW_BAND_SUFFIX = "below-z14"
+_OUTDOORS_STREET_WIDTH_MID_BAND_SUFFIX = "z14-to-z15"
+_OUTDOORS_STREET_WIDTH_BAND_MIN_ZOOM = 14.0
+_OUTDOORS_STREET_WIDTH_BAND_MAX_ZOOM = 15.0
+_OUTDOORS_STREET_WIDTH_SAMPLE_ZOOM = 14.25
 # Shared by trail and cycleway/piste overlays so outdoor route strokes remain
 # legible against contour/landcover-heavy Mapbox Outdoors scenes.
 _PATH_TRAIL_LINE_WIDTH_QGIS_SCALE = 1.6
@@ -3082,6 +3091,20 @@ def _aeroway_line_width_base_layer_id(layer_id: object) -> str | None:
     return None
 
 
+def _outdoors_street_width_base_layer_id(layer_id: object) -> str | None:
+    normalized = str(layer_id or "")
+    for suffix in (
+        _OUTDOORS_STREET_WIDTH_LOW_BAND_SUFFIX,
+        _OUTDOORS_STREET_WIDTH_MID_BAND_SUFFIX,
+    ):
+        suffix_text = f"-{suffix}"
+        if normalized.endswith(suffix_text):
+            base_layer_id = normalized[: -len(suffix_text)]
+            if base_layer_id in _OUTDOORS_STREET_WIDTH_PROPS_BY_LAYER_ID:
+                return base_layer_id
+    return None
+
+
 def base_mapbox_style_layer_id_for_qgis(layer_id: object) -> str:
     """Return the original Mapbox layer id for QGIS-created layer variants."""
     for resolved_layer_id in (
@@ -3091,6 +3114,7 @@ def base_mapbox_style_layer_id_for_qgis(layer_id: object) -> str:
         _waterway_line_width_base_layer_id(layer_id),
         _water_label_typography_base_layer_id(layer_id),
         _regional_major_road_width_base_layer_id(layer_id),
+        _outdoors_street_width_base_layer_id(layer_id),
         _major_link_width_base_layer_id(layer_id),
         _landcover_fill_opacity_base_layer_id(layer_id),
         _landuse_fill_opacity_base_layer_id(layer_id),
@@ -3281,6 +3305,98 @@ def _line_width_zoom_band_layer_variants(
         variant_paint["line-width"] = line_width_mm
         variants.append(variant)
     return variants or None
+
+
+def _outdoors_street_width_layer_variants(
+    layer: dict[str, object],
+) -> list[dict[str, object]] | None:
+    """Sample the z14-z15 Outdoors street width without changing higher zooms."""
+    layer_id = str(layer.get("id") or "")
+    width_prop = _OUTDOORS_STREET_WIDTH_PROPS_BY_LAYER_ID.get(layer_id)
+    paint = layer.get("paint")
+    if width_prop is None or layer.get("type") != "line" or not isinstance(paint, dict):
+        return None
+    width = paint.get(width_prop)
+    if not isinstance(width, list):
+        return None
+
+    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
+    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
+    low_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        None,
+        _OUTDOORS_STREET_WIDTH_BAND_MIN_ZOOM,
+    )
+    mid_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        _OUTDOORS_STREET_WIDTH_BAND_MIN_ZOOM,
+        _OUTDOORS_STREET_WIDTH_BAND_MAX_ZOOM,
+    )
+    high_zoom_band = _effective_zoom_band(
+        existing_minzoom,
+        existing_maxzoom,
+        _OUTDOORS_STREET_WIDTH_BAND_MAX_ZOOM,
+        None,
+    )
+    if mid_zoom_band is None or high_zoom_band is None:
+        return None
+
+    sampled_zoom = _zoom_in_layer_range(
+        _OUTDOORS_STREET_WIDTH_SAMPLE_ZOOM,
+        *mid_zoom_band,
+    )
+    if sampled_zoom is None:
+        return None
+    width_mm = _line_width_mm_at_zoom(width, sampled_zoom)
+    if width_mm is None:
+        return None
+
+    variants: list[dict[str, object]] = []
+    if low_zoom_band is not None:
+        low_zoom_layer = copy.deepcopy(layer)
+        low_zoom_layer["id"] = f"{layer_id}-{_OUTDOORS_STREET_WIDTH_LOW_BAND_SUFFIX}"
+        _set_zoom_bounds(low_zoom_layer, *low_zoom_band)
+        low_zoom_paint = low_zoom_layer["paint"]
+        assert isinstance(low_zoom_paint, dict)
+        visibility_minzoom = _zoom_step_full_opacity_minzoom(
+            paint.get("line-opacity"),
+            existing_minzoom,
+            existing_maxzoom,
+        )
+        if (
+            visibility_minzoom is not None
+            and abs(visibility_minzoom - _OUTDOORS_STREET_WIDTH_BAND_MIN_ZOOM)
+            <= _ZOOM_BOUND_EPSILON
+        ):
+            low_zoom_paint["line-opacity"] = 0.0
+        variants.append(low_zoom_layer)
+
+    mid_zoom_layer = copy.deepcopy(layer)
+    mid_zoom_layer["id"] = f"{layer_id}-{_OUTDOORS_STREET_WIDTH_MID_BAND_SUFFIX}"
+    _set_zoom_bounds(mid_zoom_layer, *mid_zoom_band)
+    mid_zoom_paint = mid_zoom_layer["paint"]
+    assert isinstance(mid_zoom_paint, dict)
+    mid_zoom_paint[width_prop] = width_mm
+    variants.append(mid_zoom_layer)
+
+    high_zoom_layer = copy.deepcopy(layer)
+    _set_zoom_bounds(high_zoom_layer, *high_zoom_band)
+    variants.append(high_zoom_layer)
+    return variants
+
+
+def _split_outdoors_street_width_layers_for_qgis(
+    style: dict[str, object],
+    layers: object,
+) -> object:
+    if not _is_mapbox_outdoors_style(style):
+        return layers
+    return _split_line_width_zoom_band_layers_for_qgis(
+        layers,
+        variants_for_layer=_outdoors_street_width_layer_variants,
+    )
 
 
 def _path_trail_line_width_layer_variants(layer: dict[str, object]) -> list[dict[str, object]] | None:
@@ -6644,8 +6760,8 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
     QGIS can parse, splits visible hillshade, landcover, landuse, waterway,
-    path background, and road class colors into static class layers, adds
-    high-zoom pale path/pedestrian casings for Outdoors parity, and collapses
+    path background, street widths, and road class colors into static layers,
+    adds high-zoom pale path/pedestrian casings for Outdoors parity, and collapses
     Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
     family names.
@@ -6656,6 +6772,9 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     style = copy.deepcopy(style_definition)
     style["layers"] = _split_regional_major_road_width_layers_for_qgis(style.get("layers"))
     style["layers"] = _split_major_link_width_layers_for_qgis(style.get("layers"))
+    style["layers"] = _split_outdoors_street_width_layers_for_qgis(
+        style, style.get("layers")
+    )
     style["layers"] = _split_road_class_line_color_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_number_shield_layers_for_qgis(style.get("layers"))
     style["layers"] = _expand_road_exit_shield_layers_for_qgis(style.get("layers"))
