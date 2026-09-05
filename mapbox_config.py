@@ -709,6 +709,8 @@ _PATH_TRAIL_LINE_WIDTH_ZOOM_BANDS: tuple[tuple[str, float | None, float | None, 
 _OUTDOORS_STREET_WIDTH_PROPS_BY_LAYER_ID = {
     "bridge-street": "line-width",
     "bridge-street-case": "line-gap-width",
+    "road-minor": "line-width",
+    "road-minor-case": "line-gap-width",
     "road-street": "line-width",
     "road-street-case": "line-gap-width",
     "tunnel-street": "line-width",
@@ -3314,7 +3316,7 @@ def _line_width_zoom_band_layer_variants(
 def _outdoors_street_width_layer_variants(
     layer: dict[str, object],
 ) -> list[dict[str, object]] | None:
-    """Sample the z14-z15 Outdoors street width without changing higher zooms."""
+    """Sample selected z14-z15 Outdoors road widths without changing higher zooms."""
     layer_id = str(layer.get("id") or "")
     width_prop = _OUTDOORS_STREET_WIDTH_PROPS_BY_LAYER_ID.get(layer_id)
     paint = layer.get("paint")
@@ -6764,7 +6766,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
     survive QGIS conversion, rewrites a few semantics-preserving filter shapes,
     snapshots selected zoom-dependent filters at a representative layer zoom that
     QGIS can parse, splits visible hillshade, landcover, landuse, waterway,
-    path background, street widths, and road class colors into static layers,
+    path background, selected road widths, and road class colors into static layers,
     adds high-zoom pale path/pedestrian casings for Outdoors parity, and collapses
     Mapbox font stacks to a QGIS-safe local fallback to avoid
     warning spam from proprietary Mapbox font
