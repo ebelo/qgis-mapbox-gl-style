@@ -1689,6 +1689,64 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ],
         ]
 
+    def test_outdoors_blue_shields_use_list_match_without_reordering_layers(self):
+        source = {
+            "owner": "mapbox", "id": "outdoors-v12",
+            "layers": [{
+                "id": "road-number-shield", "type": "symbol", "minzoom": 6,
+                "filter": mapbox_config._ROAD_NUMBER_SHIELD_POINT_TO_LINE_FILTER_EXPRESSION,
+                "layout": {
+                    "icon-image": self._road_number_shield_icon_case(),
+                    "symbol-placement": mapbox_config._ROAD_NUMBER_SHIELD_SYMBOL_PLACEMENT_EXPRESSION,
+                    "text-field": ["get", "ref"],
+                },
+                "paint": {"text-color": "#222222"},
+            }],
+        }
+        unchanged = simplify_mapbox_style_expressions({**source, "owner": "custom"})
+        result = simplify_mapbox_style_expressions(source)
+        self.assertEqual(len(result["layers"]), len(unchanged["layers"]))
+        changed = 0
+        for original, candidate in zip(unchanged["layers"], result["layers"]):
+            expected = copy.deepcopy(original)
+            if "-known-icons" in original["id"]:
+                field = "shield_beta" if "-beta-" in original["id"] else "shield"
+                expected["paint"]["text-color"] = [
+                    "match", ["get", field], ["rectangle-blue"],
+                    "hsl(0, 0%, 100%)", "#222222",
+                ]
+                changed += 1
+            self.assertEqual(candidate, expected)
+        self.assertEqual(changed, 20)  # Five ref lengths, beta/non-beta, point/line.
+        self.assertEqual(source["layers"][0]["paint"]["text-color"], "#222222")
+        self.assertEqual(simplify_mapbox_style_expressions(result), result)
+
+    def test_blue_shield_text_color_requires_exact_outdoors_identity(self):
+        layer = {
+            "id": "road-number-shield", "type": "symbol",
+            "layout": {"icon-image": self._road_number_shield_icon_case()},
+            "paint": {"text-color": "#222222"},
+        }
+        for identity in (
+            {}, {"owner": "mapbox", "id": "light-v11"},
+            {"owner": "custom", "id": "outdoors-v12"},
+            {"owner": "mapbox", "id": "custom", "name": "Mapbox Outdoors"},
+        ):
+            with self.subTest(identity=identity):
+                result = simplify_mapbox_style_expressions({**identity, "layers": [layer]})
+                for variant in result["layers"]:
+                    if "-known-icons" in variant["id"]:
+                        self.assertEqual(variant["paint"]["text-color"], "#222222")
+
+    def test_outdoors_blue_shield_color_preserves_missing_paint_and_other_symbols(self):
+        layers = [
+            {"id": "road-number-shield-2-known-icons", "type": "symbol"},
+            {"id": "road-number-shield-3-known-icons", "type": "symbol", "paint": {}},
+            {"id": "poi-known-icons", "type": "symbol", "paint": {"text-color": "#222222"}},
+        ]
+        result = simplify_mapbox_style_expressions({"owner": "mapbox", "id": "outdoors-v12", "layers": layers})
+        self.assertEqual(result["layers"], layers)
+
     def test_road_number_shield_icon_case_expands_to_reflen_tokenized_sprite_layers(self):
         shield_icon = self._road_number_shield_icon_case()
         style = {
