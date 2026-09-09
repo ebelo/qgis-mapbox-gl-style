@@ -446,7 +446,7 @@ class EnsureBackgroundLayerMockTests(unittest.TestCase):
             sprite_url="mapbox://sprites/shared-owner/shared-style",
         )
         uri_builder.assert_called_once()
-        apply_style.assert_called_once_with(vector_layer, {"layers": []}, sprite_resources=sprite_resources)
+        apply_style.assert_called_once_with(vector_layer, {"layers": []}, sprite_resources=sprite_resources, source_style_definition={"sources": {}, "sprite": "mapbox://sprites/shared-owner/shared-style"})
 
     def test_enabled_vector_continues_without_unavailable_sprite_resources(self):
         vector_layer = MagicMock()
@@ -467,7 +467,7 @@ class EnsureBackgroundLayerMockTests(unittest.TestCase):
             )
 
         self.assertIs(result, vector_layer)
-        apply_style.assert_called_once_with(vector_layer, {"layers": []}, sprite_resources=None)
+        apply_style.assert_called_once_with(vector_layer, {"layers": []}, sprite_resources=None, source_style_definition={"sources": {}, "sprite": "mapbox://sprites/shared-owner/shared-style"})
 
 
 @unittest.skipIf(QGIS_AVAILABLE, SKIP_MOCK)
@@ -636,6 +636,62 @@ class ApplyLabelPriorityRealTests(unittest.TestCase):
         settings.dataDefinedProperties.return_value = MagicMock()
         style.labelSettings.return_value = settings
         return style, settings
+
+    def test_docker_open_fonts_resolve_and_preserve_source_styles(self):
+        if os.environ.get("QFIT_REQUIRE_OPEN_FONTS") != "1":
+            self.skipTest("Pinned open-font environment required")
+        self.assertNotEqual(os.getuid(), 0, "Font-enabled Docker tests must run as the unprivileged qfit user")
+        from qgis.PyQt.QtGui import QFont, QFontInfo, QTextLayout
+        from qfit.mapbox_config import simplify_mapbox_style_expressions
+        from qfit.visualization.infrastructure import mapbox_open_fonts as fonts
+
+        noto = QFontInfo(QFont("Noto Sans"))
+        self.assertEqual(noto.family(), "Noto Sans", "Noto must not silently fall back to DejaVu")
+        for face in fonts.DIN_STYLES.values():
+            requested = QFont(fonts.OPEN_FONT_FAMILY)
+            requested.setStyleName(face)
+            resolved = QFontInfo(requested)
+            self.assertEqual((resolved.family(), resolved.styleName()), (fonts.OPEN_FONT_FAMILY, face))
+        source = {
+            "version": 8, "owner": "mapbox", "id": "outdoors-v12",
+            "sources": {"composite": {"type": "vector"}},
+            "layers": [{
+                "id": "font-" + face, "type": "symbol", "source": "composite",
+                "source-layer": "place_label",
+                "layout": {"text-field": ["get", "name"], "text-font": [original], "text-size": 16},
+                "paint": {"text-color": "#123456", "text-halo-color": "#ffffff", "text-halo-width": 1},
+            } for original, face in fonts.DIN_STYLES.items()],
+        }
+        layer = MagicMock()
+        self.service._apply_mapbox_gl_style(
+            layer, simplify_mapbox_style_expressions(source), source_style_definition=source,
+        )
+        labeling = layer.setLabeling.call_args.args[0]
+        self.assertEqual(len(labeling.styles()), 4)
+        from qfit.validation.mapbox_outdoors_comparison import _qgis_font_snapshot
+        for label in labeling.styles():
+            settings = label.labelSettings()
+            fmt = settings.format()
+            face = label.styleName().removeprefix("font-")
+            audit = _qgis_font_snapshot(fmt)
+            self.assertEqual(audit["resolved_font_family"], fonts.OPEN_FONT_FAMILY)
+            self.assertEqual(audit["resolved_font_style"], face)
+            self.assertEqual(fmt.font().families(), [fonts.OPEN_FONT_FAMILY, "Noto Sans"])
+            self.assertEqual(fmt.color().name(), "#123456")
+            self.assertAlmostEqual(fmt.size(), 16 * 25.4 / 96)
+            self.assertTrue(fmt.buffer().enabled())
+
+        # Broad script fallback is real glyph shaping, not just a family name.
+        font = QFont(fonts.OPEN_FONT_FAMILY)
+        font.setFamilies([fonts.OPEN_FONT_FAMILY, "Noto Sans"])
+        layout = QTextLayout("Genève É27 Αθήνα Москва العربية", font)
+        layout.beginLayout()
+        line = layout.createLine()
+        line.setLineWidth(1000)
+        layout.endLayout()
+        runs = layout.glyphRuns()
+        self.assertTrue(runs)
+        self.assertTrue(all(0 not in run.glyphIndexes() for run in runs))
 
     def test_outdoors_green_shield_native_colors_and_fallbacks(self):
         from qgis.core import (

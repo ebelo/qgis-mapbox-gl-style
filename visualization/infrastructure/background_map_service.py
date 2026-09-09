@@ -591,7 +591,10 @@ class BackgroundMapService:
                 if not layer.isValid():
                     layer = None
                 else:
-                    self._apply_mapbox_gl_style(layer, simplified_style, sprite_resources=sprite_resources)
+                    self._apply_mapbox_gl_style(
+                        layer, simplified_style, sprite_resources=sprite_resources,
+                        source_style_definition=style_definition,
+                    )
             except (RuntimeError, KeyError, ValueError, OSError):
                 logger.warning("Vector tile layer creation failed, falling back to raster", exc_info=True)
                 layer = None
@@ -686,6 +689,7 @@ class BackgroundMapService:
         style_definition: dict,
         *,
         sprite_resources: MapboxSpriteResources | None = None,
+        source_style_definition: dict | None = None,
     ) -> None:
         try:
             from qgis.core import (  # noqa: PLC0415
@@ -704,6 +708,11 @@ class BackgroundMapService:
                 renderer = converter.renderer()
                 labeling = converter.labeling()
                 if labeling is not None:
+                    from .mapbox_open_fonts import apply_available_outdoors_fonts
+
+                    apply_available_outdoors_fonts(
+                        labeling, source_style_definition if source_style_definition is not None else style_definition,
+                    )
                     self._apply_label_priority(labeling)
                     apply_outdoors_green_shield_text_colors(labeling, style_definition)
                     if renderer is not None:
