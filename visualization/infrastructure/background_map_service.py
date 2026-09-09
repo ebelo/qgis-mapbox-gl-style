@@ -703,11 +703,16 @@ class BackgroundMapService:
             if result == QgsMapBoxGlStyleConverter.Success:
                 renderer = converter.renderer()
                 labeling = converter.labeling()
-                if renderer is not None:
-                    layer.setRenderer(renderer)
                 if labeling is not None:
                     self._apply_label_priority(labeling)
                     apply_outdoors_green_shield_text_colors(labeling, style_definition)
+                    if renderer is not None:
+                        from .mapbox_shield_collision import couple_outdoors_shield_backgrounds
+
+                        couple_outdoors_shield_backgrounds(renderer, labeling, style_definition)
+                if renderer is not None:
+                    layer.setRenderer(renderer)
+                if labeling is not None:
                     layer.setLabeling(labeling)
                     layer.setLabelsEnabled(True)
         except (RuntimeError, ImportError):
