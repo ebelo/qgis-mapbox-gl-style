@@ -637,6 +637,66 @@ class ApplyLabelPriorityRealTests(unittest.TestCase):
         style.labelSettings.return_value = settings
         return style, settings
 
+    def test_outdoors_green_shield_native_colors_and_fallbacks(self):
+        from qgis.core import (
+            QgsExpressionContext, QgsFeature, QgsField, QgsFields,
+            QgsPalLayerSettings,
+        )
+        from qfit.mapbox_config import simplify_mapbox_style_expressions
+
+        fields = QgsFields()
+        for name in ("shield", "shield_beta", "shield_text_color"):
+            fields.append(QgsField(name))
+        names = [
+            "road-number-shield-3-known-icons-below-z11",
+            "road-number-shield-3-known-icons-z11-plus",
+            "road-number-shield-3-beta-known-icons-below-z11",
+            "road-number-shield-3-default-icon-below-z11",
+        ]
+        source = {
+            "version": 8, "owner": "mapbox", "id": "outdoors-v12",
+            "sources": {"composite": {"type": "vector"}},
+            "layers": [{
+                "id": name, "type": "symbol", "source": "composite",
+                "source-layer": "road", "layout": {"text-field": ["get", "ref"]},
+                "paint": {"text-color": "#222222"},
+            } for name in names],
+        }
+        layer = MagicMock()
+        self.service._apply_mapbox_gl_style(layer, simplify_mapbox_style_expressions(source))
+        labeling = layer.setLabeling.call_args.args[0]
+        self.assertEqual([style.styleName() for style in labeling.styles()], names)
+        context = QgsExpressionContext()
+        context.setFields(fields)
+        for style in labeling.styles():
+            settings = style.labelSettings()
+            prop = settings.dataDefinedProperties().property(QgsPalLayerSettings.Property.Color)
+            for shield, source_color, expected in (
+                ("rectangle-green", "white", "#ffffff"),
+                ("rectangle-green", "yellow", "#e3d382"),
+                ("rectangle-green", "black", "#222222"),
+                ("rectangle-green", None, "#222222"),
+                ("rectangle-blue", None, "#ffffff"),
+                ("rectangle-red", "white", "#ffffff"),
+                ("it-motorway", "white", "#ffffff"),
+                ("rectangle-yellow", "white", "#222222"),
+                ("default", "white", "#222222"),
+                (None, "white", "#222222"),
+            ):
+                with self.subTest(style=style.styleName(), shield=shield, color=source_color):
+                    feature = QgsFeature(fields)
+                    feature.setAttributes([shield, shield, source_color])
+                    context.setFeature(feature)
+                    if "-default-icon" in style.styleName():
+                        self.assertFalse(prop.isActive())
+                        self.assertEqual(settings.format().color().name(), "#222222")
+                        continue
+                    if "-beta-" in style.styleName() and shield == "rectangle-green":
+                        expected = "#222222"
+                    color, ok = prop.valueAsColor(context)
+                    self.assertTrue(ok)
+                    self.assertEqual(color.name(), expected)
+
     def test_outdoors_colored_shield_color_match_evaluates_in_qgis(self):
         from qgis.core import (
             QgsExpressionContext, QgsFeature, QgsField, QgsFields,
@@ -1638,3 +1698,58 @@ class ApplyMapboxGlStyleMockTests(unittest.TestCase):
         layer = MagicMock()
         self.service._apply_mapbox_gl_style(layer, {"layers": []})
         layer.setLabeling.assert_not_called()
+
+
+@unittest.skipIf(QGIS_AVAILABLE, SKIP_MOCK)
+@unittest.skipIf(_mock_bms_cls is None, SKIP_MOCK_LOAD)
+class OutdoorsGreenShieldColorMockTests(unittest.TestCase):
+    def setUp(self):
+        self._sys_patch = patch.dict("sys.modules", {"qgis": _qstub, "qgis.core": _qstub})
+        self._sys_patch.start()
+        self.addCleanup(self._sys_patch.stop)
+
+    def test_requires_exact_outdoors_identity(self):
+        for source in ({}, {"owner": "mapbox", "id": "light-v11"},
+                       {"owner": "custom", "id": "outdoors-v12"}):
+            with self.subTest(source=source):
+                labeling = MagicMock()
+                _mock_bms_mod.apply_outdoors_green_shield_text_colors(labeling, source)
+                labeling.styles.assert_not_called()
+
+    def test_only_active_non_beta_known_shield_colors_are_changed(self):
+        names = ["road-label", "road-number-shield-3-default-icon",
+                 "road-number-shield-3-beta-known-icons",
+                 "road-number-shield-3-known-icons-below-z11",
+                 "road-number-shield-4-known-icons-below-z11",
+                 "road-number-shield-5-known-icons-below-z11"]
+        styles = [MagicMock() for _ in names]
+        for style, name in zip(styles, names):
+            style.styleName.return_value = name
+        changed, inactive, empty = styles[-3:]
+        for style, active, expression in ((changed, True, "'fallback'"),
+                                          (inactive, False, "'fallback'"),
+                                          (empty, True, "")):
+            prop = style.labelSettings().dataDefinedProperties().property.return_value
+            prop.isActive.return_value = active
+            prop.expressionString.return_value = expression
+        labeling = MagicMock()
+        labeling.styles.return_value = styles
+        _mock_bms_mod.apply_outdoors_green_shield_text_colors(
+            labeling, {"owner": "mapbox", "id": "outdoors-v12"}
+        )
+        labeling.setStyles.assert_called_once_with(styles)
+        changed.setLabelSettings.assert_called_once_with(changed.labelSettings())
+        expression = _qstub.QgsProperty.fromExpression.call_args.args[0]
+        self.assertIn('"shield_text_color"', expression)
+        self.assertIn("ELSE ('fallback') END", expression)
+        self.assertIn("'#ffffff'", expression)
+        self.assertIn("'#e3d382'", expression)
+        for style in styles:
+            if style is not changed:
+                style.setLabelSettings.assert_not_called()
+        labeling.reset_mock()
+        labeling.styles.return_value = [inactive, empty]
+        _mock_bms_mod.apply_outdoors_green_shield_text_colors(
+            labeling, {"owner": "mapbox", "id": "outdoors-v12"}
+        )
+        labeling.setStyles.assert_not_called()

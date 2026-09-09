@@ -11,6 +11,7 @@ from qgis.core import (
 
 from ...mapbox_config import (
     BACKGROUND_LAYER_PREFIX,
+    _is_mapbox_outdoors_style,
     TILE_MODE_RASTER,
     TILE_MODE_VECTOR,
     MapboxSpriteResources,
@@ -496,6 +497,44 @@ def apply_mapbox_label_priority(labeling) -> None:
         logger.debug("Mapbox GL style application skipped", exc_info=True)
 
 
+def apply_outdoors_green_shield_text_colors(labeling, style_definition: dict) -> None:
+    """Restore source foregrounds that QGIS cannot convert as nested colors."""
+    if not _is_mapbox_outdoors_style(style_definition):
+        return
+    from qgis.core import QgsPalLayerSettings, QgsProperty  # noqa: PLC0415
+
+    styles = list(labeling.styles())
+    changed = False
+    for style in styles:
+        name = _label_style_name(style)
+        if (not name.startswith("road-number-shield-")
+                or "-known-icons" not in name or "-beta-" in name):
+            continue
+        settings = style.labelSettings()
+        properties = settings.dataDefinedProperties()
+        color_property = properties.property(QgsPalLayerSettings.Property.Color)
+        fallback = color_property.expressionString()
+        if not color_property.isActive() or not fallback:
+            continue
+        # Keep the converted blue/red/Italian and unknown-sprite fallbacks.
+        # Only non-beta green rectangles have fresh source/rendering proof.
+        expression = (
+            "CASE WHEN \"shield\" = 'rectangle-green' AND \"shield_text_color\" = 'white' "
+            "THEN '#ffffff' "
+            "WHEN \"shield\" = 'rectangle-green' AND \"shield_text_color\" = 'yellow' "
+            "THEN '#e3d382' "  # Source hsl(50, 63%, 70%).
+            f"ELSE ({fallback}) END"
+        )
+        properties.setProperty(
+            QgsPalLayerSettings.Property.Color, QgsProperty.fromExpression(expression)
+        )
+        settings.setDataDefinedProperties(properties)
+        style.setLabelSettings(settings)
+        changed = True
+    if changed:
+        labeling.setStyles(styles)
+
+
 class BackgroundMapService:
     """Manages Mapbox background tile layers (raster and vector) in the QGIS project.
 
@@ -668,6 +707,7 @@ class BackgroundMapService:
                     layer.setRenderer(renderer)
                 if labeling is not None:
                     self._apply_label_priority(labeling)
+                    apply_outdoors_green_shield_text_colors(labeling, style_definition)
                     layer.setLabeling(labeling)
                     layer.setLabelsEnabled(True)
         except (RuntimeError, ImportError):
