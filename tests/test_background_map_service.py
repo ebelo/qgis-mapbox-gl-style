@@ -670,6 +670,7 @@ class ApplyLabelPriorityRealTests(unittest.TestCase):
                 context.setFields(fields)
                 for shield, expected in (
                     ("rectangle-blue", "#ffffff"), ("rectangle-red", "#ffffff"),
+                    ("it-motorway", "#ffffff"),
                     ("rectangle-yellow", "#222222"), ("rectangle-green", "#222222"),
                     ("default", "#222222"), (None, "#222222"),
                 ):

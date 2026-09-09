@@ -1712,7 +1712,7 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             if "-known-icons" in original["id"]:
                 field = "shield_beta" if "-beta-" in original["id"] else "shield"
                 expected["paint"]["text-color"] = [
-                    "match", ["get", field], ["rectangle-blue", "rectangle-red"],
+                    "match", ["get", field], ["rectangle-blue", "rectangle-red", "it-motorway"],
                     "hsl(0, 0%, 100%)", "#222222",
                 ]
                 changed += 1

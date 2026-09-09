@@ -5750,7 +5750,7 @@ def _expand_road_number_shield_layers_for_qgis(layers: object) -> object:
 
 
 def _apply_outdoors_colored_shield_text_colors(style: dict[str, object]) -> None:
-    """Keep white references on known blue/red sprites without adding label layers."""
+    """Keep source-white references on colored sprites without adding label layers."""
     if not _is_mapbox_outdoors_style(style):
         return
     for layer in style.get("layers", []):
@@ -5764,7 +5764,7 @@ def _apply_outdoors_colored_shield_text_colors(style: dict[str, object]) -> None
         # QGIS 3 converts a scalar match key to an empty IN clause. A list
         # key preserves the test; unknown/default sprites keep dark text.
         paint["text-color"] = [
-            "match", ["get", field_name], ["rectangle-blue", "rectangle-red"],
+            "match", ["get", field_name], ["rectangle-blue", "rectangle-red", "it-motorway"],
             "hsl(0, 0%, 100%)", paint["text-color"],
         ]
 
