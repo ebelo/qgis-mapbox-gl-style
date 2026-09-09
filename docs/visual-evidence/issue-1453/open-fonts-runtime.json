@@ -1,0 +1,552 @@
+{
+  "3": {
+    "chamonix-trails-z14-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "geneva-airport-motorway-z14-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "lausanne-lavaux-z10-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "switzerland-alps-z5-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "valais-geneva-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "zermatt-piste-z17-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "zermatt-trails-z18-outdoors": {
+      "runtime": {
+        "qgis_version": "3.44.11-Solothurn",
+        "qgis_version_int": 34411,
+        "qgis_release_name": "Solothurn"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    }
+  },
+  "4": {
+    "chamonix-trails-z14-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "geneva-airport-motorway-z14-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "lausanne-lavaux-z10-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "switzerland-alps-z5-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "valais-geneva-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "zermatt-piste-z17-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    },
+    "zermatt-trails-z18-outdoors": {
+      "runtime": {
+        "qgis_version": "4.2.0-Bel\u00e9m do Par\u00e1",
+        "qgis_version_int": 40200,
+        "qgis_release_name": "Bel\u00e9m do Par\u00e1"
+      },
+      "font_resolution": [
+        {
+          "requested_family": "Noto Sans",
+          "requested_style": "Regular",
+          "resolved_family": "Noto Sans",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Regular",
+          "resolved_family": "Barlow",
+          "resolved_style": "Regular"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Medium",
+          "resolved_family": "Barlow",
+          "resolved_style": "Medium"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Italic",
+          "resolved_family": "Barlow",
+          "resolved_style": "Italic"
+        },
+        {
+          "requested_family": "Barlow",
+          "requested_style": "Bold",
+          "resolved_family": "Barlow",
+          "resolved_style": "Bold"
+        }
+      ]
+    }
+  }
+}

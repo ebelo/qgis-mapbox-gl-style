@@ -1,0 +1,160 @@
+{
+  "3": {
+    "chamonix-trails-z14-outdoors": {
+      "before": {
+        "mae": 0.03419210012708787,
+        "rms": 0.0744720106981636
+      },
+      "after": {
+        "mae": 0.03419004516158315,
+        "rms": 0.074010499956176
+      },
+      "reference_sha256": "29ebfe37262e1c809894df45916e0928a8324e7883120c07453fff648d7248c3"
+    },
+    "geneva-airport-motorway-z14-outdoors": {
+      "before": {
+        "mae": 0.05805511528685549,
+        "rms": 0.10438772441354636
+      },
+      "after": {
+        "mae": 0.05799248479484386,
+        "rms": 0.10365586575536115
+      },
+      "reference_sha256": "1acc7757f7c289ad60b36939dd53614095aed45983de5231239dbc60c220ed12"
+    },
+    "lausanne-lavaux-z10-outdoors": {
+      "before": {
+        "mae": 0.026998140205156135,
+        "rms": 0.06860986232593555
+      },
+      "after": {
+        "mae": 0.026802083333333334,
+        "rms": 0.06765178353229737
+      },
+      "reference_sha256": "43ae6bb367bf6397b4771856409a0ddad5db7e10f6f8d968447b690913ded505"
+    },
+    "switzerland-alps-z5-outdoors": {
+      "before": {
+        "mae": 0.07479809708605664,
+        "rms": 0.13396069916899306
+      },
+      "after": {
+        "mae": 0.07434022217683371,
+        "rms": 0.13358954351332047
+      },
+      "reference_sha256": "b8957eee857eba3f9116548182aec374efa46d93a697722d34e22897ed87cc6e"
+    },
+    "valais-geneva-outdoors": {
+      "before": {
+        "mae": 0.04176830178830792,
+        "rms": 0.08102643800456016
+      },
+      "after": {
+        "mae": 0.041660510847857664,
+        "rms": 0.0803789533294272
+      },
+      "reference_sha256": "0ef16b70f28466b194ce22c48e0bd61e4da00f252fb713916e8000a9082b33cf"
+    },
+    "zermatt-piste-z17-outdoors": {
+      "before": {
+        "mae": 0.004321123819898329,
+        "rms": 0.023463426016557317
+      },
+      "after": {
+        "mae": 0.0042981821895424835,
+        "rms": 0.02349046504784915
+      },
+      "reference_sha256": "f47ed750cedb4d369d3c53c625cb806c2a7eae449371cef362d996f747f972d6"
+    },
+    "zermatt-trails-z18-outdoors": {
+      "before": {
+        "mae": 0.024582486837327524,
+        "rms": 0.0781894241025615
+      },
+      "after": {
+        "mae": 0.02340848311546841,
+        "rms": 0.0728551068773295
+      },
+      "reference_sha256": "6af55ff9a9751bab4578d0ebf70aea3061c141decd50de447f84bc15357876d0"
+    }
+  },
+  "4": {
+    "chamonix-trails-z14-outdoors": {
+      "before": {
+        "mae": 0.03392863902505446,
+        "rms": 0.07392268783976524
+      },
+      "after": {
+        "mae": 0.03409961873638344,
+        "rms": 0.0742107484742111
+      },
+      "reference_sha256": "29ebfe37262e1c809894df45916e0928a8324e7883120c07453fff648d7248c3"
+    },
+    "geneva-airport-motorway-z14-outdoors": {
+      "before": {
+        "mae": 0.058582314360929554,
+        "rms": 0.10493412197437646
+      },
+      "after": {
+        "mae": 0.05861774577886711,
+        "rms": 0.10444669150554596
+      },
+      "reference_sha256": "1acc7757f7c289ad60b36939dd53614095aed45983de5231239dbc60c220ed12"
+    },
+    "lausanne-lavaux-z10-outdoors": {
+      "before": {
+        "mae": 0.02646400803376906,
+        "rms": 0.06615955918715524
+      },
+      "after": {
+        "mae": 0.026417700390341324,
+        "rms": 0.06603158110888452
+      },
+      "reference_sha256": "43ae6bb367bf6397b4771856409a0ddad5db7e10f6f8d968447b690913ded505"
+    },
+    "switzerland-alps-z5-outdoors": {
+      "before": {
+        "mae": 0.07355300925925926,
+        "rms": 0.13096820410287635
+      },
+      "after": {
+        "mae": 0.07309066698438635,
+        "rms": 0.13064656442360117
+      },
+      "reference_sha256": "b8957eee857eba3f9116548182aec374efa46d93a697722d34e22897ed87cc6e"
+    },
+    "valais-geneva-outdoors": {
+      "before": {
+        "mae": 0.04200191199164851,
+        "rms": 0.08104463014843846
+      },
+      "after": {
+        "mae": 0.041848620188816264,
+        "rms": 0.08039089412138094
+      },
+      "reference_sha256": "0ef16b70f28466b194ce22c48e0bd61e4da00f252fb713916e8000a9082b33cf"
+    },
+    "zermatt-piste-z17-outdoors": {
+      "before": {
+        "mae": 0.004587839279230211,
+        "rms": 0.023890782889164016
+      },
+      "after": {
+        "mae": 0.004530214006899056,
+        "rms": 0.02357794232211612
+      },
+      "reference_sha256": "f47ed750cedb4d369d3c53c625cb806c2a7eae449371cef362d996f747f972d6"
+    },
+    "zermatt-trails-z18-outdoors": {
+      "before": {
+        "mae": 0.024484894698620193,
+        "rms": 0.07789518901946822
+      },
+      "after": {
+        "mae": 0.023263850308641972,
+        "rms": 0.07234076813510362
+      },
+      "reference_sha256": "6af55ff9a9751bab4578d0ebf70aea3061c141decd50de447f84bc15357876d0"
+    }
+  }
+}
