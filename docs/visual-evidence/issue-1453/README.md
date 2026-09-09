@@ -54,3 +54,13 @@ not a claim that Barlow is universally closer to every DIN font.
 
 Map data © Mapbox © OpenStreetMap. The Mapbox reference uses Mapbox's hosted
 font glyphs; no proprietary desktop font files are distributed here.
+
+## Light preset guardrail
+
+Zurich z8 and Lausanne z10 were also rendered before/after in both Docker
+versions. No Light label was mapped to Barlow; labels resolve Noto Sans after
+installation. The environment deliberately replaces the previously missing
+Noto request's DejaVu fallback, so exact pixel neutrality is not claimed.
+The largest whole-image MAE increase is about 0.000083 (Zurich, QGIS 4).
+`light-font-guardrail-metrics.json` records all four comparisons. The Outdoors
+mapping itself leaves custom and Light sources unchanged, as also unit-tested.
