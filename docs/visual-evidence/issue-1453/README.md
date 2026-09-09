@@ -1,6 +1,6 @@
 # Open-font comparison evidence for #1453
 
-Runtime mapping: `eb9d048` on `feat/issue-1453-docker-open-fonts`.
+Runtime mapping: `4887ed0` on `feat/issue-1453-docker-open-fonts`.
 The original font-less environment's conversion is the `41898fa` baseline.
 
 ## Production before/after
@@ -12,7 +12,8 @@ The original font-less environment's conversion is the `41898fa` baseline.
   disabled for this baseline (the base images have no Barlow in any case).
 - After: corresponding derived `qfit/qgis:<version>-fonts` image, with pinned
   Barlow Regular/Medium/Italic/Bold and Noto Core, using the production adapter.
-- Both camera matrices were rerun against committed runtime code `eb9d048`.
+- Both camera matrices were rerun against committed runtime code `4887ed0`, running as the unprivileged
+  `qfit` user with Noto Core and fontconfig pinned to the verified versions.
   Font and runtime records are in `open-fonts-runtime.json`; full-image metrics
   and reference-image hashes are in `open-fonts-metrics.json`.
 - Protected Mapbox access was verified inside each container with HTTP 200,

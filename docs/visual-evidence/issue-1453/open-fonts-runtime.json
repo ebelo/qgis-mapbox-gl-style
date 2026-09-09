@@ -37,7 +37,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "geneva-airport-motorway-z14-outdoors": {
       "runtime": {
@@ -76,7 +99,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "lausanne-lavaux-z10-outdoors": {
       "runtime": {
@@ -115,7 +161,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "switzerland-alps-z5-outdoors": {
       "runtime": {
@@ -154,7 +223,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "valais-geneva-outdoors": {
       "runtime": {
@@ -193,7 +285,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "zermatt-piste-z17-outdoors": {
       "runtime": {
@@ -232,7 +347,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "zermatt-trails-z18-outdoors": {
       "runtime": {
@@ -271,7 +409,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     }
   },
   "4": {
@@ -312,7 +473,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "geneva-airport-motorway-z14-outdoors": {
       "runtime": {
@@ -351,7 +535,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "lausanne-lavaux-z10-outdoors": {
       "runtime": {
@@ -390,7 +597,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "switzerland-alps-z5-outdoors": {
       "runtime": {
@@ -429,7 +659,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "valais-geneva-outdoors": {
       "runtime": {
@@ -468,7 +721,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "zermatt-piste-z17-outdoors": {
       "runtime": {
@@ -507,7 +783,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     },
     "zermatt-trails-z18-outdoors": {
       "runtime": {
@@ -546,7 +845,30 @@
           "resolved_family": "Barlow",
           "resolved_style": "Bold"
         }
-      ]
+      ],
+      "converted_label_faces": [
+        {
+          "family": "Barlow",
+          "style": "Bold",
+          "rules": 59
+        },
+        {
+          "family": "Barlow",
+          "style": "Italic",
+          "rules": 22
+        },
+        {
+          "family": "Barlow",
+          "style": "Medium",
+          "rules": 127
+        },
+        {
+          "family": "Barlow",
+          "style": "Regular",
+          "rules": 31
+        }
+      ],
+      "render_user": "qfit (non-root)"
     }
   }
 }
