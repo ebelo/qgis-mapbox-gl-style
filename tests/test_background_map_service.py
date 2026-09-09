@@ -637,7 +637,7 @@ class ApplyLabelPriorityRealTests(unittest.TestCase):
         style.labelSettings.return_value = settings
         return style, settings
 
-    def test_outdoors_blue_shield_color_match_evaluates_in_qgis(self):
+    def test_outdoors_colored_shield_color_match_evaluates_in_qgis(self):
         from qgis.core import (
             QgsExpressionContext, QgsFeature, QgsField, QgsFields,
             QgsMapBoxGlStyleConverter, QgsPalLayerSettings,
@@ -668,7 +668,11 @@ class ApplyLabelPriorityRealTests(unittest.TestCase):
                 self.assertTrue(prop.isActive())
                 context = QgsExpressionContext()
                 context.setFields(fields)
-                for shield, expected in (("rectangle-blue", "#ffffff"), ("rectangle-yellow", "#222222"), (None, "#222222")):
+                for shield, expected in (
+                    ("rectangle-blue", "#ffffff"), ("rectangle-red", "#ffffff"),
+                    ("rectangle-yellow", "#222222"), ("rectangle-green", "#222222"),
+                    ("default", "#222222"), (None, "#222222"),
+                ):
                     feature = QgsFeature(fields)
                     feature.setAttribute(field_name, shield)
                     context.setFeature(feature)

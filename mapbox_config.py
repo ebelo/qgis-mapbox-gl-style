@@ -5749,8 +5749,8 @@ def _expand_road_number_shield_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
-def _apply_outdoors_blue_shield_text_colors(style: dict[str, object]) -> None:
-    """Keep white references on known blue sprites without adding label layers."""
+def _apply_outdoors_colored_shield_text_colors(style: dict[str, object]) -> None:
+    """Keep white references on known blue/red sprites without adding label layers."""
     if not _is_mapbox_outdoors_style(style):
         return
     for layer in style.get("layers", []):
@@ -5764,7 +5764,7 @@ def _apply_outdoors_blue_shield_text_colors(style: dict[str, object]) -> None:
         # QGIS 3 converts a scalar match key to an empty IN clause. A list
         # key preserves the test; unknown/default sprites keep dark text.
         paint["text-color"] = [
-            "match", ["get", field_name], ["rectangle-blue"],
+            "match", ["get", field_name], ["rectangle-blue", "rectangle-red"],
             "hsl(0, 0%, 100%)", paint["text-color"],
         ]
 
@@ -7122,7 +7122,7 @@ def simplify_mapbox_style_expressions(style_definition: dict[str, object]) -> di
                     if choice is not None:
                         props[prop] = choice
         _drop_icon_opacity_without_icon_image(layer)
-    _apply_outdoors_blue_shield_text_colors(style)
+    _apply_outdoors_colored_shield_text_colors(style)
     return style
 
 
