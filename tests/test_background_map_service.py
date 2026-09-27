@@ -42,7 +42,7 @@ try:
     QGIS_IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover
     BackgroundMapService = None
-    BACKGROUND_LAYER_PREFIX = "qfit background"
+    BACKGROUND_LAYER_PREFIX = "QGIS Mapbox GL Style background"
     TILE_MODE_RASTER = "Raster"
     TILE_MODE_VECTOR = "Vector"
     QGIS_AVAILABLE = False
@@ -374,7 +374,7 @@ class EnsureBackgroundLayerMockTests(unittest.TestCase):
 
     def test_disabled_returns_none_and_removes_layers(self):
         bg = MagicMock()
-        bg.name.return_value = "qfit background — Outdoor"
+        bg.name.return_value = f"{BACKGROUND_LAYER_PREFIX} — Outdoor"
         bg.id.return_value = "bg-1"
         self.mock_project.mapLayers.return_value = {"bg-1": bg}
 
@@ -486,7 +486,7 @@ class MoveBackgroundLayersMockTests(unittest.TestCase):
         self._sys_patch.stop()
 
     def test_background_moved_to_end(self):
-        bg_node, _ = _make_layer_node("qfit background — Outdoor")
+        bg_node, _ = _make_layer_node(f"{BACKGROUND_LAYER_PREFIX} — Outdoor")
         other_node, _ = _make_layer_node("qfit activities")
         mock_root = MagicMock()
         mock_root.children.return_value = [bg_node, other_node]
@@ -498,7 +498,7 @@ class MoveBackgroundLayersMockTests(unittest.TestCase):
 
     def test_no_reorder_when_already_at_bottom(self):
         other_node, _ = _make_layer_node("qfit activities")
-        bg_node, _ = _make_layer_node("qfit background — Outdoor")
+        bg_node, _ = _make_layer_node(f"{BACKGROUND_LAYER_PREFIX} — Outdoor")
         mock_root = MagicMock()
         mock_root.children.return_value = [other_node, bg_node]
         self.mock_project.layerTreeRoot.return_value = mock_root
@@ -525,7 +525,7 @@ class RemoveBackgroundLayersMockTests(unittest.TestCase):
 
     def test_removes_only_background_layers(self):
         bg = MagicMock()
-        bg.name.return_value = "qfit background — Outdoor"
+        bg.name.return_value = f"{BACKGROUND_LAYER_PREFIX} — Outdoor"
         bg.id.return_value = "bg-1"
         other = MagicMock()
         other.name.return_value = "qfit activities"
@@ -601,7 +601,7 @@ class SnapExtentMockTests(unittest.TestCase):
 
         # Create a raster layer as an instance of the stub QgsRasterLayer
         raster_layer = _qstub.QgsRasterLayer()
-        raster_layer.name.return_value = "qfit background — Outdoor"
+        raster_layer.name.return_value = f"{BACKGROUND_LAYER_PREFIX} — Outdoor"
         self.mock_project.mapLayers.return_value = {"bg": raster_layer}
 
         canvas = MagicMock()
