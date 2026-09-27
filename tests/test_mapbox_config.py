@@ -2412,52 +2412,6 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(lower_bound_layer["maxzoom"], 11)
         self.assertEqual(lower_bound_layer["filter"], ["all", ["has", "name"], low_zoom_filter])
 
-    def test_light_road_label_size_is_split_into_evidenced_zoom_bands(self):
-        text_size = [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            10,
-            10,
-            18,
-            16,
-        ]
-        style = {
-            "owner": "mapbox",
-            "id": "light-v11",
-            "layers": [
-                {"id": "background", "type": "background"},
-                {
-                    "id": "road-label-simple",
-                    "type": "symbol",
-                    "minzoom": 12,
-                    "layout": {
-                        "text-field": ["get", "name"],
-                        "text-size": text_size,
-                    },
-                },
-            ],
-        }
-
-        result = simplify_mapbox_style_expressions(style)
-
-        self.assertEqual(
-            [layer["id"] for layer in result["layers"]],
-            [
-                "background",
-                "road-label-simple",
-                "road-label-simple-z12-to-z15",
-            ],
-        )
-        by_id = {layer["id"]: layer for layer in result["layers"]}
-        self.assertEqual(by_id["road-label-simple-z12-to-z15"]["minzoom"], 12.0)
-        self.assertEqual(by_id["road-label-simple-z12-to-z15"]["maxzoom"], 15.0)
-        self.assertEqual(by_id["road-label-simple-z12-to-z15"]["layout"]["text-size"], 11.5)
-        self.assertEqual(by_id["road-label-simple"]["minzoom"], 15.0)
-        self.assertNotIn("maxzoom", by_id["road-label-simple"])
-        self.assertEqual(by_id["road-label-simple"]["layout"]["text-size"], 10.0)
-        self.assertEqual(style["layers"][1]["layout"]["text-size"], text_size)
-
     def test_outdoors_mid_zoom_road_label_size_requires_exact_style_identity(self):
         for owner, style_id in (
             ("custom-owner", "outdoors-v12"),
@@ -2491,34 +2445,6 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 result = simplify_mapbox_style_expressions(style)
 
                 self.assertEqual(result["layers"][0]["layout"]["text-size"], 10.0)
-
-    def test_light_road_label_size_split_requires_mapbox_light_identity(self):
-        for owner, style_id in (
-            ("custom-owner", "light-v11"),
-            ("mapbox", "custom-light"),
-            (None, "light-v11"),
-        ):
-            with self.subTest(owner=owner, style_id=style_id):
-                style = {
-                    "owner": owner,
-                    "id": style_id,
-                    "layers": [
-                        {
-                            "id": "road-label-simple",
-                            "type": "symbol",
-                            "minzoom": 12,
-                            "layout": {"text-size": 10},
-                        }
-                    ],
-                }
-
-                result = simplify_mapbox_style_expressions(style)
-
-                self.assertEqual(
-                    [layer["id"] for layer in result["layers"]],
-                    ["road-label-simple"],
-                )
-                self.assertEqual(result["layers"][0]["layout"]["text-size"], 10)
 
     def test_filter_simplification_splits_path_pedestrian_label_zoom_filter(self):
         low_zoom_filter = [

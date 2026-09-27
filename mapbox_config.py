@@ -792,13 +792,6 @@ _ROAD_LABEL_MID_ZOOM_TEXT_COLOR = _ROAD_LABEL_HIGH_ZOOM_TEXT_COLOR
 _OUTDOORS_STYLE_OWNER = "mapbox"
 _OUTDOORS_STYLE_ID = "outdoors-v12"
 _OUTDOORS_ROAD_LABEL_MID_ZOOM_TEXT_SIZE = 12.0
-_LIGHT_STYLE_OWNER = "mapbox"
-_LIGHT_STYLE_ID = "light-v11"
-_LIGHT_ROAD_LABEL_LAYER_ID = "road-label-simple"
-_LIGHT_ROAD_LABEL_SIZE_ZOOM_BANDS: tuple[
-    tuple[str | None, float | None, float | None, float],
-    ...,
-] = ((None, 15.0, None, 10.0), ("z12-to-z15", 12.0, 15.0, 11.5))
 _PATH_PEDESTRIAN_LABEL_LOW_ZOOM_CLASS_FILTER = [
     "match",
     ["get", "class"],
@@ -2419,63 +2412,11 @@ def _split_road_label_filter_layers_for_qgis(layers: object) -> object:
     return expanded_layers
 
 
-def _is_mapbox_light_style(style_definition: dict[str, object]) -> bool:
-    return (
-        style_definition.get("owner") == _LIGHT_STYLE_OWNER
-        and style_definition.get("id") == _LIGHT_STYLE_ID
-    )
-
-
 def _is_mapbox_outdoors_style(style_definition: dict[str, object]) -> bool:
     return (
         style_definition.get("owner") == _OUTDOORS_STYLE_OWNER
         and style_definition.get("id") == _OUTDOORS_STYLE_ID
     )
-
-
-def _light_road_label_size_layer_variants(
-    layer: dict[str, object],
-) -> list[dict[str, object]] | None:
-    if (
-        str(layer.get("id") or "") != _LIGHT_ROAD_LABEL_LAYER_ID
-        or layer.get("type") != "symbol"
-    ):
-        return None
-    existing_minzoom = _numeric_zoom_bound(layer.get("minzoom"))
-    existing_maxzoom = _numeric_zoom_bound(layer.get("maxzoom"))
-    variants: list[dict[str, object]] = []
-    for suffix, band_minzoom, band_maxzoom, text_size in _LIGHT_ROAD_LABEL_SIZE_ZOOM_BANDS:
-        zoom_band = _effective_zoom_band(
-            existing_minzoom,
-            existing_maxzoom,
-            band_minzoom,
-            band_maxzoom,
-        )
-        if zoom_band is None:
-            continue
-        variant = copy.deepcopy(layer)
-        if suffix is not None:
-            variant["id"] = f"{_LIGHT_ROAD_LABEL_LAYER_ID}-{suffix}"
-        _set_zoom_bounds(variant, *zoom_band)
-        layout = variant.setdefault("layout", {})
-        if not isinstance(layout, dict):
-            return None
-        layout["text-size"] = text_size
-        variants.append(variant)
-    return variants or None
-
-
-def _split_light_road_label_size_layers_for_qgis(
-    style_definition: dict[str, object],
-    layers: object,
-) -> object:
-    if not _is_mapbox_light_style(style_definition) or not isinstance(layers, list):
-        return layers
-    expanded_layers: list[object] = []
-    for layer in layers:
-        variants = _light_road_label_size_layer_variants(layer) if isinstance(layer, dict) else None
-        expanded_layers.extend(variants if variants is not None else [layer])
-    return expanded_layers
 
 
 def _path_pedestrian_label_zoom_step_filter_clause(value: object) -> list[object] | None:

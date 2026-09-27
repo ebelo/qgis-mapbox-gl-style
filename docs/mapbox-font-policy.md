@@ -1,8 +1,10 @@
 # Mapbox typography: open-font substitution policy
 
-This decision forms part of qfit's [architecture](architecture.md#81-basemap-typography-and-open-font-policy)
-and [deterministic rendering principles](qgis-plugin-architecture-principles.md#8-deterministic-rendering-policy).
-It follows the [Geneva font investigation in #1453](https://github.com/ebelo/qfit/issues/1453#issuecomment-5606888522).
+This decision originated in qfit's
+[architecture](https://github.com/ebelo/qfit/blob/0e79b0e8b034a29edf3cb53f08998cdb213b04d9/docs/architecture.md#81-basemap-typography-and-open-font-policy)
+and [deterministic rendering principles](https://github.com/ebelo/qfit/blob/0e79b0e8b034a29edf3cb53f08998cdb213b04d9/docs/qgis-plugin-architecture-principles.md#8-deterministic-rendering-policy).
+It is retained here with the Mapbox/QGIS implementation and follows the
+[Geneva font investigation in #1453](https://github.com/ebelo/qfit/issues/1453#issuecomment-5606888522).
 
 ## Decision
 

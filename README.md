@@ -6,23 +6,27 @@ The first target style is Mapbox Outdoors (`mapbox/outdoors-v12`). The project k
 
 ## Style Maturity At A Glance
 
-The Chamonix sequence below shows how the QGIS rendering of Mapbox Outdoors evolved from an early converter pass to a mature outdoor style with clearer terrain, hillshade relief, paths, landcover, labels, and contour balance. Each frame is a fresh QGIS render from a historical iteration of the style work.
+The curated Chamonix sequence shows only visually meaningful steps: first conversion, restored symbols and labels, landcover and trail separation, hillshade relief, and the latest qFit baseline with balanced contour/path detail. The final stage adds the September 2026 road hierarchy, source-correct shields, shield/label collision coupling, and portable Barlow/Noto typography.
 
-| Early conversion | Style audit |
-| --- | --- |
-| ![Initial comparable QGIS render of Mapbox Outdoors around Chamonix](docs/images/style-progression/chamonix/01_initial_llm_guess.png) | ![Style audit iteration of the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/02_first_visual_pass.png) |
+![Five-stage comparison matrix showing the evolution of Mapbox Outdoors rendered natively in QGIS around Chamonix](docs/images/style-progression/chamonix/style-maturity-matrix.png)
 
-| Symbols and labels | Opacity simplification |
-| --- | --- |
-| ![Sprites provided to QGIS for Mapbox Outdoors labels and symbols around Chamonix](docs/images/style-progression/chamonix/03_label_and_terrain_iteration.png) | ![Opacity simplification pass for Mapbox Outdoors in QGIS around Chamonix](docs/images/style-progression/chamonix/04_landcover_rebalance.png) |
+The source history now includes the final work from qFit issues [#949](https://github.com/ebelo/qfit/issues/949) and [#1453](https://github.com/ebelo/qfit/issues/1453):
 
-| Landcover separation | Hillshade relief |
-| --- | --- |
-| ![Landcover color separation in the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/05_area_fill_and_trails.png) | ![Hillshade relief preserved in the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/06_road_label_refinement.png) |
+| Milestone | qFit work integrated | Visible result |
+| --- | --- | --- |
+| Roads | PRs [#1448](https://github.com/ebelo/qfit/pull/1448), [#1449](https://github.com/ebelo/qfit/pull/1449), [#1450](https://github.com/ebelo/qfit/pull/1450), [#1452](https://github.com/ebelo/qfit/pull/1452) | Better road-label sizing and a clearer z14 street hierarchy |
+| Shields | PRs [#1454](https://github.com/ebelo/qfit/pull/1454)–[#1458](https://github.com/ebelo/qfit/pull/1458) | Source-correct shield colours and no orphan backgrounds after collision removal |
+| Typography | PR [#1460](https://github.com/ebelo/qfit/pull/1460) | Portable Barlow roles with Noto script fallback in reproducible QGIS environments |
 
-| Trail legibility | Mature result |
+The qFit team accepted this Outdoors state at baseline [`63784d0`](https://github.com/ebelo/qfit/commit/63784d0) after the visual review loop. Acceptance means the remaining differences were documented and no longer blocked the project; it is not a claim of pixel-perfect browser parity.
+
+Focused evidence remains available for the two changes that are hard to judge at Chamonix scale:
+
+| Shield collision coupling | Portable typography |
 | --- | --- |
-| ![Trail overlay legibility improved in the QGIS Mapbox Outdoors render around Chamonix](docs/images/style-progression/chamonix/07_high_zoom_outdoor_detail.png) | ![Mature QGIS Mapbox Outdoors render around Chamonix with terrain, paths, labels, and contour balance](docs/images/style-progression/chamonix/08_late_vision_tuned_result.png) |
+| ![Geneva comparison showing Mapbox reference, orphan shield before the fix, and coupled shield after the fix](docs/visual-evidence/issue-1453/geneva-collision-before-after.png) | ![Mapbox reference, QGIS before, and QGIS after comparison for Barlow and Noto typography](docs/visual-evidence/issue-1453/open-fonts-qgis3-before-after.png) |
+
+See the [progression image notes](docs/images/style-progression/chamonix/README.md) and [`iterations/index.json`](iterations/index.json) for provenance and reproducible iteration metadata.
 
 ## What It Does
 
@@ -30,7 +34,8 @@ The Chamonix sequence below shows how the QGIS rendering of Mapbox Outdoors evol
 - fetches the Mapbox style JSON and sprite sheet at runtime
 - simplifies Mapbox GL expressions that QGIS cannot convert directly
 - applies the converted renderer and labeling with QGIS' `QgsMapBoxGlStyleConverter`
-- post-processes labels, line styles, terrain fills, road shields, contour labels, paths, and other Outdoors-specific details from the qfit work
+- post-processes labels, line styles, terrain fills, source-correct road shields, shield collisions, contour labels, paths, and other Outdoors-specific details from the qfit work
+- maps proprietary DIN roles to portable Barlow faces with Noto script fallback in the reproducible rendering environments
 - keeps an iteration manifest so historical and future style snapshots can be rendered and compared
 
 No Mapbox token, tile payload, sprite payload, downloaded style JSON, or render output is committed.
