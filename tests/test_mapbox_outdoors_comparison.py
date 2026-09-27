@@ -8,7 +8,7 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from tests import _path  # noqa: F401
 
@@ -90,6 +90,26 @@ SAMPLE_STYLE = {
 
 
 class MapboxOutdoorsComparisonTests(unittest.TestCase):
+    def test_font_snapshot_reports_actual_resolution_and_handles_unavailable_qt(self):
+        from qfit.validation.mapbox_outdoors_comparison import _qgis_font_snapshot
+
+        font = types.SimpleNamespace(family=lambda: "Noto Sans", styleName=lambda: "Regular")
+        text_format = types.SimpleNamespace(font=lambda: font)
+        qt = types.SimpleNamespace(QFontInfo=lambda _: types.SimpleNamespace(
+            family=lambda: "DejaVu Sans", styleName=lambda: "Book",
+        ))
+        with patch.dict(sys.modules, {"qgis.PyQt.QtGui": qt}):
+            snapshot = _qgis_font_snapshot(text_format)
+        self.assertEqual(snapshot, {
+            "requested_font_family": "Noto Sans", "requested_font_style": "Regular",
+            "resolved_font_family": "DejaVu Sans", "resolved_font_style": "Book",
+        })
+        qt.QFontInfo = Mock(side_effect=TypeError("not a real QFont"))
+        with patch.dict(sys.modules, {"qgis.PyQt.QtGui": qt}):
+            snapshot = _qgis_font_snapshot(text_format)
+        self.assertNotIn("resolved_font_family", snapshot)
+        self.assertEqual(_qgis_font_snapshot(None), {})
+
     def test_default_camera_targets_mapbox_outdoors(self):
         camera = CAMERAS["valais-geneva-outdoors"]
 
@@ -467,10 +487,12 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
         captured_style = {}
 
         class FakeBackgroundMapService:
-            def _apply_mapbox_gl_style(self, layer, style_definition, *, sprite_resources=None):
+            def _apply_mapbox_gl_style(self, layer, style_definition, *, sprite_resources=None,
+                                      source_style_definition=None):
                 layer.applied_style = style_definition
                 layer.sprite_resources = sprite_resources
                 captured_style["style_definition"] = style_definition
+                captured_style["source_style_definition"] = source_style_definition
 
         fake_core = types.ModuleType("qgis.core")
         fake_core.QgsApplication = FakeQgsApplication
@@ -530,6 +552,7 @@ class MapboxOutdoorsComparisonTests(unittest.TestCase):
             preprocessed_style = json.loads(preprocessed_style_text)
 
             self.assertTrue(captured_style["style_definition"]["metadata"]["qfit-preprocessed"])
+            self.assertNotIn("qfit-preprocessed", captured_style["source_style_definition"].get("metadata", {}))
             self.assertTrue(preprocessed_style["metadata"]["qfit-preprocessed"])
             self.assertNotIn("test-mapbox-token", preprocessed_style_text)
 

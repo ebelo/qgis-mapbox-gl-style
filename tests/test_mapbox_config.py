@@ -1689,6 +1689,64 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             ],
         ]
 
+    def test_outdoors_colored_shields_use_list_match_without_reordering_layers(self):
+        source = {
+            "owner": "mapbox", "id": "outdoors-v12",
+            "layers": [{
+                "id": "road-number-shield", "type": "symbol", "minzoom": 6,
+                "filter": mapbox_config._ROAD_NUMBER_SHIELD_POINT_TO_LINE_FILTER_EXPRESSION,
+                "layout": {
+                    "icon-image": self._road_number_shield_icon_case(),
+                    "symbol-placement": mapbox_config._ROAD_NUMBER_SHIELD_SYMBOL_PLACEMENT_EXPRESSION,
+                    "text-field": ["get", "ref"],
+                },
+                "paint": {"text-color": "#222222"},
+            }],
+        }
+        unchanged = simplify_mapbox_style_expressions({**source, "owner": "custom"})
+        result = simplify_mapbox_style_expressions(source)
+        self.assertEqual(len(result["layers"]), len(unchanged["layers"]))
+        changed = 0
+        for original, candidate in zip(unchanged["layers"], result["layers"]):
+            expected = copy.deepcopy(original)
+            if "-known-icons" in original["id"]:
+                field = "shield_beta" if "-beta-" in original["id"] else "shield"
+                expected["paint"]["text-color"] = [
+                    "match", ["get", field], ["rectangle-blue", "rectangle-red", "it-motorway"],
+                    "hsl(0, 0%, 100%)", "#222222",
+                ]
+                changed += 1
+            self.assertEqual(candidate, expected)
+        self.assertEqual(changed, 20)  # Five ref lengths, beta/non-beta, point/line.
+        self.assertEqual(source["layers"][0]["paint"]["text-color"], "#222222")
+        self.assertEqual(simplify_mapbox_style_expressions(result), result)
+
+    def test_colored_shield_text_color_requires_exact_outdoors_identity(self):
+        layer = {
+            "id": "road-number-shield", "type": "symbol",
+            "layout": {"icon-image": self._road_number_shield_icon_case()},
+            "paint": {"text-color": "#222222"},
+        }
+        for identity in (
+            {}, {"owner": "mapbox", "id": "light-v11"},
+            {"owner": "custom", "id": "outdoors-v12"},
+            {"owner": "mapbox", "id": "custom", "name": "Mapbox Outdoors"},
+        ):
+            with self.subTest(identity=identity):
+                result = simplify_mapbox_style_expressions({**identity, "layers": [layer]})
+                for variant in result["layers"]:
+                    if "-known-icons" in variant["id"]:
+                        self.assertEqual(variant["paint"]["text-color"], "#222222")
+
+    def test_outdoors_colored_shield_color_preserves_missing_paint_and_other_symbols(self):
+        layers = [
+            {"id": "road-number-shield-2-known-icons", "type": "symbol"},
+            {"id": "road-number-shield-3-known-icons", "type": "symbol", "paint": {}},
+            {"id": "poi-known-icons", "type": "symbol", "paint": {"text-color": "#222222"}},
+        ]
+        result = simplify_mapbox_style_expressions({"owner": "mapbox", "id": "outdoors-v12", "layers": layers})
+        self.assertEqual(result["layers"], layers)
+
     def test_road_number_shield_icon_case_expands_to_reflen_tokenized_sprite_layers(self):
         shield_icon = self._road_number_shield_icon_case()
         style = {
@@ -2257,6 +2315,8 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
             True,
         ]
         style = {
+            "owner": "mapbox",
+            "id": "outdoors-v12",
             "layers": [
                 {
                     "id": "road-label",
@@ -2323,7 +2383,12 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertNotIn("paint", by_id["road-label-below-z12"])
         for layer in by_id.values():
             self.assertEqual(layer["layout"]["text-field"], ["get", "name"])
-            self.assertEqual(layer["layout"]["text-size"], 10.0)
+        self.assertEqual(by_id["road-label-below-z12"]["layout"]["text-size"], 10.0)
+        self.assertEqual(
+            by_id["road-label-z12-to-z15"]["layout"]["text-size"],
+            mapbox_config._OUTDOORS_ROAD_LABEL_MID_ZOOM_TEXT_SIZE,
+        )
+        self.assertEqual(by_id["road-label-z15-plus"]["layout"]["text-size"], 10.0)
         for layer_id in by_id:
             self.assertEqual(
                 mapbox_config.base_mapbox_style_layer_id_for_qfit(layer_id),
@@ -2346,6 +2411,40 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
         self.assertEqual(lower_bound_layer["minzoom"], 8)
         self.assertEqual(lower_bound_layer["maxzoom"], 11)
         self.assertEqual(lower_bound_layer["filter"], ["all", ["has", "name"], low_zoom_filter])
+
+    def test_outdoors_mid_zoom_road_label_size_requires_exact_style_identity(self):
+        for owner, style_id in (
+            ("custom-owner", "outdoors-v12"),
+            ("mapbox", "custom-outdoors"),
+            ("mapbox", "light-v11"),
+            (None, "outdoors-v12"),
+        ):
+            with self.subTest(owner=owner, style_id=style_id):
+                style = {
+                    "owner": owner,
+                    "id": style_id,
+                    "layers": [
+                        {
+                            "id": "road-label-z12-to-z15",
+                            "type": "symbol",
+                            "layout": {
+                                "text-size": [
+                                    "interpolate",
+                                    ["linear"],
+                                    ["zoom"],
+                                    10,
+                                    9,
+                                    18,
+                                    14,
+                                ]
+                            },
+                        }
+                    ],
+                }
+
+                result = simplify_mapbox_style_expressions(style)
+
+                self.assertEqual(result["layers"][0]["layout"]["text-size"], 10.0)
 
     def test_filter_simplification_splits_path_pedestrian_label_zoom_filter(self):
         low_zoom_filter = [
@@ -5793,6 +5892,296 @@ class SimplifyMapboxStyleTests(unittest.TestCase):
                 "road-pedestrian-case-z18-plus-pale-casing"
             ),
             "road-pedestrian-case",
+        )
+
+    def test_outdoors_street_width_uses_z14_camera_sample_in_a_narrow_band(self):
+        width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            12,
+            0.5,
+            18,
+            20,
+            22,
+            200,
+        ]
+        case_width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            0.8,
+            22,
+            2,
+        ]
+        style = {
+            "owner": "mapbox",
+            "id": "outdoors-v12",
+            "layers": [
+                {
+                    "id": "road-street-case",
+                    "type": "line",
+                    "minzoom": 14,
+                    "paint": {
+                        "line-width": copy.deepcopy(case_width_expression),
+                        "line-gap-width": copy.deepcopy(width_expression),
+                    },
+                },
+                {
+                    "id": "road-street",
+                    "type": "line",
+                    "minzoom": 13,
+                    "paint": {
+                        "line-width": copy.deepcopy(width_expression),
+                        "line-opacity": ["step", ["zoom"], 0, 14, 1],
+                    },
+                },
+            ],
+        }
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        expected_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(
+                width_expression,
+                mapbox_config._OUTDOORS_STREET_WIDTH_SAMPLE_ZOOM,
+            )
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        case_mid = by_id["road-street-case-z14-to-z15"]
+        street_low = by_id["road-street-below-z14"]
+        street_mid = by_id["road-street-z14-to-z15"]
+        self.assertEqual(case_mid["minzoom"], 14)
+        self.assertEqual(case_mid["maxzoom"], 15)
+        self.assertAlmostEqual(case_mid["paint"]["line-gap-width"], expected_width_mm)
+        self.assertEqual(street_mid["minzoom"], 14)
+        self.assertEqual(street_mid["maxzoom"], 15)
+        self.assertAlmostEqual(street_mid["paint"]["line-width"], expected_width_mm)
+        self.assertEqual(street_low["minzoom"], 13)
+        self.assertEqual(street_low["maxzoom"], 14)
+        self.assertAlmostEqual(
+            street_low["paint"]["line-width"],
+            0.5 * mapbox_config._MAPBOX_PIXEL_TO_MM,
+        )
+        self.assertEqual(street_low["paint"]["line-opacity"], 0.0)
+        self.assertEqual(by_id["road-street-case"]["minzoom"], 15)
+        self.assertEqual(by_id["road-street"]["minzoom"], 15)
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(case_mid["id"]),
+            "road-street-case",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(street_mid["id"]),
+            "road-street",
+        )
+        self.assertEqual(
+            mapbox_config.base_mapbox_style_layer_id_for_qfit(street_low["id"]),
+            "road-street",
+        )
+
+    def test_outdoors_structure_street_widths_use_the_same_z14_band(self):
+        width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            12,
+            0.5,
+            18,
+            20,
+            22,
+            200,
+        ]
+        case_width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            0.8,
+            22,
+            2,
+        ]
+        layers = []
+        for structure in ("bridge", "tunnel"):
+            layers.extend(
+                [
+                    {
+                        "id": f"{structure}-street-case",
+                        "type": "line",
+                        "minzoom": 14,
+                        "paint": {
+                            "line-width": copy.deepcopy(case_width_expression),
+                            "line-gap-width": copy.deepcopy(width_expression),
+                        },
+                    },
+                    {
+                        "id": f"{structure}-street",
+                        "type": "line",
+                        "minzoom": 13,
+                        "paint": {
+                            "line-width": copy.deepcopy(width_expression),
+                            "line-opacity": ["step", ["zoom"], 0, 14, 1],
+                        },
+                    },
+                ]
+            )
+        style = {"owner": "mapbox", "id": "outdoors-v12", "layers": layers}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        expected_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(
+                width_expression,
+                mapbox_config._OUTDOORS_STREET_WIDTH_SAMPLE_ZOOM,
+            )
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        for structure in ("bridge", "tunnel"):
+            case_id = f"{structure}-street-case"
+            street_id = f"{structure}-street"
+            case_mid = by_id[f"{case_id}-z14-to-z15"]
+            street_low = by_id[f"{street_id}-below-z14"]
+            street_mid = by_id[f"{street_id}-z14-to-z15"]
+            with self.subTest(structure=structure):
+                self.assertEqual((case_mid["minzoom"], case_mid["maxzoom"]), (14, 15))
+                self.assertAlmostEqual(
+                    case_mid["paint"]["line-gap-width"], expected_width_mm
+                )
+                self.assertEqual((street_mid["minzoom"], street_mid["maxzoom"]), (14, 15))
+                self.assertAlmostEqual(
+                    street_mid["paint"]["line-width"], expected_width_mm
+                )
+                self.assertEqual((street_low["minzoom"], street_low["maxzoom"]), (13, 14))
+                self.assertEqual(street_low["paint"]["line-opacity"], 0.0)
+                self.assertEqual(by_id[case_id]["minzoom"], 15)
+                self.assertEqual(by_id[street_id]["minzoom"], 15)
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(case_mid["id"]),
+                    case_id,
+                )
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(street_mid["id"]),
+                    street_id,
+                )
+
+    def test_outdoors_minor_road_width_uses_z14_camera_sample_in_narrow_band(self):
+        width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            1,
+            18,
+            10,
+            22,
+            100,
+        ]
+        case_width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            14,
+            0.8,
+            22,
+            2,
+        ]
+        layers = [
+            {
+                "id": "road-minor-case",
+                "type": "line",
+                "minzoom": 13,
+                "paint": {
+                    "line-width": case_width_expression,
+                    "line-gap-width": copy.deepcopy(width_expression),
+                },
+            },
+            {
+                "id": "road-minor",
+                "type": "line",
+                "minzoom": 13,
+                "paint": {"line-width": copy.deepcopy(width_expression)},
+            },
+        ]
+        style = {"owner": "mapbox", "id": "outdoors-v12", "layers": layers}
+
+        result = simplify_mapbox_style_expressions(style)
+
+        by_id = {layer["id"]: layer for layer in result["layers"]}
+        expected_width_mm = (
+            mapbox_config._extract_zoom_scalar_size_at_zoom(
+                width_expression,
+                mapbox_config._OUTDOORS_STREET_WIDTH_SAMPLE_ZOOM,
+            )
+            * mapbox_config._MAPBOX_PIXEL_TO_MM
+        )
+        for layer_id, width_prop in (
+            ("road-minor-case", "line-gap-width"),
+            ("road-minor", "line-width"),
+        ):
+            low = by_id[f"{layer_id}-below-z14"]
+            mid = by_id[f"{layer_id}-z14-to-z15"]
+            high = by_id[layer_id]
+            with self.subTest(layer_id=layer_id):
+                self.assertEqual((low["minzoom"], low["maxzoom"]), (13, 14))
+                self.assertAlmostEqual(
+                    low["paint"][width_prop],
+                    mapbox_config._MAPBOX_PIXEL_TO_MM,
+                )
+                self.assertEqual((mid["minzoom"], mid["maxzoom"]), (14, 15))
+                self.assertAlmostEqual(mid["paint"][width_prop], expected_width_mm)
+                self.assertEqual(high["minzoom"], 15)
+                self.assertAlmostEqual(
+                    high["paint"][width_prop],
+                    mapbox_config._MAPBOX_PIXEL_TO_MM,
+                )
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(low["id"]),
+                    layer_id,
+                )
+                self.assertEqual(
+                    mapbox_config.base_mapbox_style_layer_id_for_qfit(mid["id"]),
+                    layer_id,
+                )
+
+    def test_outdoors_street_width_split_keeps_other_style_identities_unchanged(self):
+        width_expression = [
+            "interpolate",
+            ["exponential", 1.5],
+            ["zoom"],
+            12,
+            0.5,
+            18,
+            20,
+        ]
+        layers = [
+            {
+                "id": "road-street",
+                "type": "line",
+                "minzoom": 13,
+                "paint": {"line-width": width_expression},
+            }
+        ]
+
+        for owner, style_id in (("mapbox", "light-v11"), ("custom", "outdoors-v12")):
+            with self.subTest(owner=owner, style_id=style_id):
+                style = {"owner": owner, "id": style_id, "layers": copy.deepcopy(layers)}
+
+                result = simplify_mapbox_style_expressions(style)
+
+                self.assertEqual([layer["id"] for layer in result["layers"]], ["road-street"])
+                self.assertEqual(result["layers"][0]["minzoom"], 13)
+
+    def test_outdoors_street_width_split_keeps_passthrough_inputs(self):
+        unchanged_layers = "not-a-layer-list"
+
+        self.assertIs(
+            mapbox_config._split_outdoors_street_width_layers_for_qgis(
+                {"owner": "mapbox", "id": "outdoors-v12"},
+                unchanged_layers,
+            ),
+            unchanged_layers,
         )
 
     def test_path_line_width_uses_split_zoom_band_samples(self):

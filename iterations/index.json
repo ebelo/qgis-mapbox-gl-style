@@ -208,6 +208,78 @@
       "camera_set": "issue-949",
       "created_at": "2026-05-27T19:38:50+02:00",
       "notes": "Added ranked camera/class probe candidates to the aggregate source/crop report."
+    },
+    {
+      "id": "013",
+      "label": "Road labels and z14 street hierarchy",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "504d0c2ab4b94f5db27870e5f71bea426b6b819e",
+      "filtered_commit": "53f5280b59fe36895f55df3234e1cb6cf72d2a1b",
+      "source_prs": [
+        1448,
+        1449,
+        1450,
+        1452
+      ],
+      "source_issue": 949,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-09-05T12:08:51+02:00",
+      "notes": "Promoted evidence-backed road-label sizing and z14 street, structure, service, and track widths after the seven-camera comparison loop."
+    },
+    {
+      "id": "014",
+      "label": "Source-correct road shield foregrounds",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "81fb2f4198a4dd7a7b32e97ace723a19601459d6",
+      "filtered_commit": "1d3cd3a23609308f51693b6dfff7ee702089acb9",
+      "source_prs": [
+        1454,
+        1455,
+        1456,
+        1457
+      ],
+      "source_issue": 1453,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-09-09T17:09:16+02:00",
+      "notes": "Restored source-requested blue, red, Italian motorway, and mixed green road-shield text foregrounds without adding or reordering symbol layers."
+    },
+    {
+      "id": "015",
+      "label": "Road shield collision coupling",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "2269c69e2c52cc894022124808bed75ca8d69c24",
+      "filtered_commit": "b7a399d6292c80e8104e808fa1fd72a8f8020f1b",
+      "source_prs": [
+        1458
+      ],
+      "source_issue": 1453,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-09-09T20:25:46+02:00",
+      "evidence": "docs/visual-evidence/issue-1453/geneva-collision-before-after.png",
+      "notes": "Coupled supported low-zoom shield icons to their labels so QGIS collision removal no longer leaves orphan shield backgrounds."
+    },
+    {
+      "id": "016",
+      "label": "Portable Outdoors typography",
+      "source_repo": "ebelo/qfit",
+      "source_commit": "0e79b0e8b034a29edf3cb53f08998cdb213b04d9",
+      "filtered_commit": "d5233e49f8bcd800364ee220be2fc8948b8fab9a",
+      "source_prs": [
+        1460
+      ],
+      "source_issue": 1453,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12",
+      "camera_set": "issue-949",
+      "created_at": "2026-09-09T21:33:21+02:00",
+      "evidence": "docs/visual-evidence/issue-1453/open-fonts-qgis3-before-after.png",
+      "notes": "Mapped the original DIN roles to verified Barlow faces with Noto script fallback in the reproducible QGIS environments. This is the Outdoors rendering state later accepted in qFit issue 1453 at baseline 63784d0."
     }
   ]
 }

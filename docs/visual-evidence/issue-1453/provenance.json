@@ -1,0 +1,150 @@
+[
+  {
+    "pr": 1454,
+    "baseline_commit": "504d0c2",
+    "candidate_commit": "842c2a9",
+    "camera": {
+      "name": "valais-geneva-outdoors",
+      "description": "z7-z8 regional qfit map context spanning the Geneva/Valais corridor for terrain/outdoor features, main roads, and settlement visibility.",
+      "longitude": 7.14,
+      "latitude": 46.2,
+      "zoom": 8.15,
+      "width": 1280,
+      "height": 900,
+      "bearing": 0.0,
+      "pitch": 0.0,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12"
+    },
+    "qgis_runtime": {
+      "qgis_version": "3.34.4-Prizren",
+      "qgis_version_int": 33404,
+      "qgis_release_name": "Prizren"
+    },
+    "source_style_sha256": "da68d8ece0bb90c6d45fb36085b1e64f9d9e966175f1abf31fcddbf28bc1504c",
+    "crop_box": [
+      960,
+      450,
+      1200,
+      630
+    ],
+    "detail_scale": 2,
+    "source_files_sha256": [
+      "0ef16b70f28466b194ce22c48e0bd61e4da00f252fb713916e8000a9082b33cf",
+      "171990f6d4895bd06ad72b191ef316841a0b80c81a1471d3aace87da28ccdc90",
+      "b097a4c30fffc7a45a04ec4f5f5a1890a2994112fe640089d195b26d86bf8071"
+    ],
+    "note": "Before is the unchanged baseline paired-control render. After is the final production-candidate render. Crops are pixel-preserving; enlargement uses nearest-neighbor, without retouching."
+  },
+  {
+    "pr": 1455,
+    "baseline_commit": "277c079",
+    "candidate_commit": "6daba76",
+    "camera": {
+      "name": "valais-geneva-outdoors",
+      "description": "z7-z8 regional qfit map context spanning the Geneva/Valais corridor for terrain/outdoor features, main roads, and settlement visibility.",
+      "longitude": 7.14,
+      "latitude": 46.2,
+      "zoom": 8.15,
+      "width": 1280,
+      "height": 900,
+      "bearing": 0.0,
+      "pitch": 0.0,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12"
+    },
+    "qgis_runtime": {
+      "qgis_version": "3.34.4-Prizren",
+      "qgis_version_int": 33404,
+      "qgis_release_name": "Prizren"
+    },
+    "source_style_sha256": "da68d8ece0bb90c6d45fb36085b1e64f9d9e966175f1abf31fcddbf28bc1504c",
+    "crop_box": [
+      0,
+      400,
+      480,
+      900
+    ],
+    "detail_scale": 1,
+    "source_files_sha256": [
+      "0ef16b70f28466b194ce22c48e0bd61e4da00f252fb713916e8000a9082b33cf",
+      "b097a4c30fffc7a45a04ec4f5f5a1890a2994112fe640089d195b26d86bf8071",
+      "e989fdfef235de07fdf6a2e4d68394188c4f4d4c8ed7b764652869082faf2e81"
+    ],
+    "note": "Before is the unchanged baseline paired-control render. After is the final production-candidate render. Crops are pixel-preserving; enlargement uses nearest-neighbor, without retouching."
+  },
+  {
+    "pr": 1456,
+    "baseline_commit": "e9e67be",
+    "candidate_commit": "c47422d",
+    "camera": {
+      "name": "valais-geneva-outdoors",
+      "description": "z7-z8 regional qfit map context spanning the Geneva/Valais corridor for terrain/outdoor features, main roads, and settlement visibility.",
+      "longitude": 7.14,
+      "latitude": 46.2,
+      "zoom": 8.15,
+      "width": 1280,
+      "height": 900,
+      "bearing": 0.0,
+      "pitch": 0.0,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12"
+    },
+    "qgis_runtime": {
+      "qgis_version": "3.34.4-Prizren",
+      "qgis_version_int": 33404,
+      "qgis_release_name": "Prizren"
+    },
+    "source_style_sha256": "da68d8ece0bb90c6d45fb36085b1e64f9d9e966175f1abf31fcddbf28bc1504c",
+    "crop_box": [
+      480,
+      660,
+      900,
+      840
+    ],
+    "detail_scale": 1,
+    "source_files_sha256": [
+      "0ef16b70f28466b194ce22c48e0bd61e4da00f252fb713916e8000a9082b33cf",
+      "e989fdfef235de07fdf6a2e4d68394188c4f4d4c8ed7b764652869082faf2e81",
+      "1f5b9e3492a0c6b75a49d3d9e1cfa966c23ab2746a76d414328552e673e73e07"
+    ],
+    "note": "Before is the unchanged baseline paired-control render. After is the final production-candidate render. Crops are pixel-preserving; enlargement uses nearest-neighbor, without retouching."
+  },
+  {
+    "pr": 1457,
+    "baseline_commit": "004609a",
+    "candidate_commit": "81fb2f4",
+    "camera": {
+      "name": "valais-geneva-outdoors",
+      "description": "z7-z8 regional qfit map context spanning the Geneva/Valais corridor for terrain/outdoor features, main roads, and settlement visibility.",
+      "longitude": 7.14,
+      "latitude": 46.2,
+      "zoom": 8.15,
+      "width": 1280,
+      "height": 900,
+      "bearing": 0.0,
+      "pitch": 0.0,
+      "style_owner": "mapbox",
+      "style_id": "outdoors-v12"
+    },
+    "qgis_runtime": {
+      "qgis_version": "3.34.4-Prizren",
+      "qgis_version_int": 33404,
+      "qgis_release_name": "Prizren"
+    },
+    "source_style_sha256": "da68d8ece0bb90c6d45fb36085b1e64f9d9e966175f1abf31fcddbf28bc1504c",
+    "crop_box": [
+      618,
+      587,
+      705,
+      665
+    ],
+    "detail_scale": 4,
+    "source_files_sha256": [
+      "0ef16b70f28466b194ce22c48e0bd61e4da00f252fb713916e8000a9082b33cf",
+      "1f5b9e3492a0c6b75a49d3d9e1cfa966c23ab2746a76d414328552e673e73e07",
+      "57ab0256ac116155bb5502d1f341363b094dd4d69b1c3911bea7901e582666de"
+    ],
+    "note": "Before is the unchanged baseline paired-control render. After is the final production-candidate render. Crops are pixel-preserving; enlargement uses nearest-neighbor, without retouching."
+  }
+]

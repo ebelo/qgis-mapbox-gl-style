@@ -1,0 +1,54 @@
+{
+  "3": {
+    "lausanne-lavaux-z10-light": {
+      "before": {
+        "mae": 0.008023953794480754,
+        "rms": 0.0195350936316149
+      },
+      "after": {
+        "mae": 0.008026983478576616,
+        "rms": 0.019580717653474754
+      },
+      "after_font": "Noto Sans",
+      "barlow_rules": 0
+    },
+    "zurich-region-z8-light": {
+      "before": {
+        "mae": 0.021038867329339142,
+        "rms": 0.033774143131611783
+      },
+      "after": {
+        "mae": 0.021093012436456067,
+        "rms": 0.03407681785721421
+      },
+      "after_font": "Noto Sans",
+      "barlow_rules": 0
+    }
+  },
+  "4": {
+    "lausanne-lavaux-z10-light": {
+      "before": {
+        "mae": 0.00852844158496732,
+        "rms": 0.01954980394346574
+      },
+      "after": {
+        "mae": 0.008519233387799564,
+        "rms": 0.019516342720479765
+      },
+      "after_font": "Noto Sans",
+      "barlow_rules": 0
+    },
+    "zurich-region-z8-light": {
+      "before": {
+        "mae": 0.021552857207697892,
+        "rms": 0.0335431013032701
+      },
+      "after": {
+        "mae": 0.021635559640522876,
+        "rms": 0.03398642643603853
+      },
+      "after_font": "Noto Sans",
+      "barlow_rules": 0
+    }
+  }
+}

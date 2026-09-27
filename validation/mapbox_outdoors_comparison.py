@@ -650,12 +650,32 @@ def _color_name(value: object) -> object:
     return name if isinstance(name, str) else None
 
 
+def _qgis_font_snapshot(text_format: object) -> dict[str, object]:
+    font = _method_value(text_format, "font")
+    if font is None:
+        return {}
+    result = {
+        "requested_font_family": _method_value(font, "family"),
+        "requested_font_style": _method_value(font, "styleName"),
+    }
+    try:
+        from qgis.PyQt.QtGui import QFontInfo
+
+        resolved = QFontInfo(font)
+        result.update(resolved_font_family=resolved.family(), resolved_font_style=resolved.styleName())
+    except (ImportError, TypeError, RuntimeError):
+        # Pure-Python audit consumers can inspect requested fonts without Qt.
+        pass
+    return result
+
+
 def _qgis_label_format_snapshot(settings: object | None) -> dict[str, object]:
     text_format = _method_value(settings, "format") if settings is not None else None
     buffer = _method_value(text_format, "buffer") if text_format is not None else None
     text_color = _method_value(text_format, "color") if text_format is not None else None
     buffer_color = _method_value(buffer, "color") if buffer is not None else None
     return {
+        **_qgis_font_snapshot(text_format),
         "text_size": _method_value(text_format, "size") if text_format is not None else None,
         "text_size_unit": _label_value(_method_value(text_format, "sizeUnit")) if text_format is not None else None,
         "text_color": _color_name(text_color),
@@ -993,7 +1013,10 @@ def render_qgis_vector(  # pragma: no cover - depends on optional PyQGIS runtime
         layer = QgsVectorTileLayer(layer_uri, f"qfit comparison {camera.style_owner}/{camera.style_id}")
         if not is_valid_qgis_vector_tile_layer(layer=layer, vector_tile_layer_type=QgsVectorTileLayer):
             raise RuntimeError("QGIS did not create a valid Mapbox vector tile layer.")
-        BackgroundMapService()._apply_mapbox_gl_style(layer, simplified_style, sprite_resources=sprite_resources)
+        BackgroundMapService()._apply_mapbox_gl_style(
+            layer, simplified_style, sprite_resources=sprite_resources,
+            source_style_definition=resolved_style_definition,
+        )
         _append_enabled_qgis_contour_label_probes(
             layer,
             qgis_contour_polygon_label_probe=qgis_contour_polygon_label_probe,
