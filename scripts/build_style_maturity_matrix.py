@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROGRESSION_DIR = ROOT / "docs" / "images" / "style-progression" / "chamonix"
 LATEST_FRAME = PROGRESSION_DIR / "09_accepted_qfit_baseline.png"
 MATRIX_PATH = PROGRESSION_DIR / "style-maturity-matrix.png"
+PPTX_ASSET_DIR = PROGRESSION_DIR / "pptx-assets"
 
 CANVAS_SIZE = (1920, 1080)
 FRAME_SIZE = (1280, 1022)
@@ -47,6 +48,14 @@ MILESTONES = (
     Milestone("05_area_fill_and_trails.png", "Landcover & trails", "Outdoor classes become distinct"),
     Milestone("06_road_label_refinement.png", "Hillshade & relief", "Terrain structure becomes legible"),
     Milestone("09_accepted_qfit_baseline.png", "Accepted qFit baseline", "Balanced detail, roads, shields and open fonts"),
+)
+
+PPTX_FILENAMES = (
+    "01-basic-conversion.png",
+    "02-symbols-and-labels.png",
+    "03-landcover-and-trails.png",
+    "04-hillshade-and-relief.png",
+    "05-accepted-qfit-baseline.png",
 )
 
 
@@ -163,6 +172,52 @@ def build_matrix() -> None:
     canvas.save(MATRIX_PATH, optimize=True)
 
 
+def build_pptx_assets() -> None:
+    """Export one high-resolution, transparent-backed card per milestone."""
+    PPTX_ASSET_DIR.mkdir(parents=True, exist_ok=True)
+    scale = 2
+    card_w, card_h = 592 * scale, 420 * scale
+    image_w, image_h = 560 * scale, 315 * scale
+
+    for index, (milestone, filename) in enumerate(
+        zip(MILESTONES, PPTX_FILENAMES, strict=True), start=1
+    ):
+        is_latest = index == len(MILESTONES)
+        card = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(card)
+        outline = ACCENT if is_latest else LINE
+        draw.rounded_rectangle(
+            (2, 2, card_w - 3, card_h - 3),
+            radius=28,
+            fill=CARD_BACKGROUND,
+            outline=outline,
+            width=8 if is_latest else 4,
+        )
+        badge_fill = ACCENT if is_latest else ACCENT_LIGHT
+        badge_ink = "#FFFFFF" if is_latest else ACCENT
+        draw.ellipse((32, 30, 104, 102), fill=badge_fill)
+        number = str(index)
+        number_font = _font(38, True)
+        number_box = draw.textbbox((0, 0), number, font=number_font)
+        draw.text(
+            (
+                68 - (number_box[2] - number_box[0]) / 2,
+                66 - (number_box[3] - number_box[1]) / 2 - 4,
+            ),
+            number,
+            font=number_font,
+            fill=badge_ink,
+        )
+        draw.text((132, 28), milestone.title, font=_font(48, True), fill=INK)
+        draw.text((132, 90), milestone.takeaway, font=_font(30), fill=MUTED)
+        map_image = _fit_cover(
+            _map_view(PROGRESSION_DIR / milestone.image),
+            (image_w, image_h),
+        )
+        card.paste(map_image, (32, 176))
+        card.save(PPTX_ASSET_DIR / filename, optimize=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -178,7 +233,9 @@ def main() -> None:
     if args.latest_render:
         wrap_latest_render(args.latest_render)
     build_matrix()
+    build_pptx_assets()
     print(MATRIX_PATH.relative_to(ROOT))
+    print(PPTX_ASSET_DIR.relative_to(ROOT))
 
 
 if __name__ == "__main__":

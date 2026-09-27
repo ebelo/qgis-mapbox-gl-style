@@ -12,6 +12,11 @@ Rebuild the matrix from the committed frames:
 python scripts/build_style_maturity_matrix.py
 ```
 
+The same command also exports five independent, high-resolution cards under
+[`pptx-assets`](pptx-assets). Each PNG is 1184 × 840 with a transparent outer
+background and identical geometry, so the stages can be positioned, revealed,
+or animated independently in PowerPoint without cropping the full matrix.
+
 To wrap a new 1280 × 900 QGIS render as frame 09 and rebuild the matrix:
 
 ```bash
